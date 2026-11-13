@@ -42,11 +42,30 @@ def detect_lang(text: str) -> str | None:
     if not text or not str(text).strip():
         return None
     try:
-        from langdetect import detect, LangDetectException
+        from langdetect import DetectorFactory, detect
 
+        DetectorFactory.seed = 0          # langdetect is randomised by default; make runs reproducible
         return detect(str(text)[:2000])
     except Exception:
         return None
+
+
+_NO_LANG = ("", "unknown", "(unknown)", "null", "nan", "none")
+
+
+def resolve_lang(text: str, declared) -> str:
+    """Declared language when usable, otherwise detected from the text, otherwise 'unknown'.
+
+    A missing declared language arrives from pandas as NaN/None. NaN is truthy and str(NaN) is 'nan', so the
+    old test (`if lang and str(lang).strip() and ...`) accepted it and stored the string 'nan': detection never ran
+    for every platform without a language field (about 182,000 posts) and the readability metric was then chosen
+    from that wrong label.
+    """
+    if declared is not None and not pd.isna(declared):             # None, NaN and pd.NA are all "missing"
+        d = str(declared).strip().lower()
+        if d not in _NO_LANG:
+            return d[:8]
+    return detect_lang(text) or "unknown"
 
 
 def flesch_kincaid_grade(text: str) -> float | None:
@@ -78,45 +97,27 @@ def lix_score(text: str) -> float | None:
 
 
 def score_readability(text: str, lang: str | None) -> dict:
+    """ONE readability measure for every language: LIX.
+
+    The old rule used Flesch-Kincaid grade (about 13 on average) for English and LIX (about 67 on average) for other
+    languages, and the cell mean averaged the two scales together, so a cell's value depended on its language mix.
+    Now every scorable post gets LIX; the English-only Flesch-Kincaid grade is kept in `readability_fk_grade`
+    and is never aggregated with LIX. Chinese, Japanese, Thai and Burmese (no word spaces) are not scored.
+    """
     wc = word_count(text)
+    none = {"readability_score": None, "readability_metric": None, "readability_valid": False,
+            "readability_fk_grade": None}
     if wc < READ_MIN_WORDS:
-        return {
-            "readability_score": None,
-            "readability_metric": None,
-            "readability_valid": False,
-            "readability_reason": "too_short",
-        }
+        return {**none, "readability_reason": "too_short"}
     lang = (lang or "").lower()
     if lang in ("zh", "zh-cn", "zh-tw", "ja", "th", "my"):
-        return {
-            "readability_score": None,
-            "readability_metric": None,
-            "readability_valid": False,
-            "readability_reason": "lang_not_applicable",
-        }
-    if lang in ("en", "en-us", "en-gb", ""):
-        fk = flesch_kincaid_grade(text)
-        if fk is not None:
-            return {
-                "readability_score": fk,
-                "readability_metric": "flesch_kincaid_grade",
-                "readability_valid": True,
-                "readability_reason": None,
-            }
+        return {**none, "readability_reason": "lang_not_applicable"}
     lix = lix_score(text)
-    if lix is not None:
-        return {
-            "readability_score": lix,
-            "readability_metric": "lix",
-            "readability_valid": True,
-            "readability_reason": None,
-        }
-    return {
-        "readability_score": None,
-        "readability_metric": None,
-        "readability_valid": False,
-        "readability_reason": "compute_failed",
-    }
+    if lix is None:
+        return {**none, "readability_reason": "compute_failed"}
+    fk = flesch_kincaid_grade(text) if lang in ("en", "en-us", "en-gb") else None
+    return {"readability_score": lix, "readability_metric": "lix", "readability_valid": True,
+            "readability_reason": None, "readability_fk_grade": fk}
 
 
 def load_sentiment_pipeline(device: int | str):
@@ -223,10 +224,7 @@ def main() -> int:
     print("language detection ...")
     detected = []
     for i, (txt, lang) in enumerate(zip(posts["text"], posts["lang"])):
-        if lang and str(lang).strip() and str(lang).lower() not in ("unknown", "(unknown)", "null"):
-            detected.append(str(lang).lower()[:8])
-        else:
-            detected.append(detect_lang(txt) or "unknown")
+        detected.append(resolve_lang(txt, lang))
         if (i + 1) % 5000 == 0:
             print(f"  lang {i+1:,}/{len(posts):,}")
     posts["lang_resolved"] = detected
@@ -310,6 +308,7 @@ def main() -> int:
                 "readability_metric": r["readability_metric"],
                 "readability_valid": r["readability_valid"],
                 "readability_reason": r["readability_reason"],
+                "readability_fk_grade": r["readability_fk_grade"],
                 "scored_at": scored_at,
                 "valid": bool(tone_valid[i] or hate_valid[i] or r["readability_valid"]),
             }

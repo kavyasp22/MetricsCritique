@@ -362,11 +362,14 @@ METRIC_META: list[dict] = [
          units="boolean", grain=_CELL, direction="n/a", higher_is_worse=None,
          caveats="non-negotiable #3 of the spec", support_gate="none"),
     dict(metric_key="readability_mean", display_name="Readability", family="content",
-         formula="mean of valid, language-appropriate readability scores, winsorised to [0,100]",
+         formula="mean of valid LIX readability scores (one measure for every language), winsorised to [0,100]",
          units="score", grain=_CELL, direction="higher=easier to read", higher_is_worse=None,
          caveats=("coverage is low on short posts (13.7% on youtube_video, 48% on telegram) — "
                   "always read alongside readability_coverage. Raw scores reach 1703 on "
-                  "degenerate text, hence the winsorisation."),
+                  "degenerate text, hence the winsorisation. LIX for every language: earlier runs averaged "
+                  "Flesch-Kincaid grade (English) with LIX (other languages), two different scales; the "
+                  "English-only Flesch-Kincaid grade is kept separately (post_scores.readability_fk_grade). "
+                  "Not scored for zh/ja/th/my (no word spaces)."),
          support_gate="read_n>0"),
     dict(metric_key="readability_coverage", display_name="Readability coverage",
          family="content", formula="share of posts in the cell with readability_valid",
@@ -913,7 +916,7 @@ def main() -> int:
         # MLE fit from a fallback, which the shipped data previously could not.
         "burst_support_ok", "baseline_days", "baseline_mean", "baseline_dist", "baseline_method",
         "effort_source", "log_rate", "log_count", "surprise_q_global", "emergence_flag",
-        "tone_mean", "hate_n", "read_n", "views_sum", "E_sum", "mean_confidence",
+        "tone_mean", "hate_n", "read_n", "views_sum", "E_sum", "eng_sum", "mean_confidence",
         "virality_pct_raw", "virality_n", "novelty_n", "novelty_base_n",
         # count_mode='soft' only (07 Step 1): hard top-1 count / distinct top-1 authors
         # kept beside the weighted V and effective n_authors. Absent in hard mode.

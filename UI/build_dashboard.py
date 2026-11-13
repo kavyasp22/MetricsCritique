@@ -1176,8 +1176,8 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
 
     # --------------------------------------------------------------- 12 ----
     section(doc, "12", "readability", "Readability",
-            "The Flesch mean, and — inseparably — the share of posts that were long "
-            "enough to score at all.",
+            "The LIX readability mean (one measure for every language), and — inseparably — "
+            "the share of posts that were long enough to score at all.",
             f"""
 <div class="card">
   <p class="ct">Readability mean and its coverage</p>
