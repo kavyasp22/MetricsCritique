@@ -54,6 +54,7 @@ __all__ = [
     "fit_exp_decay",
     "age_conditional_percentile",
     "leave_one_out_median",
+    "prior_window_drift",
     "shannon_entropy",
     "hhi",
     "ljung_box",
@@ -868,6 +869,46 @@ def leave_one_out_median(values: Sequence[float], min_others: int = 5) -> np.nda
     return out
 
 
+def prior_window_drift(
+    values: Sequence[float],
+    counts: Sequence[float],
+    *,
+    window: int = 14,
+    min_base: int = 7,
+    min_n: int = 5,
+    scale_floor: float = 0.05,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Drift of a daily value against its PRIOR ``window`` days (today is never in the baseline).
+
+    z_t = (v_t - mean(prior days)) / max(sd(prior days), scale_floor), using only days with at least
+    ``min_n`` observations; NaN when fewer than ``min_base`` usable prior days or today has < ``min_n``.
+    ``p_lower`` is the one-sided lower-tail p-value of a Student t with (n_base - 1) degrees of freedom,
+    which is what keeps the false-alert rate near nominal when the baseline is only 7 to 14 days
+    (checked on the real daily tone series: p<0.05 on 5.0% of days; median/MAD scaling was much worse).
+    Returns ``(z, p_lower, base_n)`` aligned with the inputs.
+    """
+    v = np.asarray(values, dtype=float)
+    n = np.asarray(counts, dtype=float)
+    T = v.size
+    z = np.full(T, np.nan)
+    p = np.full(T, np.nan)
+    bn = np.zeros(T, dtype=int)
+    ok = np.isfinite(v) & np.isfinite(n) & (n >= min_n)
+    for t in range(T):
+        if not ok[t]:
+            continue
+        lo = max(0, t - int(window))
+        b = v[lo:t][ok[lo:t]]
+        bn[t] = b.size
+        if b.size < int(min_base):
+            continue
+        sd = float(np.std(b, ddof=1)) if b.size > 1 else 0.0
+        zt = (v[t] - float(b.mean())) / max(sd, float(scale_floor))
+        z[t] = zt
+        p[t] = float(stats.t.cdf(zt, df=b.size - 1))
+    return z, p, bn
+
+
 # --------------------------------------------------------------------------- #
 # Diversity (carried over from v1 — these were correct)
 # --------------------------------------------------------------------------- #
@@ -975,6 +1016,19 @@ def run_self_checks(*, verbose: bool = False) -> dict:
     """
     res: dict[str, bool] = {}
     rng = np.random.default_rng(RNG_SEED)
+
+    # --- drift: prior window only, no look-ahead, guards ---------------------
+    _d = np.array([0.10, 0.12, 0.08, 0.11, 0.09, 0.10, 0.12, 0.10, 0.09, 0.11, 0.10, 0.08, 0.12, 0.10, -0.50, 0.10])
+    _n = np.full(_d.size, 20.0)
+    _z, _p, _b = prior_window_drift(_d, _n, window=14, min_base=7, min_n=5)
+    res["drift_flags_sudden_drop"] = bool(_z[14] < -5 and _p[14] < 0.001)
+    _d2 = _d.copy(); _d2[15] = 5.0                     # change the FUTURE: today's z must not move
+    res["drift_has_no_lookahead"] = bool(abs(prior_window_drift(_d2, _n)[0][14] - _z[14]) < 1e-12)
+    res["drift_needs_min_base_days"] = bool(np.isnan(_z[:7]).all() and np.isfinite(_z[7]))
+    _zc, _, _ = prior_window_drift(np.full(20, 0.3), np.full(20, 9.0))   # zero variance: floor keeps z finite
+    res["drift_zero_variance_finite"] = bool(np.isfinite(_zc[10]) and abs(_zc[10]) < 1e-9)
+    _zl, _, _ = prior_window_drift(_d, np.r_[np.full(14, 20.0), 2.0, 20.0])  # too few posts today -> NaN
+    res["drift_min_posts_today"] = bool(np.isnan(_zl[14]))
 
     # --- 0. leave-one-out median excludes the element itself ---------------
     _v = np.array([1.0, 2.0, 3.0, 4.0, 100.0, 7.0])

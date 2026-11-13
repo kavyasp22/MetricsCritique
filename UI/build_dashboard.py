@@ -1046,7 +1046,29 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
     <div class="plot" data-panel="tone_shrink"></div>
   </div>
 </div>
-{metric_bullets(meta, ['tone_mean', 'tone_eb', 'tone_n'], md_cols)}
+<div class="card">
+  <p class="ct">Tone mix by platform <span class="badge gray">provisional</span></p>
+  <p class="cs">How many scored posts are positive, neutral or negative, per platform, never pooled across
+  platforms (platforms differ too much: net scores range from about &minus;70 to +60). A post is
+  <b>positive</b> if its tone is above +0.15 and <b>negative</b> if below &minus;0.15. The <b>net sentiment
+  score</b> is 100 &times; (positive share &minus; negative share). <b>Audience-weighted tone</b> gives posts with
+  more views and interactions more influence, with weight 1 + ln(1 + views + likes + comments + shares), so a
+  post with no counter still counts once; where a platform has no counters it equals the plain average.
+  <b>Provisional:</b> the tone model is not yet human-validated. In a first hand-labelled check it scored
+  factual reports of bad events as negative, so these numbers reflect news content as much as opinion, and
+  the &plusmn;0.15 cut-off is not validated per language.</p>
+  <div class="plot" data-panel="tone_mix"></div>
+</div>
+<div class="card">
+  <p class="ct">Largest tone drops <span class="badge gray">provisional</span></p>
+  <p class="cs">Days where a topic's tone on a platform fell significantly below its own previous 14 days
+  (today is not in the baseline). z compares today with the baseline mean in baseline standard deviations
+  (floor 0.05); q is the false-discovery-controlled probability across all topic &times; platform series
+  that day. Needs at least 5 scored posts today and on at least 7 of the previous 14 days. This is a monitor
+  and does not feed the alert list.</p>
+  <div class="plot" data-panel="tone_drift"></div>
+</div>
+{metric_bullets(meta, ['tone_mean', 'tone_eb', 'tone_n', 'tone_pos_share', 'tone_neu_share', 'tone_neg_share', 'net_sentiment_score', 'tone_weighted', 'tone_weight_cov', 'tone_drift_z', 'tone_drift_q'], md_cols)}
 """)
 
     # ---------------------------------------------------------------- 9 ----

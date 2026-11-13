@@ -1961,6 +1961,72 @@
   };
 
   /* ---- 9. Hate (gated) ---- */
+  /* ---- 8c. Tone mix, net sentiment score, audience-weighted tone (provisional) ---- */
+  P.tone_mix = function (host) {
+    var by = {}, have = false;
+    F.md.forEach(function (r) {
+      if (!isNum(r.tone_n) || r.tone_n <= 0) { return; }
+      if (r.tone_pos_n != null) { have = true; }
+      if (!by[r.platform]) { by[r.platform] = { n: 0, pos: 0, neg: 0, raw: 0, rawn: 0, wt: 0, wtn: 0, wsum: 0, wnum: 0, cov: 0, covn: 0 }; }
+      var b = by[r.platform];
+      b.n += r.tone_n; b.pos += (r.tone_pos_n || 0); b.neg += (r.tone_neg_n || 0);
+      if (isNum(r.tone_weighted) && isNum(r.tone_mean)) {      // same cells for both so they are comparable
+        b.wt += r.tone_weighted * r.tone_n; b.raw += r.tone_mean * r.tone_n; b.wtn += r.tone_n;
+      }
+      if (isNum(r.tone_weight_cov)) { b.cov += r.tone_weight_cov * r.tone_n; b.covn += r.tone_n; }
+    });
+    if (!have) {
+      empty(host, 'Tone mix is not in the published metrics yet (needs the metrics rebuild).');
+      return;
+    }
+    var rows = Object.keys(by).map(function (p) {
+      var b = by[p], pos = b.pos / b.n, neg = b.neg / b.n;
+      return { platform: p, n: b.n, pos: pos, neu: 1 - pos - neg, neg: neg, nss: 100 * (pos - neg),
+        raw: b.wtn ? b.raw / b.wtn : null, wt: b.wtn ? b.wt / b.wtn : null, cov: b.covn ? b.cov / b.covn : null };
+    }).sort(function (a, b) { return b.n - a.n; });
+    var pct = function (v) { return v == null ? '—' : (100 * v).toFixed(0) + '%'; };
+    tableView(host, [
+      { k: 'platform', label: 'Platform', strong: true },
+      { k: 'n', label: 'Scored posts', num: true, fmt: fmtInt },
+      { k: 'pos', label: 'Positive', num: true, fmt: pct },
+      { k: 'neu', label: 'Neutral', num: true, fmt: pct },
+      { k: 'neg', label: 'Negative', num: true, fmt: pct },
+      { k: 'nss', label: 'Net sentiment score', num: true, fmt: function (v) { return fmtSigned(v, 1); } },
+      { k: 'raw', label: 'Average tone', num: true, fmt: function (v) { return v == null ? '—' : fmtSigned(v, 3); } },
+      { k: 'wt', label: 'Audience-weighted tone', num: true, fmt: function (v) { return v == null ? '—' : fmtSigned(v, 3); } },
+      { k: 'cov', label: 'Posts with a counter', num: true, fmt: pct }
+    ], rows, { open: true, label: 'Tone mix per platform (' + rows.length + ' platforms, current selection)',
+      rowDrill: function (r) { return { view: 'platform', params: { platform: r.platform }, title: r.platform + ' — recent posts' }; } });
+  };
+
+  /* ---- 8d. Largest tone drops (provisional) ---- */
+  P.tone_drift = function (host) {
+    var have = false;
+    var hits = F.md.filter(function (r) {
+      if (r.tone_drift_z != null) { have = true; }
+      return r.tone_drift_flag === true || r.tone_drift_flag === 1;
+    });
+    if (!have) { empty(host, 'Tone drift is not in the published metrics yet (needs the metrics rebuild).'); return; }
+    if (!hits.length) { empty(host, 'No significant tone drops in this selection.'); return; }
+    hits.sort(function (a, b) { return a.tone_drift_z - b.tone_drift_z; });
+    var rows = hits.slice(0, 60).map(function (r) {
+      return { label: topicLabel(r.topic_id), platform: r.platform, day: fmtDay(r.day), tone: r.tone_mean,
+        z: r.tone_drift_z, q: r.tone_drift_q, n: r.tone_n, base: r.tone_drift_base_n, topic_id: r.topic_id, raw_day: r.day };
+    });
+    tableView(host, [
+      { k: 'label', label: 'Topic', strong: true },
+      { k: 'platform', label: 'Platform' },
+      { k: 'day', label: 'Day' },
+      { k: 'tone', label: 'Tone that day', num: true, fmt: function (v) { return fmtSigned(v, 3); } },
+      { k: 'z', label: 'Drift (z)', num: true, fmt: function (v) { return fmtSigned(v, 1); } },
+      { k: 'q', label: 'q (false-discovery)', num: true, fmt: function (v) { return v == null ? '—' : v.toFixed(3); } },
+      { k: 'n', label: 'Posts that day', num: true, fmt: fmtInt },
+      { k: 'base', label: 'Baseline days', num: true, fmt: fmtInt }
+    ], rows, { open: true, label: 'Significant tone drops (' + hits.length + ' in this selection; showing the largest ' + rows.length + ')',
+      rowDrill: function (r) { return { view: 'topic', params: { topic_id: r.topic_id, platform: r.platform, day: day(r.raw_day) },
+        title: r.label + ' · ' + r.platform + ' · ' + r.day }; } });
+  };
+
   P.hate_gated = function (host) {
     var by = {};
     F.md.forEach(function (r) {

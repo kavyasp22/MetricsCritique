@@ -116,6 +116,14 @@ PARAMS: dict = {
     "virality_min_band_n": 20,
     # --- reach (F10) --------------------------------------------------
     "channel_median_min_others": 5,   # other view-bearing posts by the same author needed for a baseline
+    # --- tone: class mix, audience weight, drift (provisional; see reports/TONE_HATE_VALIDATION.md) --
+    "tone_class_threshold": 0.15,   # |tone| above this = positive / negative (net sentiment score cut-off)
+    "tone_min_n": 5,                # cells with fewer tone-scored posts get NULL shares / weighted tone
+    "tone_weight_formula": "1 + ln(1 + views + likes + comments + shares)",   # floor 1: no post gets weight 0
+    "tone_drift_window": 14,        # prior days in the drift baseline (today excluded)
+    "tone_drift_min_base": 7,       # usable prior days required
+    "tone_drift_min_n": 5,          # tone-scored posts required on a day (today and baseline days)
+    "tone_drift_scale_floor": 0.05, # lower bound on the baseline sd (guards zero variance)
     # --- coordination -------------------------------------------------
     "coord_min_v": 10,
     "coord_max_diversity": 0.30,   # author_1_hhi = 1-HHI, low => concentrated
@@ -193,6 +201,44 @@ def norm_text(t) -> str:
     if not isinstance(t, str):
         return ""
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]+", "", t.lower(), flags=re.UNICODE)).strip()
+
+
+def tone_weight(views, likes, comments, shares) -> pd.Series:
+    """Audience weight of a post: 1 + ln(1 + views + likes + comments + shares), missing counters as 0.
+
+    Floor 1 (a post with no engagement still counts once); monotone in exposure and damped by the log.
+    Only meaningful within a platform: counters mean different things on different platforms.
+    """
+    tot = pd.concat([pd.Series(views), pd.Series(likes), pd.Series(comments), pd.Series(shares)],
+                    axis=1).fillna(0).clip(lower=0).sum(axis=1)
+    return 1.0 + np.log1p(tot)
+
+
+def add_tone_extras(p: pd.DataFrame, th: float) -> pd.DataFrame:
+    """Per-post columns behind the tone mix, net sentiment score and audience-weighted tone.
+
+    Needs tone_v, views, likes, comments, shares, has_engagement. Counts are over tone-scored posts only
+    (NaN elsewhere). Audience weight: see tone_weight(); a post with no counter has weight 1, never 0.
+    tone_wk marks posts that actually carry a counter, so the weighted metric can report its coverage.
+    """
+    scored = p["tone_v"].notna()
+    p["tone_pos"] = np.where(scored, (p["tone_v"] > th).astype(float), np.nan)
+    p["tone_neg"] = np.where(scored, (p["tone_v"] < -th).astype(float), np.nan)
+    ctr = pd.DataFrame({c: (p[c] if c in p.columns else np.nan) for c in ("views", "likes", "comments", "shares")},
+                       index=p.index)                      # a missing counter column behaves as all-missing
+    p["tone_w"] = tone_weight(ctr["views"], ctr["likes"], ctr["comments"], ctr["shares"])
+    p["tone_wx"] = p["tone_v"] * p["tone_w"]
+    p["tone_wd"] = p["tone_w"].where(scored)
+    has = p["has_engagement"].fillna(False) if "has_engagement" in p.columns else pd.Series(True, index=p.index)
+    p["tone_wk"] = np.where(scored, (has & ctr.notna().any(axis=1)).astype(float), np.nan)
+    return p
+
+
+def _ensure_tone_cols(posts: pd.DataFrame) -> pd.DataFrame:
+    """Frames built before the tone extras existed (older tests): derive them with the default threshold."""
+    if "tone_pos" in posts.columns:
+        return posts
+    return add_tone_extras(posts.copy(), PARAMS["tone_class_threshold"])
 
 
 def virality_ratio(platform: str, likes, comments, shares, views) -> float:
@@ -512,6 +558,7 @@ def enrich_posts(posts: pd.DataFrame, P: dict) -> pd.DataFrame:
     lo, hi = P["readability_clip"]
     p["tone_v"] = p["tone_score"].where(p["tone_valid"].fillna(False))
     p["hate_v"] = p["hate_score"].where(p["hate_valid"].fillna(False))
+    p = add_tone_extras(p, P["tone_class_threshold"])
     p["read_v"] = p["readability_score"].where(p["readability_valid"].fillna(False)).clip(lo, hi)
     p["read_ok"] = p["readability_valid"].fillna(False).astype(float)
     p["text_norm"] = [norm_text(t) for t in p["text"]]
@@ -578,9 +625,55 @@ def aggregate_cells(posts: pd.DataFrame, keys: list[str],
     return _aggregate_cells_weighted(posts, keys, weight_col)
 
 
+def add_tone_drift(panel: pd.DataFrame, P: dict) -> pd.DataFrame:
+    """Sentiment drift per topic x platform series (in-window days only; platform never pooled).
+
+    z = (tone_mean_today - mean of the PRIOR window days) / max(sd, floor); see stats_v2.prior_window_drift.
+    q = Benjamini-Hochberg across all series on the same day; the flag is a significant DROP (q < fdr_alpha, z < 0).
+    """
+    for c in ("tone_drift_z", "tone_drift_p", "tone_drift_q"):
+        panel[c] = np.nan
+    panel["tone_drift_base_n"] = np.nan
+    panel["tone_drift_flag"] = False
+    if not len(panel) or "tone_mean" not in panel.columns:
+        return panel
+    inw = panel[panel["in_window"].fillna(False) & panel["tone_mean"].notna()]
+    for _, g in inw.groupby(["topic_id", "platform"]):
+        g = g.sort_values("day")
+        days = pd.to_datetime(g["day"])
+        full = pd.date_range(days.min(), days.max())
+        val = pd.Series(g["tone_mean"].to_numpy(), index=days).reindex(full)
+        cnt = pd.Series(g["tone_n"].to_numpy(), index=days).reindex(full).fillna(0)
+        z, p, bn = S.prior_window_drift(
+            val.to_numpy(), cnt.to_numpy(), window=P["tone_drift_window"],
+            min_base=P["tone_drift_min_base"], min_n=P["tone_drift_min_n"],
+            scale_floor=P["tone_drift_scale_floor"])
+        ii = pd.Series(np.arange(len(full)), index=full).loc[days].to_numpy()
+        panel.loc[g.index, "tone_drift_z"] = z[ii]
+        panel.loc[g.index, "tone_drift_p"] = p[ii]
+        panel.loc[g.index, "tone_drift_base_n"] = bn[ii]
+    scored = panel.index[panel["tone_drift_p"].notna()]
+    for _, idx in panel.loc[scored].groupby("day").groups.items():
+        idx = list(idx)
+        panel.loc[idx, "tone_drift_q"] = S.bh_qvalues(
+            panel.loc[idx, "tone_drift_p"].to_numpy(dtype=float), method=P["fdr_method"])
+    panel["tone_drift_flag"] = ((panel["tone_drift_q"] < P["fdr_alpha"]) & (panel["tone_drift_z"] < 0)).fillna(False)
+    return panel
+
+
 def _finish_cells(base: pd.DataFrame) -> pd.DataFrame:
     """Derived per-cell means (shared by the hard and weighted aggregations)."""
     base["tone_mean"] = base["tone_sum"] / base["tone_n"].replace(0, np.nan)
+    # --- tone mix, net sentiment score and audience-weighted tone (NULL below tone_min_n) ---------
+    if "tone_pos_n" in base.columns:                       # frames from older callers/tests may lack the extras
+        _tn = base["tone_n"].replace(0, np.nan)
+        _ok = base["tone_n"] >= PARAMS["tone_min_n"]
+        base["tone_pos_share"] = (base["tone_pos_n"] / _tn).where(_ok)
+        base["tone_neg_share"] = (base["tone_neg_n"] / _tn).where(_ok)
+        base["tone_neu_share"] = (1.0 - base["tone_pos_share"] - base["tone_neg_share"]).where(_ok)
+        base["net_sentiment_score"] = (100.0 * (base["tone_pos_share"] - base["tone_neg_share"])).where(_ok)
+        base["tone_weighted"] = (base["tone_wnum"] / base["tone_wden"].replace(0, np.nan)).where(_ok)
+        base["tone_weight_cov"] = (base["tone_wk_n"] / _tn).where(base["tone_n"] > 0)
     base["hate_mean"] = base["hate_sum"] / base["hate_n"].replace(0, np.nan)
     base["hate_prevalence"] = base["hate_hits"] / base["hate_n"].replace(0, np.nan)
     base["readability_mean"] = base["read_sum"] / base["read_n"].replace(0, np.nan)
@@ -609,6 +702,7 @@ def _ensure_eng_sum(posts: pd.DataFrame) -> pd.DataFrame:
 
 
 _W_COLS = ("tone_v", "hate_v", "read_v", "virality_pct_post", "views", "E_sum", "eng_sum",
+           "tone_pos", "tone_neg", "tone_wx", "tone_wd", "tone_wk",
            "reach_audience_norm_post", "confidence")
 
 
@@ -624,7 +718,7 @@ def _aggregate_cells_weighted(posts: pd.DataFrame, keys: list[str],
     unweighted rule on rows with w >= 0.5. Requires a `topic_rank` column.
     """
     W = "_w"
-    p = _ensure_eng_sum(posts).assign(_w=posts[weight_col].astype(float))
+    p = _ensure_tone_cols(_ensure_eng_sum(posts)).assign(_w=posts[weight_col].astype(float))
     for c in _W_COLS:
         x = p[c].astype(float)
         p["_wx_" + c] = x * p[W]                         # NaN stays NaN (skipped by sum)
@@ -640,6 +734,8 @@ def _aggregate_cells_weighted(posts: pd.DataFrame, keys: list[str],
         V=(W, "sum"),
         V_primary=("_prim", "sum"),
         tone_sum=("_wx_tone_v", "sum"), tone_n=("_wn_tone_v", "sum"),
+        tone_pos_n=("_wx_tone_pos", "sum"), tone_neg_n=("_wx_tone_neg", "sum"),
+        tone_wnum=("_wx_tone_wx", "sum"), tone_wden=("_wx_tone_wd", "sum"), tone_wk_n=("_wx_tone_wk", "sum"),
         hate_sum=("_wx_hate_v", "sum"), hate_n=("_wn_hate_v", "sum"),
         hate_hits=("_whit", "sum"),
         read_sum=("_wx_read_v", "sum"), read_n=("_wn_read_v", "sum"),
@@ -682,7 +778,7 @@ def _aggregate_cells_weighted(posts: pd.DataFrame, keys: list[str],
 
 
 def _aggregate_cells_hard(posts: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
-    posts = _ensure_eng_sum(posts)
+    posts = _ensure_tone_cols(_ensure_eng_sum(posts))
     g = posts.groupby(keys, dropna=False)
 
     def _sq(col):
@@ -691,6 +787,8 @@ def _aggregate_cells_hard(posts: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
     base = g.agg(
         V=("post_uid", "count"),
         tone_sum=("tone_v", "sum"), tone_n=("tone_v", "count"),
+        tone_pos_n=("tone_pos", "sum"), tone_neg_n=("tone_neg", "sum"),
+        tone_wnum=("tone_wx", "sum"), tone_wden=("tone_wd", "sum"), tone_wk_n=("tone_wk", "sum"),
         hate_sum=("hate_v", "sum"), hate_n=("hate_v", "count"),
         hate_hits=("hate_v", lambda s: float((s.dropna() >= 0.5).sum())),
         read_sum=("read_v", "sum"), read_n=("read_v", "count"),
@@ -1449,6 +1547,20 @@ def apply_args(args, P: dict) -> None:
     P["chain_method"] = args.chain_method
 
 
+def _score_models() -> dict:
+    """Model names recorded with the scores (for run metadata); empty on any failure."""
+    try:
+        con = duckdb.connect(str(DUCKDB_PATH), read_only=True)
+        try:
+            return {c: [r[0] for r in con.execute(
+                f"SELECT DISTINCT {c} FROM post_scores WHERE {c} IS NOT NULL").fetchall()]
+                for c in ("tone_model", "hate_model")}
+        finally:
+            con.close()
+    except Exception:
+        return {}
+
+
 def write_stage(outputs: dict, params_json: dict, stage_dir: Path) -> None:
     stage_dir.mkdir(parents=True, exist_ok=True)
     for name, df in outputs.items():
@@ -1529,8 +1641,9 @@ def main(argv: Optional[list] = None) -> int:
         cells_tp, ["topic_id", "platform", "day"], effort, P,
         platform_days=platform_days, window_start=window_start,
         window_end=window_end, novelty_fn=novelty_fn)
+    panel_tp = add_tone_drift(panel_tp, P)
     log(f"  metrics_daily rows={len(panel_tp):,} episodes={len(episodes):,} "
-        f"burst={diag_tp['burst_methods']}")
+        f"burst={diag_tp['burst_methods']} tone_drift_flags={int(panel_tp['tone_drift_flag'].sum())}")
     if "hmm_fit_seconds" in diag_tp:
         log(f"  hmm pooled fit {diag_tp['hmm_fit_seconds']}s: " + "; ".join(
             f"{k}: K={v['n_states']} {v['dist']} lift={[round(x, 2) for x in v['lift']]} "
@@ -1539,6 +1652,8 @@ def main(argv: Optional[list] = None) -> int:
     # ---------------- grain 2: topic x day (platform rolled up) --------
     log("grain 2/3: topic x day")
     cells_t = topic_cells(["topic_id", "day"])
+    # platform-rolled grain: counters differ by platform, so no pooled weighted tone / net sentiment score
+    cells_t[["tone_weighted", "net_sentiment_score", "tone_weight_cov"]] = np.nan
     eb_t = apply_eb(cells_t, "topic_id", P)
     panel_t, episodes_t, diag_t = compute_panel(
         cells_t, ["topic_id", "day"], effort, P,
@@ -1864,6 +1979,17 @@ def main(argv: Optional[list] = None) -> int:
             "(scrape-day grain, 8/45 telegram coverage, zeros on 5 of 8 days)"
         ),
         "eb_diagnostics": {"topic_platform": eb_tp, "topic": eb_t, "tag_platform": eb_tag},
+        "tone_hate_run": {
+            "models": _score_models(),
+            "tone_definition": "P(positive) - P(negative) of the sentiment model, in [-1, 1]",
+            "class_threshold": P["tone_class_threshold"],
+            "weight_formula": P["tone_weight_formula"],
+            "drift": {"window_days": P["tone_drift_window"], "min_base_days": P["tone_drift_min_base"],
+                      "min_posts_per_day": P["tone_drift_min_n"], "scale_floor": P["tone_drift_scale_floor"],
+                      "baseline": "prior days only (today excluded); Student-t lower-tail p; BH q per day",
+                      "fdr_alpha": P["fdr_alpha"]},
+            "status": "provisional: tone/hate not yet human-validated (reports/TONE_HATE_VALIDATION.md)",
+        },
         "self_checks": checks,
         "sensitivity": sens,
         "null_control": null_ctrl,
@@ -1947,6 +2073,9 @@ def main(argv: Optional[list] = None) -> int:
         "burst_state", "burst_intensity", "burst_episode_id",
         "novelty", "days_to_threshold", "emergence_score",
         "tone_mean", "tone_eb", "tone_n",
+        "tone_pos_n", "tone_neg_n", "tone_pos_share", "tone_neu_share", "tone_neg_share", "net_sentiment_score",
+        "tone_weighted", "tone_weight_cov",
+        "tone_drift_z", "tone_drift_p", "tone_drift_q", "tone_drift_base_n", "tone_drift_flag",
         "hate_mean", "hate_eb", "hate_prevalence", "hate_calibrated", "hate_n",
         "virality_pct", "reach_proxy", "reach_audience_norm",
         "author_entropy", "author_1_hhi", "n_authors", "coordination_flag",
@@ -1960,7 +2089,7 @@ def main(argv: Optional[list] = None) -> int:
         df = df.drop(columns=[c for c in ("tone_sum", "hate_sum", "hate_hits", "read_sum",
                                           "read_cov", "vir_sum", "vir_n", "tone_ss",
                                           "hate_ss", "vir_ss", "reach_norm_sum",
-                                          "reach_norm_n") if c in df.columns])
+                                          "reach_norm_n", "tone_wnum", "tone_wden", "tone_wk_n") if c in df.columns])
         head = [c for c in SPEC_ORDER if c in df.columns]
         return df[head + [c for c in df.columns if c not in head]]
 

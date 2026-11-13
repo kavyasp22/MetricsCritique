@@ -664,5 +664,109 @@ def test_semantic_tier_excludes_identical_text_and_same_platform(m20):
     assert ev.large_event.sum() < 0.05 * len(ev)
 
 
+# --------------------------------------------------------------------------- 10. tone mix, weighted tone, drift
+def _tone_posts():
+    return pd.DataFrame({
+        "post_uid": list("abcdef"), "tone_v": [0.5, -0.4, 0.05, np.nan, -0.9, 0.3],
+        "views": [100.0, 0.0, np.nan, 5.0, 0.0, np.nan], "likes": [5.0, 1.0, np.nan, 0.0, 0.0, np.nan],
+        "comments": [1.0, 0.0, np.nan, 0.0, 0.0, np.nan], "shares": [0.0, 0.0, np.nan, 0.0, 0.0, np.nan],
+        "has_engagement": [True, True, True, True, True, False]})
+
+
+def test_tone_weight_floor_and_monotone(m7):
+    w = m7.tone_weight(pd.Series([0.0, np.nan, 100.0]), pd.Series([0.0, np.nan, 5.0]),
+                       pd.Series([0.0, np.nan, 1.0]), pd.Series([0.0, np.nan, 0.0]))
+    assert w.iloc[0] == 1.0 and w.iloc[1] == 1.0                      # never 0, missing counters -> 1
+    assert w.iloc[2] == pytest.approx(1 + np.log1p(106)) and w.iloc[2] > w.iloc[0]
+
+
+def test_tone_extras_classes_and_nan_for_unscored(m7):
+    p = m7.add_tone_extras(_tone_posts(), 0.15)
+    assert p.tone_pos.tolist()[:3] == [1.0, 0.0, 0.0] and p.tone_neg.tolist()[:3] == [0.0, 1.0, 0.0]
+    assert np.isnan(p.tone_pos[3]) and np.isnan(p.tone_neg[3]) and np.isnan(p.tone_wd[3])   # unscored post
+    # tone_wk = scored AND has a counter: post c has no counter values, post f is on a platform without engagement
+    assert p.tone_wk.tolist()[:3] == [1.0, 1.0, 0.0] and p.tone_wk[4] == 1.0 and p.tone_wk[5] == 0.0
+
+
+def test_cell_aggregation_matches_independent_calc(m7):
+    p = m7.add_tone_extras(_tone_posts(), 0.15)
+    for c in ("hate_v", "read_v", "virality_pct_post", "reach_audience_norm_post", "confidence", "read_ok"):
+        p[c] = 0.5
+    p["E_sum"], p["eng_sum"], p["author_uid"], p["platform"], p["day"] = 1.0, 1.0, "a", "x", 1
+    p["text_norm"] = [f"text {i}" for i in range(len(p))]
+    base = m7._aggregate_cells_hard(p, ["platform", "day"])
+    with_tone = p[p.tone_v.notna()]
+    w = m7.tone_weight(with_tone.views, with_tone.likes, with_tone.comments, with_tone.shares)
+    r = base.iloc[0]
+    assert r.tone_n == 5 and r.tone_pos_n == 2 and r.tone_neg_n == 2
+    assert r.tone_pos_share == pytest.approx(2 / 5) and r.tone_neu_share == pytest.approx(1 / 5)
+    assert r.net_sentiment_score == pytest.approx(0.0)
+    assert r.tone_weighted == pytest.approx((with_tone.tone_v * w).sum() / w.sum())
+    assert r.tone_weight_cov == pytest.approx(3 / 5)          # 3 of the 5 scored posts carry a counter
+    # below tone_min_n -> NULL, never 0
+    small = m7._aggregate_cells_hard(p.iloc[:3], ["platform", "day"]).iloc[0]
+    assert np.isnan(small.net_sentiment_score) and np.isnan(small.tone_weighted)
+    assert small.tone_n == 3
+
+
+def _drift_panel(spike=True):
+    days = pd.date_range("2026-07-01", periods=30)
+    rows = []
+    for plat in ("telegram", "twitter"):
+        rng = np.random.default_rng(1 if plat == "telegram" else 2)
+        for i, d in enumerate(days):
+            tone = 0.1 + rng.normal(0, 0.02)
+            if spike and plat == "telegram" and i == 25:
+                tone = -0.6
+            rows.append(dict(topic_id="t001", platform=plat, day=d.date(), in_window=True, tone_mean=tone, tone_n=20.0))
+    return pd.DataFrame(rows)
+
+
+def test_tone_drift_flags_a_sudden_drop_only_in_its_own_series(m7):
+    out = m7.add_tone_drift(_drift_panel(), m7.PARAMS)
+    flagged = out[out.tone_drift_flag]
+    assert len(flagged) == 1 and flagged.iloc[0].platform == "telegram" and str(flagged.iloc[0].day) == "2026-07-26"
+    assert flagged.iloc[0].tone_drift_z < -5 and flagged.iloc[0].tone_drift_q < m7.PARAMS["fdr_alpha"]
+    assert out.loc[out.platform == "twitter", "tone_drift_flag"].sum() == 0        # platforms are never pooled
+    assert out.tone_drift_z.iloc[:7].isna().all()                                  # < min_base prior days
+    assert not m7.add_tone_drift(_drift_panel(spike=False), m7.PARAMS).tone_drift_flag.any()
+
+
+def test_tone_drift_ignores_out_of_window_and_low_n(m7):
+    p = _drift_panel()
+    p.loc[p.platform == "telegram", "in_window"] = False
+    assert not m7.add_tone_drift(p, m7.PARAMS).tone_drift_flag.any()
+    q = _drift_panel()
+    q.loc[(q.platform == "telegram") & (q.day.astype(str) == "2026-07-26"), "tone_n"] = 2.0   # too few posts that day
+    assert not m7.add_tone_drift(q, m7.PARAMS).tone_drift_flag.any()
+
+
+@needs_analytics
+def test_tone_weight_and_drift_calibration_on_real_data(m7):
+    """Real data: weights are >= 1 and never missing; the drift p-values are near nominal (p<0.05 on ~5% of days)."""
+    import duckdb
+    import lib.stats_v2 as S
+    con = duckdb.connect(str(ANALYTICS), read_only=True)
+    try:
+        c = con.execute("SELECT f.views, f.likes, f.comments, f.shares FROM post_facts f").fetchdf()
+        d = con.execute("""SELECT pt.topic_id, f.platform, CAST(date_trunc('day', f.posted_at) AS DATE) AS dy, s.tone_score t
+                           FROM post_scores s JOIN post_facts f USING (post_uid) JOIN post_topic pt USING (post_uid)
+                           WHERE s.tone_valid AND f.posted_at >= '2026-06-14' AND pt.topic_id <> 'unassigned'""").fetchdf()
+    finally:
+        con.close()
+    w = m7.tone_weight(c.views, c.likes, c.comments, c.shares)
+    assert w.notna().all() and (w >= 1.0).all()
+    g = d.groupby(["topic_id", "platform", "dy"]).t.agg(["mean", "size"]).reset_index()
+    ps = []
+    for _, x in g.groupby(["topic_id", "platform"]):
+        x = x.set_index("dy").sort_index().reindex(pd.date_range(x.dy.min(), x.dy.max()))
+        z, p, _b = S.prior_window_drift(x["mean"].to_numpy(), x["size"].fillna(0).to_numpy(),
+                                        window=14, min_base=7, min_n=5, scale_floor=0.05)
+        ps.append(p[np.isfinite(p)])
+    p = np.concatenate(ps)
+    assert len(p) > 1000
+    assert 0.03 < (p < 0.05).mean() < 0.075 and 0.07 < (p < 0.10).mean() < 0.14
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
