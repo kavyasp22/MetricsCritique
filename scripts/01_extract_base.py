@@ -242,6 +242,326 @@ PLATFORM_SQL = {
             NULL::vector AS embedding
         FROM youtube_videos
     """,
+    "twitter": """
+        SELECT
+            'twitter'::text AS platform,
+            COALESCE(tweet_id::text, id::text) AS native_id,
+            post_url AS url,
+            COALESCE(author_id::text, author_username) AS author_id,
+            COALESCE(author_name, author_username) AS author_name,
+            is_verified,
+            COALESCE(translated_text, text) AS text,
+            COALESCE(detected_language, language) AS lang,
+            posted_at,
+            scraped_at,
+            keyword,
+            hashtags::text AS hashtags,
+            like_count AS likes,
+            reply_count AS comments,
+            retweet_count AS shares,
+            impression_count::double precision AS views,
+            TRUE AS has_engagement,
+            embedding
+        FROM twitter_posts
+    """,
+    "whatsapp": """
+        SELECT
+            'whatsapp'::text AS platform,
+            COALESCE(channel_id::text || ':' || message_id::text, id::text) AS native_id,
+            COALESCE(media_link, external_link) AS url,
+            channel_id::text AS author_id,
+            channel_id::text AS author_name,
+            NULL::boolean AS is_verified,
+            COALESCE(translated_text, text, translated_caption, caption, '') AS text,
+            COALESCE(detected_language, language) AS lang,
+            posted_at,
+            scraped_at,
+            NULL::text AS keyword,
+            NULL::text AS hashtags,
+            NULL::double precision AS likes,
+            NULL::double precision AS comments,
+            NULL::double precision AS shares,
+            NULL::double precision AS views,
+            FALSE AS has_engagement,
+            embedding
+        FROM whatsapp_posts
+    """,
+    "tiktok": """
+        SELECT
+            'tiktok'::text AS platform,
+            post_id::text AS native_id,
+            COALESCE(share_url, video_url) AS url,
+            COALESCE(author_uid::text, author_username) AS author_id,
+            COALESCE(author_nickname, author_username) AS author_name,
+            (author_verification_type IS NOT NULL AND author_verification_type != '0') AS is_verified,
+            COALESCE(translated_desc, "desc") AS text,
+            COALESCE(detected_language, language, desc_language) AS lang,
+            to_timestamp(create_time) AS posted_at,   -- create_time is a bigint of Unix SECONDS; unconverted it became 1970-01-01
+            collected_at AS scraped_at,
+            keyword,
+            NULL::text AS hashtags,
+            digg_count AS likes,
+            comment_count AS comments,
+            share_count AS shares,
+            play_count::double precision AS views,
+            TRUE AS has_engagement,
+            embedding
+        FROM tiktok_posts
+    """,
+    "baidu_tieba": """
+        SELECT
+            'baidu_tieba'::text AS platform,
+            COALESCE(pid::text, tid::text, id::text) AS native_id,
+            post_url AS url,
+            COALESCE(author_id::text, author_name) AS author_id,
+            author_name AS author_name,
+            is_verified,
+            COALESCE(translated_content, content, translated_title, title) AS text,
+            COALESCE(detected_language, language) AS lang,
+            posted_time AS posted_at,
+            collected_time AS scraped_at,
+            keyword_used AS keyword,
+            NULL::text AS hashtags,
+            like_count AS likes,
+            reply_count AS comments,
+            NULL::double precision AS shares,
+            NULL::double precision AS views,
+            TRUE AS has_engagement,
+            embedding
+        FROM baidu_tieba_posts
+    """,
+    "baidu_video": """
+        SELECT
+            'baidu_video'::text AS platform,
+            id::text AS native_id,
+            COALESCE(video_url, redirect_url) AS url,
+            author AS author_id,
+            author AS author_name,
+            NULL::boolean AS is_verified,
+            COALESCE(translated_title, title) AS text,
+            COALESCE(detected_language, language) AS lang,
+            posted_time AS posted_at,
+            collected_time AS scraped_at,
+            keyword_used AS keyword,
+            NULL::text AS hashtags,
+            likes AS likes,
+            comment_count AS comments,
+            share_count AS shares,
+            view_count::double precision AS views,
+            TRUE AS has_engagement,
+            embedding
+        FROM baidu_video_posts
+    """,
+    "mastodon": """
+        SELECT
+            'mastodon'::text AS platform,
+            id::text AS native_id,
+            url,
+            COALESCE(account_id::text, account_acct) AS author_id,
+            COALESCE(account_display_name, account_acct) AS author_name,
+            NULL::boolean AS is_verified,
+            COALESCE(translated_content_text, content_text, content_html) AS text,
+            COALESCE(detected_language, language) AS lang,
+            created_at AS posted_at,
+            collected_at AS scraped_at,
+            matched_hashtag AS keyword,
+            tags::text AS hashtags,
+            favourites_count AS likes,
+            replies_count AS comments,
+            reblogs_count AS shares,
+            NULL::double precision AS views,
+            TRUE AS has_engagement,
+            embedding
+        FROM mastodon_posts
+    """,
+    "truthsocial": """
+        SELECT
+            'truthsocial'::text AS platform,
+            post_id::text AS native_id,
+            url,
+            COALESCE(author_id::text, author_handle) AS author_id,
+            COALESCE(author_display_name, author_handle) AS author_name,
+            NULL::boolean AS is_verified,
+            COALESCE(translated_text_plain, text_plain, text_html) AS text,
+            COALESCE(detected_language, language) AS lang,
+            created_at AS posted_at,
+            collected_at AS scraped_at,
+            topic AS keyword,
+            NULL::text AS hashtags,
+            favourites_count AS likes,
+            replies_count AS comments,
+            reblogs_count AS shares,
+            NULL::double precision AS views,
+            TRUE AS has_engagement,
+            embedding
+        FROM truthsocial_posts
+    """,
+    "facebook_profile": """
+        SELECT
+            'facebook_profile'::text AS platform,
+            COALESCE(post_id::text, url, id::text) AS native_id,
+            url,
+            COALESCE(author_id::text, author_name) AS author_id,
+            author_name AS author_name,
+            is_verified,
+            COALESCE(translated_message, message, translated_message_rich, message_rich) AS text,
+            COALESCE(detected_language, language) AS lang,
+            COALESCE(posted_time, to_timestamp(timestamp)) AS posted_at,
+            collected_time AS scraped_at,
+            NULL::text AS keyword,
+            NULL::text AS hashtags,
+            reactions_count AS likes,
+            comments_count AS comments,
+            reshare_count AS shares,
+            video_view_count::double precision AS views,
+            TRUE AS has_engagement,
+            NULL::vector AS embedding
+        FROM facebook_profile_posts
+    """,
+    # ---- DISABLED for now (local storage): discord / chirpwire / weibo. The SQL below was validated against
+    # ---- production (read-only). To enable: un-comment this block, the matching EFFORT_SQLS block, the three
+    # ---- table names in the row-count list and the emb_specs lines in main(), and add discord + chirpwire to
+    # ---- NO_ENGAGEMENT_PLATFORMS in lib/config.py (they have no engagement counts today).
+    # ---- Twitter, second source table: prod keeps x_posts separate from twitter_posts, but it is Twitter. -----
+    # Same column meanings as twitter_posts; labelled platform='twitter' so the dashboard shows one Twitter.
+    # post_uid = sha1(platform|tweet_id) matches twitter_posts, so a tweet present in both tables is one post
+    # (the copy with the later scraped_at is kept, see the global dedup in main()).
+    "twitter_x": """
+        SELECT
+            'twitter'::text AS platform,
+            tweet_id::text AS native_id,
+            post_url AS url,
+            COALESCE(author_id::text, author_username) AS author_id,
+            COALESCE(author_name, author_username) AS author_name,
+            is_verified,
+            COALESCE(translated_text, text) AS text,
+            COALESCE(detected_language, language) AS lang,
+            posted_at,
+            scraped_at,
+            keyword,
+            hashtags::text AS hashtags,
+            like_count AS likes,
+            reply_count AS comments,
+            retweet_count AS shares,
+            impression_count::double precision AS views,
+            TRUE AS has_engagement,
+            embedding
+        FROM x_posts
+    """,
+    # ---- Other prod sources (added 2026-11-13; first extract that includes them is the next rebuild) --------
+    # discord_posts has NO embedding column in prod: its posts get tone/hate scores but no topic until embedded.
+    "discord": """
+        SELECT
+            'discord'::text AS platform,
+            message_id::text AS native_id,
+            url,
+            author AS author_id,
+            author AS author_name,
+            NULL::boolean AS is_verified,
+            content AS text,
+            NULL::text AS lang,
+            "timestamp" AS posted_at,
+            collected_time AS scraped_at,
+            keyword_used AS keyword,
+            NULL::text AS hashtags,
+            NULL::double precision AS likes,
+            NULL::double precision AS comments,
+            NULL::double precision AS shares,
+            NULL::double precision AS views,
+            FALSE AS has_engagement,
+            NULL::vector AS embedding
+        FROM discord_posts
+    """,
+    "chirpwire": """
+        SELECT
+            'chirpwire'::text AS platform,
+            post_id::text AS native_id,
+            thread_url AS url,
+            author_handle AS author_id,
+            COALESCE(author_name, author_handle) AS author_name,
+            NULL::boolean AS is_verified,
+            COALESCE(translated_post_text, post_text) AS text,
+            COALESCE(detected_language, language) AS lang,
+            posted_at,
+            fetched_at AS scraped_at,
+            hashtag_queried AS keyword,
+            hashtags::text AS hashtags,
+            likes_count::double precision AS likes,
+            comments_count::double precision AS comments,
+            reposts_count::double precision AS shares,
+            NULL::double precision AS views,
+            (likes_count IS NOT NULL OR comments_count IS NOT NULL OR reposts_count IS NOT NULL) AS has_engagement,
+            embedding
+        FROM chirpwire_posts
+    """,
+    "weibo": """
+        SELECT
+            'weibo'::text AS platform,
+            weibo_id::text AS native_id,
+            post_url AS url,
+            author_id::text AS author_id,
+            author_name,
+            NULL::boolean AS is_verified,
+            COALESCE(translated_text, text) AS text,
+            COALESCE(detected_language, language) AS lang,
+            posted_at,
+            scraped_at,
+            keyword,
+            topics::text AS hashtags,
+            attitudes_count::double precision AS likes,
+            comments_count::double precision AS comments,
+            reposts_count::double precision AS shares,
+            NULL::double precision AS views,
+            TRUE AS has_engagement,
+            embedding
+        FROM weibo_posts
+    """,
+    # Element/Matrix chat rooms; no engagement counters.
+    "kashmirfight": """
+        SELECT
+            'kashmirfight'::text AS platform,
+            COALESCE(message_id, dedupe_key, id::text) AS native_id,
+            COALESCE(source_url, element_web_link) AS url,
+            username AS author_id,
+            username AS author_name,
+            NULL::boolean AS is_verified,
+            COALESCE(translated_message_content, message_content) AS text,
+            COALESCE(detected_language, language) AS lang,
+            posted_at,
+            collected_at AS scraped_at,
+            NULL::text AS keyword,
+            NULL::text AS hashtags,
+            NULL::double precision AS likes,
+            NULL::double precision AS comments,
+            NULL::double precision AS shares,
+            NULL::double precision AS views,
+            FALSE AS has_engagement,
+            embedding
+        FROM kashmirfight_posts
+    """,
+    # Rocket.Chat channels; no engagement counters.
+    "rocketchat": """
+        SELECT
+            'rocketchat'::text AS platform,
+            COALESCE(message_id, id::text) AS native_id,
+            channel_url AS url,
+            COALESCE(author_user_id, author_username) AS author_id,
+            COALESCE(author_name, author_username) AS author_name,
+            NULL::boolean AS is_verified,
+            COALESCE(translated_text, text) AS text,
+            COALESCE(detected_language, language) AS lang,
+            posted_at,
+            collected_at AS scraped_at,
+            NULL::text AS keyword,
+            NULL::text AS hashtags,
+            NULL::double precision AS likes,
+            NULL::double precision AS comments,
+            NULL::double precision AS shares,
+            NULL::double precision AS views,
+            FALSE AS has_engagement,
+            embedding
+        FROM rocketchat_messages
+    """,
 }
 
 COMMENT_SQL = """
@@ -360,6 +680,173 @@ EFFORT_SQLS = {
         WHERE scraped_at IS NOT NULL
         GROUP BY 1, 2
     """,
+    "twitter": """
+        SELECT
+            'twitter'::text AS platform,
+            date_trunc('day', scraped_at)::date AS day,
+            COUNT(*) AS rows_ingested,
+            COUNT(DISTINCT author_id) AS active_channels,
+            COUNT(DISTINCT keyword) AS active_keywords
+        FROM twitter_posts
+        WHERE scraped_at IS NOT NULL
+        GROUP BY 1, 2
+    """,
+    "whatsapp": """
+        SELECT
+            'whatsapp'::text AS platform,
+            date_trunc('day', scraped_at)::date AS day,
+            COUNT(*) AS rows_ingested,
+            COUNT(DISTINCT channel_id) AS active_channels,
+            NULL::bigint AS active_keywords
+        FROM whatsapp_posts
+        WHERE scraped_at IS NOT NULL
+        GROUP BY 1, 2
+    """,
+    "tiktok": """
+        SELECT
+            'tiktok'::text AS platform,
+            date_trunc('day', collected_at)::date AS day,
+            COUNT(*) AS rows_ingested,
+            COUNT(DISTINCT author_uid) AS active_channels,
+            COUNT(DISTINCT keyword) AS active_keywords
+        FROM tiktok_posts
+        WHERE collected_at IS NOT NULL
+        GROUP BY 1, 2
+    """,
+    "baidu_tieba": """
+        SELECT
+            'baidu_tieba'::text AS platform,
+            date_trunc('day', collected_time)::date AS day,
+            COUNT(*) AS rows_ingested,
+            COUNT(DISTINCT forum) AS active_channels,
+            COUNT(DISTINCT keyword_used) AS active_keywords
+        FROM baidu_tieba_posts
+        WHERE collected_time IS NOT NULL
+        GROUP BY 1, 2
+    """,
+    "baidu_video": """
+        SELECT
+            'baidu_video'::text AS platform,
+            date_trunc('day', collected_time)::date AS day,
+            COUNT(*) AS rows_ingested,
+            COUNT(DISTINCT author) AS active_channels,
+            COUNT(DISTINCT keyword_used) AS active_keywords
+        FROM baidu_video_posts
+        WHERE collected_time IS NOT NULL
+        GROUP BY 1, 2
+    """,
+    "mastodon": """
+        SELECT
+            'mastodon'::text AS platform,
+            date_trunc('day', collected_at)::date AS day,
+            COUNT(*) AS rows_ingested,
+            COUNT(DISTINCT account_id) AS active_channels,
+            COUNT(DISTINCT matched_hashtag) AS active_keywords
+        FROM mastodon_posts
+        WHERE collected_at IS NOT NULL
+        GROUP BY 1, 2
+    """,
+    "truthsocial": """
+        SELECT
+            'truthsocial'::text AS platform,
+            date_trunc('day', collected_at)::date AS day,
+            COUNT(*) AS rows_ingested,
+            COUNT(DISTINCT author_id) AS active_channels,
+            COUNT(DISTINCT topic) AS active_keywords
+        FROM truthsocial_posts
+        WHERE collected_at IS NOT NULL
+        GROUP BY 1, 2
+    """,
+    "facebook_profile": """
+        SELECT
+            'facebook_profile'::text AS platform,
+            date_trunc('day', collected_time)::date AS day,
+            COUNT(*) AS rows_ingested,
+            COUNT(DISTINCT author_id) AS active_channels,
+            NULL::bigint AS active_keywords
+        FROM facebook_profile_posts
+        WHERE collected_time IS NOT NULL
+        GROUP BY 1, 2
+    """,
+    "twitter_x": """
+        SELECT
+            'twitter'::text AS platform,
+            date_trunc('day', scraped_at)::date AS day,
+            COUNT(*) AS rows_ingested,
+            COUNT(DISTINCT COALESCE(author_id::text, author_username)) AS active_channels,
+            COUNT(DISTINCT keyword) AS active_keywords
+        FROM x_posts
+        WHERE scraped_at IS NOT NULL
+        GROUP BY 1, 2
+    """,
+    "discord": """
+        SELECT
+            'discord'::text AS platform,
+            date_trunc('day', collected_time)::date AS day,
+            COUNT(*) AS rows_ingested,
+            COUNT(DISTINCT channel_id) AS active_channels,
+            COUNT(DISTINCT keyword_used) AS active_keywords
+        FROM discord_posts
+        WHERE collected_time IS NOT NULL
+        GROUP BY 1, 2
+    """,
+    "chirpwire": """
+        SELECT
+            'chirpwire'::text AS platform,
+            date_trunc('day', fetched_at)::date AS day,
+            COUNT(*) AS rows_ingested,
+            COUNT(DISTINCT author_handle) AS active_channels,
+            COUNT(DISTINCT hashtag_queried) AS active_keywords
+        FROM chirpwire_posts
+        WHERE fetched_at IS NOT NULL
+        GROUP BY 1, 2
+    """,
+    "weibo": """
+        SELECT
+            'weibo'::text AS platform,
+            date_trunc('day', scraped_at)::date AS day,
+            COUNT(*) AS rows_ingested,
+            COUNT(DISTINCT author_id) AS active_channels,
+            COUNT(DISTINCT keyword) AS active_keywords
+        FROM weibo_posts
+        WHERE scraped_at IS NOT NULL
+        GROUP BY 1, 2
+    """,
+    "kashmirfight": """
+        SELECT
+            'kashmirfight'::text AS platform,
+            date_trunc('day', collected_at)::date AS day,
+            COUNT(*) AS rows_ingested,
+            COUNT(DISTINCT room_id) AS active_channels,
+            NULL::bigint AS active_keywords
+        FROM kashmirfight_posts
+        WHERE collected_at IS NOT NULL
+        GROUP BY 1, 2
+    """,
+    "rocketchat": """
+        SELECT
+            'rocketchat'::text AS platform,
+            date_trunc('day', collected_at)::date AS day,
+            COUNT(*) AS rows_ingested,
+            COUNT(DISTINCT channel_id) AS active_channels,
+            NULL::bigint AS active_keywords
+        FROM rocketchat_messages
+        WHERE collected_at IS NOT NULL
+        GROUP BY 1, 2
+    """,
+}
+
+
+# prod table each PLATFORM_SQL key reads (kept in post_facts.source_table). Twitter has two: twitter_posts and x_posts.
+SOURCE_TABLE = {
+    "facebook": "facebook_posts", "facebook_profile": "facebook_profile_posts", "instagram": "instagram_posts",
+    "linkedin": "linkedin_posts", "pinterest": "pinterest_posts", "reddit": "reddit_posts",
+    "snapchat": "snapchat_posts", "telegram": "telegram_posts", "twitter": "twitter_posts",
+    "twitter_x": "x_posts", "whatsapp": "whatsapp_posts", "tiktok": "tiktok_posts",
+    "baidu_tieba": "baidu_tieba_posts", "baidu_video": "baidu_video_posts", "mastodon": "mastodon_posts",
+    "truthsocial": "truthsocial_posts", "youtube_video": "youtube_videos", "discord": "discord_posts",
+    "chirpwire": "chirpwire_posts", "weibo": "weibo_posts", "kashmirfight": "kashmirfight_posts",
+    "rocketchat": "rocketchat_messages",
 }
 
 
@@ -465,6 +952,7 @@ def normalize_and_dedup(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
             "shares": pd.to_numeric(df["shares"], errors="coerce"),
             "views": pd.to_numeric(df["views"], errors="coerce"),
             "has_engagement": df["has_engagement"].astype(bool),
+            "source_table": df["source_table"] if "source_table" in df.columns else None,
         }
     )
     emb_df = pd.DataFrame(emb_rows) if emb_rows else pd.DataFrame(
@@ -530,8 +1018,12 @@ def main() -> int:
 
         # Row counts for meta
         for t in [
-            "facebook_posts", "instagram_posts", "linkedin_posts", "pinterest_posts",
-            "reddit_posts", "snapchat_posts", "telegram_posts", "whatsapp_posts",
+            "facebook_posts", "facebook_profile_posts", "instagram_posts",
+            "linkedin_posts", "pinterest_posts", "reddit_posts", "snapchat_posts",
+            "telegram_posts", "whatsapp_posts", "twitter_posts", "tiktok_posts",
+            "baidu_tieba_posts", "baidu_video_posts", "mastodon_posts",
+            "truthsocial_posts", "x_posts", "discord_posts", "chirpwire_posts", "weibo_posts",
+            "kashmirfight_posts", "rocketchat_messages",
             "youtube_comments", "youtube_videos",
         ]:
             try:
@@ -576,11 +1068,25 @@ def main() -> int:
                 "reddit": ("reddit_posts", "id::text"),
                 "snapchat": ("snapchat_posts", "id::text"),
                 "telegram": ("telegram_posts", "COALESCE(post_url, channel_id::text || ':' || message_id::text)"),
+                "twitter": ("twitter_posts", "COALESCE(tweet_id::text, id::text)"),
+                "whatsapp": ("whatsapp_posts", "COALESCE(channel_id::text || ':' || message_id::text, id::text)"),
+                "tiktok": ("tiktok_posts", "post_id::text"),
+                "baidu_tieba": ("baidu_tieba_posts", "COALESCE(pid::text, tid::text, id::text)"),
+                "baidu_video": ("baidu_video_posts", "id::text"),
+                "mastodon": ("mastodon_posts", "id::text"),
+                "truthsocial": ("truthsocial_posts", "post_id::text"),
+                "twitter_x": ("x_posts", "tweet_id::text"),
+                "chirpwire": ("chirpwire_posts", "post_id::text"),
+                "weibo": ("weibo_posts", "weibo_id::text"),
+                "kashmirfight": ("kashmirfight_posts", "COALESCE(message_id, dedupe_key, id::text)"),
+                "rocketchat": ("rocketchat_messages", "COALESCE(message_id, id::text)"),
+                # discord_posts has no embedding column in prod
             }
             if platform in emb_specs:
                 table, id_expr = emb_specs[platform]
                 emb_map = fetch_embeddings_separately(cur, platform, "native_id", table, id_expr)
 
+            df["source_table"] = SOURCE_TABLE.get(platform)
             facts, _ = normalize_and_dedup(df)
             # Build embeddings from emb_map using post native_id
             emb_rows = []
@@ -591,7 +1097,7 @@ def main() -> int:
                     emb_rows.append(
                         {
                             "post_uid": row["post_uid"],
-                            "platform": platform,
+                            "platform": row["platform"],
                             "embedding": vec,
                             "embedding_model": EMBEDDING_MODEL,
                             "embedding_dim": len(vec),
@@ -642,8 +1148,12 @@ def main() -> int:
         return 1
 
     post_facts = pd.concat(all_facts, ignore_index=True)
-    # Global dedup in case of overlapping keys (shouldn't happen across platforms)
-    post_facts = post_facts.drop_duplicates(subset=["post_uid"], keep="last")
+    # Global dedup. Overlap happens for Twitter (a tweet in both twitter_posts and x_posts has the same
+    # post_uid): keep the copy with the latest scraped_at.
+    n_before = len(post_facts)
+    post_facts = (post_facts.sort_values("scraped_at", kind="stable", na_position="first")
+                  .drop_duplicates(subset=["post_uid"], keep="last").reset_index(drop=True))
+    print(f"  global dedup: {n_before:,} -> {len(post_facts):,} ({n_before - len(post_facts):,} cross-table duplicates)")
 
     post_embeddings = (
         pd.concat([e for e in all_emb if not e.empty], ignore_index=True)
@@ -657,6 +1167,13 @@ def main() -> int:
             columns=["platform", "day", "rows_ingested", "active_channels", "active_keywords"]
         )
     )
+    if len(collection_effort):
+        # twitter_posts + x_posts both report platform='twitter': one row per (platform, day). Active counts are
+        # summed, which can double-count an author/keyword present in both tables (cross-check column only).
+        collection_effort = (collection_effort.groupby(["platform", "day"], as_index=False)
+                             .agg(rows_ingested=("rows_ingested", "sum"),
+                                  active_channels=("active_channels", lambda s: s.sum(min_count=1)),
+                                  active_keywords=("active_keywords", lambda s: s.sum(min_count=1))))
 
     # Engagement snapshots (append-only)
     snap = post_facts[
