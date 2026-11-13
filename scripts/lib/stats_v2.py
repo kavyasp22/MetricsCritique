@@ -53,6 +53,7 @@ __all__ = [
     "fit_logistic_onset",
     "fit_exp_decay",
     "age_conditional_percentile",
+    "leave_one_out_median",
     "shannon_entropy",
     "hhi",
     "ljung_box",
@@ -837,6 +838,36 @@ def age_conditional_percentile(
     return pct, ref_n
 
 
+def leave_one_out_median(values: Sequence[float], min_others: int = 5) -> np.ndarray:
+    """For each element, the median of all OTHER elements (the element itself is excluded).
+
+    Used for author/channel baselines so a post can never influence its own baseline.
+    Elements with fewer than ``min_others`` other finite values get NaN (no baseline), not a guess.
+    """
+    v = np.asarray(values, dtype=float)
+    out = np.full(v.shape, np.nan)
+    ok = np.flatnonzero(np.isfinite(v))
+    n = ok.size
+    k = n - 1                                   # number of "others"
+    if n < 2 or k < max(int(min_others), 1):
+        return out
+    x = v[ok]
+    order = np.argsort(x, kind="mergesort")
+    s = x[order]                                # ascending
+    rank = np.empty(n, dtype=int)
+    rank[order] = np.arange(n)                  # position of each element in the sorted array
+
+    def others(i, r):                           # i-th smallest of the others, element at rank r removed
+        return s[np.where(i < r, i, i + 1)]
+
+    if k % 2 == 1:
+        med = others((k - 1) // 2, rank)
+    else:
+        med = 0.5 * (others(k // 2 - 1, rank) + others(k // 2, rank))
+    out[ok] = med
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Diversity (carried over from v1 — these were correct)
 # --------------------------------------------------------------------------- #
@@ -944,6 +975,15 @@ def run_self_checks(*, verbose: bool = False) -> dict:
     """
     res: dict[str, bool] = {}
     rng = np.random.default_rng(RNG_SEED)
+
+    # --- 0. leave-one-out median excludes the element itself ---------------
+    _v = np.array([1.0, 2.0, 3.0, 4.0, 100.0, 7.0])
+    _l = leave_one_out_median(_v, min_others=1)
+    res["loo_median_matches_bruteforce"] = bool(np.allclose(
+        _l, [np.median(np.delete(_v, i)) for i in range(_v.size)]))
+    _w = _v.copy(); _w[4] = 1e9
+    res["loo_median_ignores_own_value"] = bool(abs(_l[4] - leave_one_out_median(_w, 1)[4]) < 1e-12)
+    res["loo_median_needs_min_others"] = bool(np.isnan(leave_one_out_median([1.0, 2.0, 3.0], 5)).all())
 
     # --- 1. trailing baseline excludes the CURRENT day ---------------------
     base = np.array([2, 3, 2, 4, 3, 2, 5, 3, 2, 4, 3, 3, 2, 4, 3, 2, 3, 4, 2, 3], float)

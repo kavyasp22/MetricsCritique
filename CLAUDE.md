@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Guidance for AI coding agents working in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What this is
 
@@ -44,9 +44,26 @@ cp .env.example .env              # fill SHAKTI_PG_*
 python scripts/07_metrics_v2.py && python scripts/08_metrics_db.py   # metrics v2
 python UI/build_dashboard.py                                         # rebuild snapshot
 cd UI && ../.venv/bin/python3 api_server.py 8877                     # serve dashboard
+bash scripts/run_rebuild.sh                  # 07→08→11→dashboard; FROM=08 resumes; 07 takes ~45-60 min, ~8 GB RAM
 python -m pytest scripts/tests                                       # python tests
+python -m pytest scripts/tests/test_fdr_family.py::test_name -x      # single test
+python UI/tests/check_api_dimensions.py                              # UI API harnesses (use .venv python)
+bash scripts/run_gemma_ner.sh                # Gemma routing (17) + entities (18) loop; touch logs/gemma_ner.stop to end
+HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up -d             # dashboard container (port 8877, see Dockerfile)
 node UI/tests/check_taxonomy.mjs                                     # UI harnesses (see UI/tests/README.md)
 ```
+
+## Architecture in brief
+
+Data flows Postgres → `01` → foundation store (`data/parquet` + `analytics.duckdb`) → two parallel
+branches: **metrics v2** (`07` → `data/metrics_stage/` → `08` → `data/metrics.duckdb`) and the
+**geo-ontology layer** (`10`,`12`–`15`,`17`,`18` → `11` → `data/geo_ontology.duckdb`; Gemma NER lands
+in `data/gemma_ner.duckdb`, fresh posts in `incoming_posts.duckdb`). `UI/build_dashboard.py` merges both into
+`UI/data/metrics.json` + `geo_alerts.json` + `UI/index.html`; `UI/api_server.py` serves them plus read-only
+`/api/*` queries (drill-down, live NER/Military view). `delivery/` copies the results into a Docker Postgres.
+The `post_embeddings` view in `analytics.duckdb` points at an absolute parquet path — run
+`scripts/repoint_embeddings_view.py` after moving the repo. Full diagram: `current-arch.md`.
+UI tests are jsdom harnesses (`node_modules`) that render the real `index.html`, not unit tests.
 
 ## Conventions
 

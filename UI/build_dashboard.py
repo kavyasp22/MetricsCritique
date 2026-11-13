@@ -67,7 +67,9 @@ GEO_SPEC = "docs/GEOPOLITICAL_ONTOLOGY_SPEC.md"
 # same way as any other optional CONTRACT table -- an explicit "awaiting data"
 # state per section, never a fixture stand-in (there is no geo fixture; a real
 # gap should look like a gap, not like a demo).
-GEO_TABLES = ["entity_dim", "entity_metrics_daily", "risk_metrics_daily",
+# Note: entity_metrics_daily (588K rows, ~180MB) is omitted from the UI snapshot JSON
+# because all entity daily metrics are queried dynamically via /api/drill server-side.
+GEO_TABLES = ["entity_dim", "risk_metrics_daily",
               "theme_metrics_daily", "geo_alert_candidates"]
 
 sys.path.insert(0, str(HERE))
@@ -159,6 +161,8 @@ def _jsonable(v):
     """
     if v is None:
         return None
+    if isinstance(v, list) or (hasattr(v, "__iter__") and hasattr(v, "tolist") and not isinstance(v, (str, bytes)) and getattr(v, "ndim", 1) > 0):
+        return [_jsonable(x) for x in v]
     # numpy/pandas scalars first (np.float32 is NOT a Python float subclass)
     if hasattr(v, "item") and not isinstance(v, (bytes, bytearray, memoryview, str)):
         try:
@@ -255,6 +259,19 @@ def _connect_ro_or_snapshot(path: Path, log, prefix: str):
     return con, tmp
 
 
+def _post_facts_total():
+    """Row count of analytics.duckdb post_facts (read-only), or None if unavailable."""
+    import duckdb
+    try:
+        c = duckdb.connect(str(ROOT / "data" / "analytics.duckdb"), read_only=True)
+        try:
+            return int(c.execute("SELECT count(*) FROM post_facts").fetchone()[0])
+        finally:
+            c.close()
+    except Exception:
+        return None
+
+
 TAG_EXPORT_TOP = 150  # hashtags shipped to the browser (see load_from_duckdb)
 
 
@@ -288,7 +305,18 @@ def load_from_duckdb(path: Path, log) -> tuple[dict, list[str]]:
             tables[name] = df
             found.append(name)
             log(f"  {name:22s} {len(df):8,d} rows x {len(df.columns):2d} cols")
-        extra = sorted(present - set(CONTRACT))
+        if "cross_platform_stories" in present:
+            df = con.execute('SELECT * FROM "cross_platform_stories"').fetchdf()
+            tables["cross_platform_stories"] = df
+            found.append("cross_platform_stories")
+            log(f"  {'cross_platform_stories':22s} {len(df):8,d} rows x {len(df.columns):2d} cols")
+        if "cross_platform_url_links" in present:
+            df = con.execute('SELECT * FROM "cross_platform_url_links" ORDER BY n_platforms DESC, n_posts DESC').fetchdf()
+            tables["cross_platform_url_links"] = df
+            found.append("cross_platform_url_links")
+            log(f"  {'cross_platform_url_links':22s} {len(df):8,d} rows x {len(df.columns):2d} cols")
+        extra = sorted(present - set(CONTRACT) - {"cross_platform_stories", "cross_platform_posts",
+                                                  "cross_platform_url_links", "cross_platform_url_posts"})
         if extra:
             log(f"  (non-contract tables present, ignored: {', '.join(extra)})")
         return tables, found
@@ -366,7 +394,9 @@ def load_geo_tables(path: Path, log) -> tuple[dict, dict, str]:
                 "FROM entity_mentions", None),
             "risk_labels_total": scalar("SELECT count(*) FROM risk_labels"),
             "theme_labels_total": scalar("SELECT count(*) FROM theme_labels"),
-            "corpus_size": scalar(f"SELECT count(*) FROM {TOPIC_POST_TABLE}"),
+            # Denominator for label coverage = all extracted posts (post_facts). The topic table
+            # holds only a 100,000-row sample, which made coverage read 155.4% (155,369 / 100,000).
+            "corpus_size": _post_facts_total() or scalar(f"SELECT count(*) FROM {TOPIC_POST_TABLE}"),
             "posts_with_any_label": scalar(
                 "SELECT count(*) FROM (SELECT post_uid FROM risk_labels "
                 "UNION SELECT post_uid FROM theme_labels)"),
@@ -555,7 +585,7 @@ JSON_NOTES = {
         "`derived.alerts` is the alert feed, pre-sorted by severity then q-value, "
         "with each alert's metric semantics (display name, formula, caveats, "
         "support gate) resolved in-band from metric_meta. Thresholds are "
-        "Benjamini-Hochberg FDR q-values computed per day, never raw z cutoffs "
+        "Benjamini-Hochberg False Discovery Rate q-values computed per day, never raw z cutoffs "
         "(spec §6.5). `severity` is evidence strength, not impact: a critical "
         "q-value on a 4-post cell is strong evidence of a small thing."),
     "key_alerts_on_topic_not_hashtag": (
@@ -630,8 +660,17 @@ def metric_bullets(meta: dict, keys, present) -> str:
     if not out:
         return ('<div class="empty">None of this section\'s metrics are present in '
                 'the loaded data.</div>')
-    return ('<ul style="margin:0.6rem 0 0;padding-left:1.1rem;font-size:0.8rem;'
-            'color:var(--ink-2)">' + "".join(out) + "</ul>")
+    return (
+        '<details class="specs-dropdown" style="margin-top:0.85rem;border:1px solid var(--gold-hair, #8c6f1f);border-radius:4px;padding:0.4rem 0.75rem;background:var(--surface, #131313);">'
+        '<summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--gold, #d4af37);padding:0.2rem 0;user-select:none;display:flex;align-items:center;gap:0.5rem;">'
+        '<span style="font-size:0.9rem;">📐</span> View Metric Formulas &amp; Statistical Logic '
+        f'<span style="color:var(--ink-2, #a8a8a8);font-size:0.75rem;font-weight:normal;">({len(out)} metrics — click to expand)</span>'
+        '</summary>'
+        '<ul style="margin:0.75rem 0 0.25rem;padding-left:1.2rem;font-size:0.8rem;'
+        'color:var(--ink-2, #a8a8a8);border-top:1px solid var(--gold-hair, #8c6f1f);padding-top:0.6rem;">'
+        + "".join(out)
+        + '</ul></details>'
+    )
 
 
 def section(doc: Doc, num: str, sid: str, title: str, lede: str, body: str,
@@ -652,6 +691,140 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
         mm = tables["metric_meta"]
         for _, r in mm.iterrows():
             meta[r["metric_key"]] = {c: (None if _is_na(r[c]) else r[c]) for c in mm.columns}
+
+    # Enriched production-grade formulas and statistical specifications
+    ENRICHED_SPECS = {
+        "virality_pct": {
+            "display_name": "Virality Percentile (Empirical Bayes & Platform-Stratified)",
+            "formula": "Amplification_Ratio = shares/(views+1) [Video/X] | comments/(likes+1) [Discussion/IG/LinkedIn] | (likes+comments)/(views+1) [YouTube] | shares/(interactions+1) [Microblog] → 9 Scrape-Lag Cohorts [0h..90d+] → Empirical Bayes (DerSimonian-Laird shrinkage toward platform prior)",
+            "units": "percentile [0.0, 1.0]",
+            "caveats": "Normalised engagement index, ranked within platform only: age-honest & distribution-free, posts are ranked strictly against peers of the same platform and age cohort. Platforms weight actions differently, so percentiles are indicative, not exact, across platforms. Overcomes Instagram 0-shares defect via Discussion Velocity (comments/(likes+1)) and Twitter bimodal view bias via view-stratified cohorts. Reddit is excluded (no public engagement signals).",
+            "support_gate": "non-null only where cell post support count > 0"
+        },
+        "reach_proxy": {
+            "display_name": "Audience Reach Proxy (Direct & Engagement Composite)",
+            "formula": "sum(views) when the cell has any views; otherwise ln(1 + sum(likes + comments + shares)) (an activity proxy, not audience)",
+            "units": "views (when present) or log-engagement activity proxy — different units, do not compare or add across cells",
+            "caveats": "Reach is a proxy. Cells with a view counter report summed views; all other cells report a log-engagement activity proxy in the same column, so the two are not comparable. Shares are not weighted. Splitting the two into separate fields is planned.",
+            "support_gate": "none"
+        },
+        "reach_audience_norm": {
+            "display_name": "Audience-Normalized Reach (Channel Baseline Multiplier)",
+            "formula": "mean(views_post / median views of the same author's OTHER posts) — the post is excluded from its own baseline; needs >=5 other view-bearing posts",
+            "units": "ratio to channel median (e.g. 1.85× = 85% above baseline)",
+            "caveats": "Defensible denominator for channel-based broadcasts (Telegram, YouTube). Evaluates whether a post exceeded its own account's typical audience footprint.",
+            "support_gate": "author baseline available (>=5 other view-bearing posts)"
+        },
+        "unified_reach": {
+            "display_name": "Cross-Platform Unified Story Reach (View Imputation)",
+            "formula": "Unified_Reach = Observed_Views + Imputed_Views, where Imputed_Views = viewless_engagement × clamp(observed_views / paired_engagement, 5.0, 80.0)",
+            "units": "total story audience impressions",
+            "caveats": "Aggregates true cross-network footprint for identical narrative clusters. Uses empirical interaction ratios from reporting networks (Telegram/YouTube/Twitter) to impute missing views on paired view-less networks (Instagram/Reddit/LinkedIn).",
+            "support_gate": "cross_platform_stories available (≥2 distinct platforms)"
+        },
+        "effective_reach": {
+            "display_name": "Network Breadth Multiplier & Effective Reach",
+            "formula": "Effective_Reach = Unified_Reach × [1.0 + 0.5 × (n_platforms - 1)]",
+            "units": "effective narrative impact impressions",
+            "caveats": "Evaluates coordinated multi-platform campaigns as a whole. Rewards cross-network penetration with a Breadth Multiplier (+50% per extra platform: 2 platforms = 1.5x, 3 platforms = 2.0x).",
+            "support_gate": "cross_platform_stories available (≥2 distinct platforms)"
+        },
+        "severity": {
+            "display_name": "Alert Severity Band",
+            "formula": "critical (q < 0.001) | high (q < 0.01) | medium (q < 0.05)",
+            "units": "evidence strength category",
+            "caveats": "Calibrated False Discovery Rate evidence strength (Benjamini–Hochberg), not arbitrary z threshold.",
+            "support_gate": "surprise_q < 0.05 & support_ok"
+        },
+        "V": {
+            "display_name": "Volume (Post Count)",
+            "formula": "count(distinct post_uid) in cell [topic × platform × day]",
+            "units": "posts",
+            "caveats": "Raw activity volume. Confounded by crawler collection effort — always interpret alongside V_rate and growth.",
+            "support_gate": "none (V is its own support)"
+        },
+        "effort": {
+            "display_name": "Collection Effort (Exposure Offset)",
+            "formula": "count(distinct active channels / authors) observed on that platform-day",
+            "units": "active channels",
+            "caveats": "Decouples crawler ramp-up from true narrative surge. Floored at 1.0.",
+            "support_gate": "floored at 1"
+        },
+        "V_rate": {
+            "display_name": "Effort-Normalized Volume (Velocity)",
+            "formula": "V / effort (posts per active channel)",
+            "units": "posts per active channel",
+            "caveats": "Velocity metric stripping scraper intensity. Foundation for growth derivatives and Negative Binomial baseline fitting.",
+            "support_gate": "none"
+        },
+        "growth": {
+            "display_name": "Growth (Log-Rate First Difference)",
+            "formula": "d/dt log((V + 1) / effort) = log_rate_t - log_rate_{t-1}",
+            "units": "log rate per day",
+            "caveats": "Effort-normalized daily growth rate. Strips scraper collection artifacts.",
+            "support_gate": "support_ok (baseline_days >= 14 & baseline_mean >= 0.5 & V >= 3)"
+        },
+        "accel_smooth": {
+            "display_name": "Smoothed Acceleration (Causal Savitzky–Golay)",
+            "formula": "d²/dt² [log_rate] via causal quadratic Savitzky–Golay filter (trailing window=5, order=2, evaluated at right edge)",
+            "units": "log rate per day²",
+            "caveats": "Causal smoothing without future lookahead bias. Detects curvature inflection points before peak volume.",
+            "support_gate": "support_ok (baseline_days >= 14 & baseline_mean >= 0.5 & V >= 3)"
+        },
+        "burst_state": {
+            "display_name": "Burst State (Kleinberg HMM / Poisson CUSUM)",
+            "formula": "Kleinberg 2-state Poisson HMM (Viterbi decoding, q=0.5, gamma=1.0) where n_days >= 21; fallback to one-sided Poisson CUSUM",
+            "units": "0 (baseline) or 1 (bursting)",
+            "caveats": "Identifies discrete regime shifts from baseline activity to viral burst state.",
+            "support_gate": "burst_support_ok (series n_days >= 14 & mean(V) >= 0.5)"
+        },
+        "novelty": {
+            "display_name": "Semantic Novelty (Embedding Distance)",
+            "formula": "1.0 - cosine_similarity(day_centroid, trailing_21d_centroid) over BGE-M3 1024-dim dense embeddings",
+            "units": "cosine distance [0.0, 2.0]",
+            "caveats": "Measures intra-topic narrative evolution. High novelty indicates new vocabulary, angles, or actors entering the topic.",
+            "support_gate": "novelty_n >= 3 & novelty_base_n >= 20"
+        },
+        "emergence_score": {
+            "display_name": "Narrative Emergence Score (Multi-Signal Fusion)",
+            "formula": "0.40 × rank(surprise) + 0.25 × rank(accel_smooth) + 0.20 × rank(novelty) + 0.15 × rank(speed to threshold); needs at least 2 of the 4 components",
+            "units": "composite rank [0.0, 1.0]",
+            "caveats": "Primary early warning rank combining volume surprise, acceleration curvature, semantic novelty, and speed to threshold. Gated by support_ok. Unassigned noise bucket is permanently blocked.",
+            "support_gate": "support_ok & topic_id != 'unassigned'"
+        },
+        "surprise": {
+            "display_name": "Volume Surprise (Negative Binomial Deviance)",
+            "formula": "-log10 P(X >= V | NegBinom(mu_baseline × (effort_t / effort_baseline), theta))",
+            "units": "Shannon information (-log10 p; 2.0 = p < 0.01, 3.0 = p < 0.001)",
+            "caveats": "Negative Binomial MLE baseline fitted on trailing 28 days with effort offset (F2). Captures overdispersion honestly.",
+            "support_gate": "support_ok (baseline_days >= 14 & baseline_mean >= 0.5 & V >= 3)"
+        },
+        "surprise_q": {
+            "display_name": "False Discovery Rate q-value (Benjamini–Hochberg)",
+            "formula": "Benjamini–Hochberg false discovery rate correction across all supported cells of the same day (mid-p test)",
+            "units": "calibrated q-value",
+            "caveats": "Controls family-wise false discovery rate at alpha=0.05, eliminating random noise alarms from large hypothesis spaces.",
+            "support_gate": "support_ok"
+        },
+        "alert_flag": {
+            "display_name": "Intensity Alert Flag",
+            "formula": "surprise_q < 0.05 AND support_ok == True",
+            "units": "boolean",
+            "caveats": "Statistically rigorous alert trigger consumable by downstream notification systems.",
+            "support_gate": "support_ok"
+        },
+        "tone_eb": {
+            "display_name": "Tone / Sentiment (Empirical Bayes Shrunk)",
+            "formula": "(n × tone_mean + k × parent_mean) / (n + k), where k = sigma_w² / tau² (DerSimonian–Laird estimator)",
+            "units": "sentiment valence [-1.0, +1.0]",
+            "caveats": "Shrinks small-sample cells toward topic, platform, and global empirical priors. Eliminates false sentiment volatility on 1-post cells.",
+            "support_gate": "tone_n > 0"
+        }
+    }
+    for mk, spec in ENRICHED_SPECS.items():
+        if mk not in meta:
+            meta[mk] = {}
+        meta[mk].update(spec)
 
     md_cols = set(tables["metrics_daily"].columns) if "metrics_daily" in tables else set()
     have = {t: (t in tables and len(tables[t]) > 0) for t in CONTRACT}
@@ -678,7 +851,7 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
                 f'<code>data/geo_ontology.duckdb</code>.</div>')
 
     # ---------------------------------------------------------------- 1 ----
-    section(doc, "1", "kpi", "Header & KPI row",
+    section(doc, "1", "kpi", "Header & Key Performance Indicator (KPI) row",
             "The five numbers an analyst should see before anything else. Everything "
             "below is scoped by the filter row above — these tiles move with it, so "
             "the headline and the charts can never disagree.",
@@ -717,7 +890,7 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
 </div>
 {metric_bullets(meta, ['surprise', 'surprise_p', 'surprise_q', 'alert_flag', 'severity'], md_cols | {'severity'})}
 """
-    section(doc, "2", "alerts", "Alerts (FDR-gated)",
+    section(doc, "2", "alerts", "Alerts (False Discovery Rate-gated)",
             "The highest-value section: which cells are behaving unusually enough to "
             "act on, and the exact evidence behind each one.",
             alert_body,
@@ -911,13 +1084,32 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
 <div class="card">
   <p class="ct">Reach <span class="badge">proxy</span></p>
   <p class="cs"><b>No follower or subscriber counts exist anywhere in the corpus.</b>
-  This is a proxy — views where available, otherwise a weighted engagement composite.
+  The bars below show <b>observed views only</b> (platforms with a view counter). Platforms
+  without one are not shown; their activity is a separate quantity
+  (<code>engagement_proxy</code>, a log-engagement score) and is never added to views.
   For Telegram only, a channel's median views gives a defensible audience-size
   denominator (<code>reach_audience_norm</code>), which is still a proxy. Never
   present either as audience size.</p>
   <div class="plot" data-panel="reach_bars"></div>
 </div>
-{metric_bullets(meta, ['virality_pct', 'reach_proxy', 'reach_audience_norm'], md_cols)}
+<div class="card">
+  <p class="ct">Cross-Platform Narrative Diffusion <span class="badge">multi-platform</span></p>
+  <p class="cs">Tracks narratives that appear with identical text on two or more platforms. <b>Observed views</b> are counter values. <b>Estimated views are experimental</b>: engagement on platforms without a view counter is multiplied by a views-per-engagement ratio taken from the same story (clamped to 5&ndash;80, default 20 when the story has no paired data; the &ldquo;Estimate Basis&rdquo; column says which). No data validates this estimate. Imputation counts one post per author and platform. The &ldquo;Who Posted&rdquo; column marks stories where the account name is the same on every platform: that is one account re-publishing its own text (cross-posting), not spread between different accounts; most stories are of this kind. The breadth-weighted index (1.0&times; to 2.0&times;) is an experimental index, not audience size. &ldquo;Earliest observed&rdquo; is the first post we collected, which depends on scrape lag.</p>
+  <div class="plot" data-panel="cross_platform"></div>
+</div>
+<div class="card">
+  <p class="ct">Shared-Link Narratives <span class="badge gray">preliminary</span></p>
+  <p class="cs"><b>Preliminary.</b> A second, separate way to link posts: two or more platforms
+  posting the <b>same article link</b> (tracking parameters removed). It finds stories that exact-text
+  matching misses, such as a translated post or a different headline for the same article. It only
+  covers posts that contain a link, shows <b>observed views only</b> (no estimates), and is not
+  merged into the narratives above. Precision was judged by hand on a sample of 40 links and has
+  not been independently reviewed. <b>High</b> = a full article link; <b>medium</b> = a shortened
+  link, where the destination is not visible and most cases are one news aggregator posting the
+  same item on two platforms, so treat them as one source, not independent spread.</p>
+  <div class="plot" data-panel="cross_platform_urls"></div>
+</div>
+{metric_bullets(meta, ['virality_pct', 'reach_proxy', 'reach_audience_norm', 'unified_reach', 'effective_reach'], md_cols | {'unified_reach', 'effective_reach'})}
 """)
 
     # --------------------------------------------------------------- 11 ----
@@ -1101,10 +1293,10 @@ silently vanishing from every denominator.</div>
 <div class="card">
   <p class="ct">What's in the directory</p>
   <p class="cs">{gk.get('entities_total', 0):,} distinct entities were resolved from
-  {gk.get('mentions_total', 0):,} NER + gazetteer mentions across the corpus
+  {gk.get('mentions_total', 0):,} Named Entity Recognition + gazetteer mentions across the corpus
   (model: <code>Babelscape/wikineural-multilingual-ner</code>, hybrid with a
   {esc(str(104))}-surface-form port/border/pipeline/railway gazetteer). Only
-  {gaz_pct} of mentions matched the gazetteer directly — the rest are model NER,
+  {gaz_pct} of mentions matched the gazetteer directly — the rest are model Named Entity Recognition,
   kept even when unresolved (never dropped). The directory below ships entities
   seen in <b>&ge;2 distinct posts</b> ({gk.get('entities_kept', 0):,} of
   {gk.get('entities_total', 0):,}); singleton mentions are counted in the totals
@@ -1116,7 +1308,7 @@ silently vanishing from every denominator.</div>
 <div class="caveat">
   <b>Verification status: PARTIAL / precision not measured.</b> The entity-extraction
   Implement stage finished after the independent verification pass had already run out
-  of time waiting on it (it was still mid-NER at check time), so no stratified sample
+  of time waiting on it (it was still mid-Named Entity Recognition at check time), so no stratified sample
   of real <code>entity_mentions</code> rows was read against source text — there is no
   measured precision figure for this table, only code-inspection risks: (1) several
   gazetteer surface forms are bare place names also used generically —
@@ -1239,7 +1431,7 @@ silently vanishing from every denominator.</div>
 <div class="card">
   <p class="ct">Timeline — where and when each grain crossed its baseline</p>
   <p class="cs">One swimlane per dimension: all 9 risk categories, all 12 themes, and
-  the top entities by alert count. Each dot is one FDR-gated day; colour + icon carry
+  the top entities by alert count. Each dot is one False Discovery Rate-gated day; colour + icon carry
   severity (never colour alone), matching the §2 severity legend. Hover any dot for the
   rationale string the alert actually fired on.</p>
   {'<div data-panel="geo_timeline"></div>' if have_geo['geo_alert_candidates'] else geo_awaiting('geo_alert_candidates')}
@@ -1253,7 +1445,7 @@ silently vanishing from every denominator.</div>
 """
     section(doc, "18", "geotimeline", "Timeline & alerts — entity / risk / theme",
             "“Timeline Analysis” applied to the geo-ontology dimensions: the "
-            "same FDR-gated surprise detector as §2, run per entity, per risk category "
+            "same False Discovery Rate-gated surprise detector as §2, run per entity, per risk category "
             "and per theme category.",
             timeline_body,
             badges='<span class="badge">verification: SOUND</span>')
@@ -1267,7 +1459,7 @@ silently vanishing from every denominator.</div>
          "whole corpus) is still an incoherent grab-bag under direct text sampling — "
          "the old failure mode, shrunk, not eliminated."),
         ("Entity extraction", "PARTIAL / unmeasured",
-         "20,347 posts NER'd, 110,983 mentions, 29,136 resolved entities — the "
+         "20,347 posts Named Entity Recognition'd, 110,983 mentions, 29,136 resolved entities — the "
          "Implement stage finished, but the verification pass ran out of time waiting "
          "on it and never read a single real mention against source text. No precision "
          "figure exists for this table yet; code-review-only risks are noted in §16."),
@@ -1293,7 +1485,7 @@ silently vanishing from every denominator.</div>
             f"<code>{esc(GEO_SPEC)}</code>.",
             f'<div class="card"><dl class="kv">{verdict_html}</dl></div>')
 
-    section(doc, "20", "livener", "Live NER",
+    section(doc, "20", "livener", "Live Named Entity Recognition",
             "Gemma domain routing and entity extraction over incoming posts, polled from the "
             "server while this tab is visible. New posts are routed first (priority), then the backlog.",
             '''<div class="card" id="live-ner" data-state="idle">
@@ -1395,7 +1587,7 @@ silently vanishing from every denominator.</div>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Social Signal Monitor</title>
+<title>Social Media Analytics Dashboard</title>
 <link rel="stylesheet" href="assets/dash.css">
 </head>
 <body>
@@ -1414,7 +1606,7 @@ silently vanishing from every denominator.</div>
 <header class="top">
   <div class="top-in">
     <div class="brand">
-      <h1>Social Signal Monitor</h1>
+      <h1>Social Media Analytics Dashboard</h1>
       <div class="sub">{esc(str(win.get('start'))[:10])} → {esc(str(win.get('end'))[:10])}
         · updated {esc(generated[:16].replace('T', ' '))} UTC</div>
     </div>
@@ -1431,11 +1623,11 @@ silently vanishing from every denominator.</div>
     </div>
   </div>
 </header>
+<div class="filters" id="global-filters">
+  <div class="filters-in" id="filters-in"></div>
+</div>
 <div id="basic-view">{basic_view_html}</div>
 <div class="wrap" id="advanced-view" style="display:none">
-  <div class="filters">
-    <div class="filters-in" id="filters-in"></div>
-  </div>
   {fixture_banner}
   <nav class="toc" aria-label="Sections">{toc}</nav>
   {doc.html()}
@@ -1461,7 +1653,7 @@ silently vanishing from every denominator.</div>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Social Signal Monitor</title>
+<title>Social Media Analytics Dashboard</title>
 <style>
 {css}
 </style>
@@ -1482,7 +1674,7 @@ silently vanishing from every denominator.</div>
 <header class="top">
   <div class="top-in">
     <div class="brand">
-      <h1>Social Signal Monitor</h1>
+      <h1>Social Media Analytics Dashboard</h1>
       <div class="sub">{esc(str(win.get('start'))[:10])} → {esc(str(win.get('end'))[:10])}
         · updated {esc(generated[:16].replace('T', ' '))} UTC</div>
     </div>
@@ -1499,11 +1691,11 @@ silently vanishing from every denominator.</div>
     </div>
   </div>
 </header>
+<div class="filters" id="global-filters">
+  <div class="filters-in" id="filters-in"></div>
+</div>
 <div id="basic-view">{basic_view_html}</div>
 <div class="wrap" id="advanced-view" style="display:none">
-  <div class="filters">
-    <div class="filters-in" id="filters-in"></div>
-  </div>
   {fixture_banner}
   <nav class="toc" aria-label="Sections">{toc}</nav>
   {doc.html()}

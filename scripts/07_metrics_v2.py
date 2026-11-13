@@ -115,7 +115,7 @@ PARAMS: dict = {
     "age_bands": [0.0, 0.5, 1.0, 2.0, 4.0, 7.0, 14.0, 30.0, 90.0],
     "virality_min_band_n": 20,
     # --- reach (F10) --------------------------------------------------
-    "channel_median_min_posts": 3,
+    "channel_median_min_others": 5,   # other view-bearing posts by the same author needed for a baseline
     # --- coordination -------------------------------------------------
     "coord_min_v": 10,
     "coord_max_diversity": 0.30,   # author_1_hhi = 1-HHI, low => concentrated
@@ -136,7 +136,7 @@ PARAMS: dict = {
 }
 
 STAGE_DIR = DATA_DIR / "metrics_stage"
-TS_PLATFORMS_EXCLUDE = set(TS_EXCLUDE_PLATFORMS) | {"youtube_comment"}
+TS_PLATFORMS_EXCLUDE = set(TS_EXCLUDE_PLATFORMS)   # YouTube comments are in the time series (see load_source)
 HASHTAG_RE = re.compile(r"#(\w{2,60})", re.UNICODE)
 LATIN_RE = re.compile(r"[a-z]")
 
@@ -196,22 +196,54 @@ def norm_text(t) -> str:
 
 
 def virality_ratio(platform: str, likes, comments, shares, views) -> float:
-    """Platform amplification ratio (v1 formulas retained — they were sound)."""
+    """Platform amplification and conversation ratio across all supported platforms."""
     lk = 0.0 if pd.isna(likes) else float(likes)
     cm = 0.0 if pd.isna(comments) else float(comments)
     sh = 0.0 if pd.isna(shares) else float(shares)
     vw = 0.0 if pd.isna(views) else float(views)
-    if platform == "telegram":
+
+    # 1. Video & View-centric platforms with direct views and shares
+    # NOTE: baidu_video excluded — DB shows 0 shares/likes/comments for all 240 posts;
+    # including it would collapse all percentiles to 0.0 (same Instagram issue). Returns NaN below.
+    if platform in ("telegram", "snapchat", "tiktok"):
         return sh / (vw + 1.0) if (vw or sh) else np.nan
-    if platform in ("instagram", "facebook"):
+
+    # 1b. Baidu Video: only view data exists; no interaction signals (shares/likes/comments = 0).
+    # Virality requires at least one interaction signal — return NaN (not rankable).
+    if platform == "baidu_video":
+        return np.nan
+
+    # 2. Twitter / X:
+    # If views are recorded (> 0): amplification per impression = shares / (views + 1)
+    # If views are missing (== 0): fallback = shares / (likes + comments + shares + 1)
+    # Stratified in age_conditional_percentile to eliminate bimodal rank distortion.
+    if platform == "twitter":
+        if vw > 0:
+            return sh / (vw + 1.0)
         d = lk + cm + sh
         return sh / (d + 1.0) if d else np.nan
+
+    # 3. Microblogging with shares but no views
+    if platform in ("truthsocial", "mastodon", "facebook", "facebook_profile"):
+        d = lk + cm + sh
+        return sh / (d + 1.0) if d else np.nan
+
+    # 4. YouTube Video (likes + comments per view)
     if platform == "youtube_video":
         return (lk + cm) / (vw + 1.0) if (vw or lk or cm) else np.nan
-    if platform == "linkedin":
+
+    # 5. Share-less / Discussion platforms (Instagram, LinkedIn, Baidu Tieba):
+    # CRITICAL PRODUCTION FIX: Shares are 0 across 100% of posts. Using shares collapsed all
+    # posts to the 50th percentile (0.50). Using Discussion Depth (comments / (likes + 1))
+    # correctly identifies posts with viral discussion velocity.
+    if platform in ("instagram", "linkedin", "baidu_tieba"):
         return cm / (lk + 1.0) if (lk or cm) else np.nan
-    if platform == "snapchat":
-        return sh / (vw + 1.0) if (vw or sh) else np.nan
+
+    # 6. YouTube Comments: likes normalized by sibling comments on the parent video
+    if platform == "youtube_comment":
+        sibling_n = cm  # repurposed slot passed from enrich_posts
+        return lk / (sibling_n + 1.0) if (lk or sibling_n) else np.nan
+
     return np.nan
 
 
@@ -238,20 +270,43 @@ def load_source() -> dict:
     else:
         topic_join = "post_topic pt USING (post_uid)"
     try:
+        # Rows = every post in post_facts  UNION ALL  every YouTube comment in comment_facts.
+        # A comment has no topic of its own: it inherits its PARENT VIDEO's topic (joined on
+        # platform = 'youtube_video' so a video_id can never match another platform's native_id).
+        # Comments carry only `likes` (no replies/shares/views), no NLP scores, no language column
+        # (lang stays NULL; 07 never reads it) and scrape_lag_days computed from the real timestamps.
+        # They get NO virality rule: virality_ratio() returns NaN for platform 'youtube_comment'.
         posts = con.execute(
             f"""
-            SELECT pf.post_uid, pf.platform, pf.author_uid, pf.author_name, pf.is_verified,
-                   pf.text, pf.lang, pf.posted_at, pf.scraped_at, pf.scrape_lag_days,
-                   pf.keyword, pf.hashtags, pf.likes, pf.comments, pf.shares, pf.views,
-                   pf.has_engagement,
-                   COALESCE(pt.topic_id,'unassigned') AS topic_id, pt.confidence,
-                   ps.tone_score, ps.tone_valid, ps.hate_score, ps.hate_valid,
-                   ps.readability_score, ps.readability_valid
-            FROM post_facts pf
-            LEFT JOIN {topic_join}
-            LEFT JOIN post_scores ps USING (post_uid)
-            ORDER BY pf.post_uid   -- row order fixes the float32 summation order: without it
-                                   -- two identical runs differ in the 7th digit
+            SELECT * FROM (
+                SELECT pf.post_uid, pf.platform, pf.author_uid, pf.author_name, pf.is_verified,
+                       pf.text, pf.lang, pf.posted_at, pf.scraped_at, pf.scrape_lag_days,
+                       pf.keyword, pf.hashtags, pf.likes, pf.comments, pf.shares, pf.views,
+                       pf.has_engagement, NULL::VARCHAR AS video_id,
+                       COALESCE(pt.topic_id,'unassigned') AS topic_id, pt.confidence,
+                       ps.tone_score, ps.tone_valid, ps.hate_score, ps.hate_valid,
+                       ps.readability_score, ps.readability_valid
+                FROM post_facts pf
+                LEFT JOIN {topic_join}
+                LEFT JOIN post_scores ps USING (post_uid)
+                UNION ALL
+                SELECT c.comment_uid AS post_uid, 'youtube_comment' AS platform,
+                       c.author_channel_id AS author_uid, c.author_display_name AS author_name,
+                       FALSE AS is_verified, c.text, NULL::VARCHAR AS lang, c.posted_at, c.scraped_at,
+                       CASE WHEN c.posted_at IS NOT NULL AND c.scraped_at IS NOT NULL
+                            THEN epoch(c.scraped_at - c.posted_at) / 86400.0 END AS scrape_lag_days,
+                       pf.keyword, NULL::VARCHAR AS hashtags, c.likes::DOUBLE AS likes,
+                       0::DOUBLE AS comments, 0::DOUBLE AS shares, NULL::DOUBLE AS views,
+                       TRUE AS has_engagement, c.video_id AS video_id,
+                       COALESCE(pt.topic_id,'unassigned') AS topic_id, pt.confidence,
+                       NULL::DOUBLE AS tone_score, FALSE AS tone_valid, NULL::DOUBLE AS hate_score,
+                       FALSE AS hate_valid, NULL::DOUBLE AS readability_score, FALSE AS readability_valid
+                FROM comment_facts c
+                JOIN post_facts pf ON c.video_id = pf.native_id AND pf.platform = 'youtube_video'
+                LEFT JOIN {topic_join}
+            ) u
+            ORDER BY post_uid   -- row order fixes the float32 summation order: without it
+                                -- two identical runs differ in the 7th digit
             """
         ).df()
         topic_dim = (con.execute("SELECT * FROM topic_dim").df() if not use_v4
@@ -285,6 +340,8 @@ def load_source() -> dict:
         log(f"WARN: {neg_lag} rows have negative scrape_lag_days (clock skew) -- "
             f"nulling scrape_lag_days for those rows rather than crashing")
     posts.loc[posts["scrape_lag_days"] < 0, "scrape_lag_days"] = np.nan
+    # Sanitize runaway epoch offsets (e.g. TikTok Unix epoch 1970 timestamp errors > 5000 days)
+    posts.loc[posts["scrape_lag_days"] > 5000, "scrape_lag_days"] = np.nan
 
     posts["posted_at"] = pd.to_datetime(posts["posted_at"], utc=True, errors="coerce")
     posts["scraped_at"] = pd.to_datetime(posts["scraped_at"], utc=True, errors="coerce")
@@ -377,16 +434,57 @@ def enrich_posts(posts: pd.DataFrame, P: dict) -> pd.DataFrame:
     p = posts.reset_index(drop=True).copy()
     p["E_sum"] = p[["likes", "comments", "shares", "views"]].fillna(0).sum(axis=1)
     p.loc[~p["has_engagement"].fillna(False), "E_sum"] = np.nan
+    # NOTE: E_sum above INCLUDES views (likes+comments+shares+views). `eng_sum` is interactions only
+    # (likes+comments+shares) and feeds engagement_proxy, so views never leak into the activity proxy.
+    p["eng_sum"] = p[["likes", "comments", "shares"]].fillna(0).sum(axis=1)
+    p.loc[~p["has_engagement"].fillna(False), "eng_sum"] = np.nan
+
+    # --- YouTube comment sibling-count injection (for virality_ratio Group 6) --------
+    # virality_ratio() for 'youtube_comment' uses the comments slot to carry the
+    # total number of sibling comments on the parent video.
+    if "video_id" in p.columns:
+        yt_mask = p["platform"] == "youtube_comment"
+        if yt_mask.any():
+            sibling_counts = (
+                p[yt_mask]
+                .groupby("video_id", dropna=True)["post_uid"]
+                .transform("count")
+            )
+            p["_yt_sibling_n"] = 0.0
+            p.loc[yt_mask, "_yt_sibling_n"] = sibling_counts.reindex(p.index[yt_mask]).fillna(0).values
+            log(f"  youtube_comment sibling counts: {int(p.loc[yt_mask, '_yt_sibling_n'].sum()):,} "
+                f"total sibling-slots across {yt_mask.sum():,} comment rows")
+        else:
+            p["_yt_sibling_n"] = 0.0
+    else:
+        p["_yt_sibling_n"] = 0.0
+
+    # For youtube_comment rows the comments argument passed to virality_ratio() is
+    # replaced by the sibling count; for all other platforms it stays as the real comment count.
+    yt_sibling = p["_yt_sibling_n"].to_numpy(dtype=float)
+    real_comments = p["comments"].to_numpy(dtype=float)
+    comments_arg = np.where(p["platform"].to_numpy() == "youtube_comment", yt_sibling, real_comments)
+
     p["virality_ratio"] = [
         virality_ratio(pl, lk, cm, sh, vw)
-        for pl, lk, cm, sh, vw in zip(p["platform"], p["likes"], p["comments"],
+        for pl, lk, cm, sh, vw in zip(p["platform"], p["likes"], comments_arg,
                                       p["shares"], p["views"])
     ]
+
+    # --- Stratified reference sets for empirical percentile ranking ---
+    # Twitter: evaluate tweets with views and tweets without views in separate reference sets
+    # to eliminate bimodal rank penalty where views-bearing tweets were penalized.
+    strat_platform = p["platform"].copy()
+    twitter_views = (p["platform"] == "twitter") & (p["views"].fillna(0) > 0)
+    twitter_noviews = (p["platform"] == "twitter") & (~twitter_views)
+    strat_platform.loc[twitter_views] = "twitter_views"
+    strat_platform.loc[twitter_noviews] = "twitter_noviews"
+
     # F9 — age-conditional empirical percentile
     pct, refn = S.age_conditional_percentile(
         p["virality_ratio"].to_numpy(dtype=float),
         p["scrape_lag_days"].to_numpy(dtype=float),
-        p["platform"].to_numpy(dtype=object),
+        strat_platform.to_numpy(dtype=object),
         bands=P["age_bands"],
         min_band_n=P["virality_min_band_n"],
     )
@@ -394,18 +492,16 @@ def enrich_posts(posts: pd.DataFrame, P: dict) -> pd.DataFrame:
     p["virality_ref_n"] = refn
 
     # F10 — reach normalised by channel median views
+    # Baseline = median views of the author's OTHER view-bearing posts (leave-one-out): the current
+    # post never influences its own baseline. Needs >= channel_median_min_others other posts, else NaN.
+    p = p.reset_index(drop=True)
     vw = p["views"].where(p["views"] > 0)
-    chan = (
-        p.assign(_v=vw).dropna(subset=["_v"])
-        .groupby(["platform", "author_uid"])["_v"]
-        .agg(["median", "count"])
-        .reset_index()
-    )
-    chan = chan[chan["count"] >= P["channel_median_min_posts"]]
-    chan = chan.rename(columns={"median": "chan_median_views"})[
-        ["platform", "author_uid", "chan_median_views"]
-    ]
-    p = p.merge(chan, on=["platform", "author_uid"], how="left").reset_index(drop=True)
+    p["chan_median_views"] = np.nan
+    _tmp = pd.DataFrame({"platform": p["platform"], "author_uid": p["author_uid"], "_v": vw}).dropna(subset=["_v"])
+    _big = _tmp.groupby(["platform", "author_uid"])["_v"].transform("size") > P["channel_median_min_others"]
+    for _, _g in _tmp[_big].groupby(["platform", "author_uid"]):
+        p.loc[_g.index, "chan_median_views"] = S.leave_one_out_median(
+            _g["_v"].to_numpy(), P["channel_median_min_others"])
     vw2 = p["views"].where(p["views"] > 0)
     p["reach_audience_norm_post"] = np.where(
         p["chan_median_views"].notna() & vw2.notna(),
@@ -491,13 +587,28 @@ def _finish_cells(base: pd.DataFrame) -> pd.DataFrame:
     base["readability_coverage"] = base["read_cov"]
     base["virality_pct_raw"] = base["vir_sum"] / base["vir_n"].replace(0, np.nan)
     base["reach_audience_norm"] = base["reach_norm_sum"] / base["reach_norm_n"].replace(0, np.nan)
+    # Two distinct quantities, never to be added or compared as one unit:
+    #   observed_views   = summed views (NaN where the cell has no view counter / zero views)
+    #   engagement_proxy = ln(1 + summed engagement), an ACTIVITY proxy, not audience
+    # reach_proxy is the legacy mixed column (views if any, else the log proxy); kept only for
+    # backward compatibility and deprecated -- use the two columns above.
+    base["observed_views"] = base["views_sum"].where(base["views_sum"].fillna(0) > 0)
+    base["engagement_proxy"] = np.log1p(base["eng_sum"].fillna(0))   # interactions only; NO views
+    # legacy mixed column: views if any, else ln(1 + E_sum) exactly as published before
     base["reach_proxy"] = np.where(
         base["views_sum"].fillna(0) > 0, base["views_sum"], np.log1p(base["E_sum"].fillna(0))
     )
     return base
 
 
-_W_COLS = ("tone_v", "hate_v", "read_v", "virality_pct_post", "views", "E_sum",
+def _ensure_eng_sum(posts: pd.DataFrame) -> pd.DataFrame:
+    """Frames built before `eng_sum` existed: E_sum includes views, so interactions = E_sum - views."""
+    if "eng_sum" in posts.columns:
+        return posts
+    return posts.assign(eng_sum=(posts["E_sum"] - posts["views"].fillna(0)).clip(lower=0))
+
+
+_W_COLS = ("tone_v", "hate_v", "read_v", "virality_pct_post", "views", "E_sum", "eng_sum",
            "reach_audience_norm_post", "confidence")
 
 
@@ -513,7 +624,7 @@ def _aggregate_cells_weighted(posts: pd.DataFrame, keys: list[str],
     unweighted rule on rows with w >= 0.5. Requires a `topic_rank` column.
     """
     W = "_w"
-    p = posts.assign(_w=posts[weight_col].astype(float))
+    p = _ensure_eng_sum(posts).assign(_w=posts[weight_col].astype(float))
     for c in _W_COLS:
         x = p[c].astype(float)
         p["_wx_" + c] = x * p[W]                         # NaN stays NaN (skipped by sum)
@@ -536,6 +647,7 @@ def _aggregate_cells_weighted(posts: pd.DataFrame, keys: list[str],
         vir_sum=("_wx_virality_pct_post", "sum"), vir_n=("_wn_virality_pct_post", "sum"),
         views_sum=("_wx_views", "sum"),
         E_sum=("_wx_E_sum", "sum"),
+        eng_sum=("_wx_eng_sum", "sum"),
         reach_norm_sum=("_wx_reach_audience_norm_post", "sum"),
         reach_norm_n=("_wn_reach_audience_norm_post", "sum"),
         conf_sum=("_wx_confidence", "sum"), conf_n=("_wn_confidence", "sum"),
@@ -570,6 +682,7 @@ def _aggregate_cells_weighted(posts: pd.DataFrame, keys: list[str],
 
 
 def _aggregate_cells_hard(posts: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
+    posts = _ensure_eng_sum(posts)
     g = posts.groupby(keys, dropna=False)
 
     def _sq(col):
@@ -585,6 +698,7 @@ def _aggregate_cells_hard(posts: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
         vir_sum=("virality_pct_post", "sum"), vir_n=("virality_pct_post", "count"),
         views_sum=("views", "sum"),
         E_sum=("E_sum", "sum"),
+        eng_sum=("eng_sum", "sum"),
         reach_norm_sum=("reach_audience_norm_post", "sum"),
         reach_norm_n=("reach_audience_norm_post", "count"),
         n_authors=("author_uid", "nunique"),

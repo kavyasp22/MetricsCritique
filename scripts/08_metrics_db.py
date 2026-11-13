@@ -85,7 +85,7 @@ def publish_optional_tables(con, stage: dict) -> dict[str, int]:
             con.register("_opt_df", df)
             con.execute(f'INSERT INTO "{t}" BY NAME SELECT * FROM _opt_df;')
             con.unregister("_opt_df")
-        rows[t] = con.execute(f'SELECT count(*) FROM "{t}"').fetchone()[0]
+        rows[t] = con.execute(f'SELECT count(*) FROM "{t}"').fetchall()[0][0]
     return rows
 
 
@@ -326,22 +326,41 @@ METRIC_META: list[dict] = [
                   "curve. Age = scrape_lag_days, bands 0/.5/1/2/4/7/14/30/90d, >=20 "
                   "observations per band or it falls back to the platform. reddit is NULL "
                   "(no engagement fields at all). Amplification ratio differs per platform, "
-                  "so only the percentile is cross-platform comparable."),
+                  "so compare the percentile only within a platform; across platforms it is "
+                  "indicative at best (platforms weight actions differently)."),
          support_gate=_GATE_N),
-    dict(metric_key="reach_proxy", display_name="Reach (proxy)", family="engagement",
-         formula="sum(views) where views exist, else sum(log1p(total engagement))",
-         units="views or log-engagement", grain=_CELL, direction="higher=wider reach",
+    dict(metric_key="observed_views", display_name="Observed views", family="engagement",
+         formula="sum(views) over the cell's posts, only where the cell has views > 0",
+         units="views", grain=_CELL, direction="higher=more observed impressions",
          higher_is_worse=None,
-         caveats="A PROXY. No follower counts exist anywhere in the source data.",
+         caveats=("Observed counter values only; NULL where the platform has no view counter. "
+                  "Not audience size (no follower counts exist) and not comparable with "
+                  "engagement_proxy."),
+         support_gate="views > 0"),
+    dict(metric_key="engagement_proxy", display_name="Engagement activity proxy", family="engagement",
+         formula="ln(1 + sum(likes + comments + shares))",
+         units="log-engagement", grain=_CELL, direction="higher=more interaction activity",
+         higher_is_worse=None,
+         caveats=("An ACTIVITY proxy, not audience reach. Different unit from observed_views: "
+                  "never add or compare the two."),
+         support_gate="none"),
+    dict(metric_key="reach_proxy", display_name="Reach (proxy, legacy mixed)", family="engagement",
+         formula="sum(views) where views exist, else ln(1 + sum(likes+comments+shares))",
+         units="views or log-engagement (MIXED UNITS)", grain=_CELL, direction="higher=wider reach",
+         higher_is_worse=None,
+         caveats=("DEPRECATED: mixes two units in one column. Use observed_views and "
+                  "engagement_proxy. A PROXY; no follower counts exist in the source data."),
          support_gate="none"),
     dict(metric_key="reach_audience_norm", display_name="Audience-normalised reach",
          family="engagement",
-         formula="mean over posts of views / median views of that channel (>=3 posts)",
+         formula=("mean over posts of views / median views of the same author's OTHER posts "
+                  "(leave-one-out; needs >=5 other view-bearing posts)"),
          units="ratio to channel median", grain=_CELL,
          direction="higher=outperformed its own channel", higher_is_worse=None,
-         caveats=("F10. Available only where views exist and the channel has >=3 view-bearing "
-                  "posts: 27 telegram channels and 160 youtube channels. Still a proxy."),
-         support_gate="channel median available"),
+         caveats=("F10. The post itself is excluded from its own baseline. Available only where views "
+                  "exist and the author has >=5 OTHER view-bearing posts (mostly Telegram and "
+                  "Twitter; thin for Snapchat, TikTok and YouTube). Still a proxy."),
+         support_gate="author baseline available (>=5 other view-bearing posts)"),
     # ---- diversity / coordination ----------------------------------------
     dict(metric_key="author_entropy", display_name="Author entropy", family="diversity",
          formula="Shannon entropy of the author post-count distribution in the cell",
@@ -528,6 +547,7 @@ def build_report(stage: dict[str, pd.DataFrame], params: dict, db_rows: dict) ->
                     ("days_to_threshold", "after crossing"), ("emergence_score", "F3"),
                     ("tone_eb", "tone_n>0"), ("hate_eb", "hate_n>0 (uncalibrated)"),
                     ("virality_pct", "vir_n>0"), ("reach_proxy", "none"),
+                    ("observed_views", "views>0"), ("engagement_proxy", "none"),
                     ("reach_audience_norm", "channel median"),
                     ("author_entropy", "V>0"), ("readability_mean", "read_n>0")]:
         if c in iw.columns:
@@ -867,7 +887,7 @@ def main() -> int:
             con.execute(f'DROP TABLE IF EXISTS "{t}";')
             con.execute(f'CREATE TABLE "{t}" AS SELECT * FROM _stage_df;')
             con.unregister("_stage_df")
-            db_rows[t] = con.execute(f'SELECT count(*) FROM "{t}"').fetchone()[0]
+            db_rows[t] = con.execute(f'SELECT count(*) FROM "{t}"').fetchall()[0][0]
             mirror_parquet(t, df)
             log(f"  published {t:20s} rows={db_rows[t]:>7,}  -> duckdb + parquet_metrics/")
         for t, n in publish_optional_tables(con, stage).items():

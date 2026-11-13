@@ -72,6 +72,19 @@ then global) mean:
 ```
 Report `*_eb` as the publishable value, keeping the raw `*_mean` and `n` visible.
 
+**Model and references.** This is the posterior mean of a normal-normal model: group means
+`x̄ᵢ ~ N(θᵢ, σ²/nᵢ)`, `θᵢ ~ N(μ_parent, τ²)`, so `θ̂ᵢ = μ + (nᵢ/(nᵢ+k))(x̄ᵢ − μ)` with
+`k = σ²/τ²`. Unit of shrinkage: one cell mean (topic × platform × day for `metrics_daily`; tag ×
+platform × day for tags). `σ²` is the pooled within-cell variance; `τ²` is a DerSimonian–Laird
+moment estimate across cells (`stats_v2.estimate_eb_k`); a non-positive `τ²` gives a large `k`
+(full shrinkage). Parent mean: the cell's topic/tag group, then the platform, then the global
+mean (a parent needs ≥ `eb_min_parent_n` observations). The published `k`/`τ²` per family are in
+`run_meta.params_json → eb_diagnostics`. Foundation: Efron & Morris (1973), *J. American
+Statistical Association* 68(341):117–130 — empirical-Bayes shrinkage toward a common mean with the
+prior variance estimated from the data. That paper treats equal variances and one grand mean; the
+unequal-n estimator and the hierarchical parent are project choices. Tests:
+`scripts/tests/test_eb_shrink.py`.
+
 ### F6 — Multiple-testing control (directly enables alerting)
 The panel produces hundreds of daily tests. Convert surprise p-values to
 **Benjamini–Hochberg q-values** per day, and set `alert_flag = q < 0.05`. This gives
