@@ -19,6 +19,7 @@ Writes (sole writer this stage, opened only for the final publish):
   - `UI/data/geo_alerts.json`.
 
 Window discipline: identical reasoning to 07_metrics_v2.py PARAMS.window_start.
+Day rule: posted_at, falling back to scraped_at (as in 07).
 `post_facts.posted_at` runs back to 2011 (youtube_video historical backfill).
 Reindexing any of these series over that full calendar would reproduce the D1
 zero-inflation pathology stats_v2's self-checks exist to catch (see
@@ -110,15 +111,20 @@ def load_source() -> dict:
     con = duckdb.connect(str(DUCKDB_PATH), read_only=True)
     try:
         posts = con.execute(
-            "SELECT post_uid, platform, author_uid, posted_at FROM post_facts"
+            "SELECT post_uid, platform, author_uid, posted_at, scraped_at FROM post_facts"
         ).df()
     finally:
         con.close()
     n0 = len(posts)
     posts["posted_at"] = pd.to_datetime(posts["posted_at"], utc=True, errors="coerce")
-    posts = posts[posts["posted_at"].notna()].copy()
-    posts["day"] = posts["posted_at"].dt.date
-    log(f"post_facts: {n0:,} rows, {len(posts):,} with a usable posted_at")
+    # Same day rule as 07_metrics_v2: posted_at, else the scrape date (the day we observed the post).
+    posts["scraped_at"] = pd.to_datetime(posts["scraped_at"], utc=True, errors="coerce")
+    n_posted = int(posts["posted_at"].notna().sum())
+    posts["day_ts"] = posts["posted_at"].fillna(posts["scraped_at"])
+    posts = posts[posts["day_ts"].notna()].copy()
+    posts["day"] = posts["day_ts"].dt.date
+    log(f"post_facts: {n0:,} rows, {n_posted:,} with posted_at, {len(posts) - n_posted:,} use the scrape date, "
+        f"{n0 - len(posts):,} dropped (no date)")
 
     log(f"opening {GEO_DB} READ-ONLY (pre-existing tables from earlier stages)")
     con = duckdb.connect(str(GEO_DB), read_only=True)
@@ -709,6 +715,8 @@ def main() -> int:
             con.execute(f'CREATE TABLE "{name}" AS SELECT * FROM _stage_df;')
             con.unregister("_stage_df")
             db_rows[name] = con.execute(f'SELECT count(*) FROM "{name}"').fetchone()[0]
+            # Alternative (same result), kept in case it is needed:
+            # db_rows[name] = con.execute(f'SELECT count(*) FROM "{name}"').fetchall()[0][0]
         con.execute("COMMIT;")
     except Exception:
         con.execute("ROLLBACK;")
