@@ -154,7 +154,10 @@ METRIC_META: list[dict] = [
     dict(metric_key="momentum", display_name="Momentum", family="growth",
          formula="EMA_7(growth) - EMA_21(growth)", units="log rate per day", grain=_CELL,
          direction="higher=short-term outpacing long-term", higher_is_worse=None,
-         caveats="sensitive to span choice (corr 0.98 across 5/14 and 10/28 variants)",
+         caveats=("describes the recent direction of volume; it is NOT a forecast. Measured on the 26 Oct "
+                  "snapshot: corr +0.72 with same-day growth but -0.35 with the next 7 days (daily growth "
+                  "reverses). Project-defined moving-average formula, no paper. Insensitive to span choice "
+                  "(corr 0.98 across 5/14 and 10/28 variants); see reports/CORE_SIGNAL_CHECKS.md"),
          support_gate=_GATE_F3),
     # ---- acceleration family (spec section 3) -----------------------------
     dict(metric_key="accel", display_name="Acceleration (raw)", family="acceleration",
@@ -181,7 +184,10 @@ METRIC_META: list[dict] = [
          units="0/1", grain=_CELL, direction="1=bursting", higher_is_worse=True,
          caveats=("run on raw counts (Kleinberg needs integer counts), so a rising collector "
                   "ramp can inflate late-window burst states; the CUSUM path uses a trailing "
-                  "effort-adjusted baseline and does not have this problem"),
+                  "effort-adjusted baseline and does not have this problem. Parameter sensitivity "
+                  "(26 Oct snapshot): burst days overlap 0.89-0.91 with the default when gamma is "
+                  "halved or doubled, but only 0.77 at s=1.5 and 0.70 at s=3, so the burst count "
+                  "depends on s"),
          support_gate=_GATE_SERIES),
     dict(metric_key="burst_intensity", display_name="Burst intensity", family="acceleration",
          formula=("Kleinberg: log p(x|lambda1) - log p(x|lambda0) clipped at 0. "
@@ -241,7 +247,9 @@ METRIC_META: list[dict] = [
                   "trailing 28 days EXCLUDING the current day, with a method-of-moments "
                   "theta fallback and a Poisson fallback when theta is unidentifiable. "
                   "Overdispersion is honest but self-masking: a baseline that already "
-                  "contains spikes inflates 1/theta and depresses surprise."),
+                  "contains spikes inflates 1/theta and depresses surprise. Weekday pattern: no explicit "
+                  "weekday term; the effort offset absorbs most of it (weekend/weekday median ratio 0.73 raw "
+                  "-> 0.88 after the offset, snapshot 26 Oct), leaving about 12% residual."),
          support_gate=_GATE_F3),
     dict(metric_key="surprise_p", display_name="Exceedance p-value", family="intensity",
          formula="P(X >= V | fitted count baseline), exact discrete upper tail",
@@ -260,7 +268,9 @@ METRIC_META: list[dict] = [
     dict(metric_key="alert_flag", display_name="Intensity alert", family="intensity",
          formula="surprise_q < 0.05", units="boolean", grain=_CELL,
          direction="true=unusually intense", higher_is_worse=True,
-         caveats="calibrated false-discovery rate, not an arbitrary z cutoff (F6)",
+         caveats=("false-discovery-rate threshold, not an arbitrary z cutoff (F6). Under the stricter "
+                  "Benjamini-Yekutieli correction (for dependent tests) about 58% of alerts survive "
+                  "(49 vs 85, snapshot 26 Oct): treat alerts as leads to check, not confirmed events"),
          support_gate=_GATE_F3),
     dict(metric_key="baseline_mu", display_name="Baseline expected count", family="intensity",
          formula="trailing NB mean, rescaled by effort_t / mean(effort over baseline)",
