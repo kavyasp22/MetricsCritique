@@ -578,5 +578,91 @@ def test_reach_formulas_documented_in_code(m7):
     assert o.reach_audience_norm[0] == pytest.approx(2.0)
 
 
+# --------------------------------------------------------------------------- 9. semantic tier (script 20)
+@pytest.fixture(scope="module")
+def m20():
+    spec = importlib.util.spec_from_file_location("m20", ROOT / "scripts" / "20_semantic_cross_platform.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@needs_metrics
+def test_semantic_tables_invariants(mdb, m20):
+    ev = mdb.execute("SELECT * FROM cross_platform_semantic_events").fetchdf()
+    po = mdb.execute("SELECT * FROM cross_platform_semantic_posts").fetchdf()
+    assert len(ev) > 0 and ev.event_id.is_unique
+    assert (ev.n_platforms >= 2).all() and (ev.n_posts >= 2).all()
+    assert (ev.n_unique_posts <= ev.n_posts).all() and (ev.n_unique_posts >= ev.n_platforms).all()
+    assert (ev.min_sim >= m20.SIM_THRESHOLD - 1e-6).all() and (ev.min_sim <= ev.mean_sim + 1e-9).all()
+    assert (ev.loc[ev.match_confidence == "high", "min_sim"] >= m20.SIM_HIGH - 1e-6).all()
+    # min_sim is stored rounded to 3 decimals; confidence was decided on the unrounded value
+    assert (ev.loc[ev.match_confidence == "medium", "min_sim"] <= m20.SIM_HIGH + 0.0006).all()
+    assert set(ev.match_confidence) <= {"high", "medium"}
+    assert (ev.spread_duration_hours >= 0).all() and (ev.observed_views >= 0).all()
+    assert set(po.event_id) == set(ev.event_id)
+    n = po.groupby("event_id").size().reindex(ev.event_id).to_numpy()
+    assert (n == ev.n_posts.to_numpy()).all()
+    npl = po.groupby("event_id").platform.nunique().reindex(ev.event_id).to_numpy()
+    assert (npl == ev.n_platforms.to_numpy()).all()
+
+
+@needs_metrics
+@needs_analytics
+def test_semantic_events_really_connected_by_embedding_similarity(mdb, m20):
+    """Recompute cosine similarity from the stored embeddings for a random sample of events: every
+    event must be connected by cross-platform, non-identical, in-window pairs >= the threshold."""
+    import duckdb
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    ev = mdb.execute("SELECT event_id, min_sim FROM cross_platform_semantic_events").fetchdf().sample(25, random_state=0)
+    po = mdb.execute("SELECT * FROM cross_platform_semantic_posts WHERE event_id IN (SELECT unnest(?))",
+                     [ev.event_id.tolist()]).fetchdf()
+    con = duckdb.connect(str(ANALYTICS), read_only=True)
+    try:
+        con.register("want", po[["post_uid"]])
+        txt = con.execute("SELECT p.post_uid, p.platform, p.posted_at, p.text FROM post_facts p "
+                          "JOIN want USING (post_uid)").fetchdf().set_index("post_uid")
+        emb = con.execute("SELECT e.post_uid, e.embedding FROM post_embeddings e JOIN want USING (post_uid)").fetchdf()
+    finally:
+        con.close()
+    vec = {r.post_uid: np.asarray(r.embedding, dtype=np.float32) for r in emb.itertuples()}
+    for eid, x in po.groupby("event_id"):
+        uids = [u for u in x.post_uid if u in vec]
+        assert len(uids) >= 2
+        ct = {u: " ".join(str(txt.loc[u, "text"]).lower().split()) for u in uids}
+        M = np.stack([vec[u] / np.linalg.norm(vec[u]) for u in uids])
+        S = M @ M.T
+        pl = np.array([txt.loc[u, "platform"] for u in uids]); ts = np.array([txt.loc[u, "posted_at"] for u in uids])
+        n = len(uids)
+        ok = np.zeros((n, n), bool)
+        for i in range(n):
+            for j in range(i + 1, n):
+                if (S[i, j] >= m20.SIM_THRESHOLD - 1e-4 and pl[i] != pl[j] and ct[uids[i]] != ct[uids[j]]
+                        and abs((ts[i] - ts[j]).total_seconds()) <= (m20.WINDOW_DAYS + 1) * 86400):
+                    ok[i, j] = True
+        # posts sharing (platform, text) belong together: join them to the same node
+        key = {u: (pl[i], ct[u]) for i, u in enumerate(uids)}
+        for i in range(n):
+            for j in range(i + 1, n):
+                if key[uids[i]] == key[uids[j]]:
+                    ok[i, j] = True
+        k, _ = connected_components(coo_matrix(ok | ok.T), directed=False)
+        assert k == 1, f"event {eid} is not connected by embedding similarity >= {m20.SIM_THRESHOLD}"
+
+
+@needs_analytics
+def test_semantic_tier_excludes_identical_text_and_same_platform(m20):
+    """The tier must add evidence beyond the exact-text tier: no edge joins identical cleaned texts or
+    two posts of the same platform."""
+    import contextlib
+    import io
+    with contextlib.redirect_stdout(io.StringIO()):
+        ev, po = m20.compute_semantic_events(verbose=False)
+    assert len(ev) > 0 and (ev.n_platforms >= 2).all()
+    assert ev.same_account_name.mean() < 0.2        # mostly different accounts (unlike the exact-text tier)
+    assert ev.large_event.sum() < 0.05 * len(ev)
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

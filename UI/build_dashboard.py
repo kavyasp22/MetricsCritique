@@ -315,8 +315,16 @@ def load_from_duckdb(path: Path, log) -> tuple[dict, list[str]]:
             tables["cross_platform_url_links"] = df
             found.append("cross_platform_url_links")
             log(f"  {'cross_platform_url_links':22s} {len(df):8,d} rows x {len(df.columns):2d} cols")
+        if "cross_platform_semantic_events" in present:
+            df = con.execute('SELECT * FROM "cross_platform_semantic_events" '
+                             'ORDER BY n_platforms DESC, n_unique_posts DESC').fetchdf()
+            tables["cross_platform_semantic_events"] = df
+            found.append("cross_platform_semantic_events")
+            log(f"  {'cross_platform_semantic_events':22s} {len(df):8,d} rows x {len(df.columns):2d} cols")
         extra = sorted(present - set(CONTRACT) - {"cross_platform_stories", "cross_platform_posts",
-                                                  "cross_platform_url_links", "cross_platform_url_posts"})
+                                                  "cross_platform_url_links", "cross_platform_url_posts",
+                                                  "cross_platform_semantic_events",
+                                                  "cross_platform_semantic_posts"})
         if extra:
             log(f"  (non-contract tables present, ignored: {', '.join(extra)})")
         return tables, found
@@ -1108,6 +1116,19 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
   link, where the destination is not visible and most cases are one news aggregator posting the
   same item on two platforms, so treat them as one source, not independent spread.</p>
   <div class="plot" data-panel="cross_platform_urls"></div>
+</div>
+<div class="card">
+  <p class="ct">Cross-Platform Events (Semantic) <span class="badge gray">preliminary</span></p>
+  <p class="cs"><b>Preliminary.</b> Links posts on <b>different platforms that say the same thing in
+  different words or languages</b>, using the stored BGE-M3 meaning embeddings: cosine similarity
+  at least 0.85, posted within 3 days of each other, identical text excluded (that is the exact-text
+  table above). Connected posts form an <b>event</b>. Unlike the exact-text table, most events here
+  involve <b>different accounts</b>, so they show real spread of one story. Precision was judged by
+  hand on 40 random pairs (all were the same event) and has not been independently reviewed;
+  similarity below 0.80 was not tested. <b>High</b> = every link in the event is at least 0.90;
+  <b>medium</b> = some links are 0.85 to 0.90. Events with more than 30 distinct texts are marked
+  <b>large</b>: they may merge several related stories. Observed views only, no estimates.</p>
+  <div class="plot" data-panel="cross_platform_events"></div>
 </div>
 {metric_bullets(meta, ['virality_pct', 'reach_proxy', 'reach_audience_norm', 'unified_reach', 'effective_reach'], md_cols | {'unified_reach', 'effective_reach'})}
 """)

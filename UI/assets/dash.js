@@ -2179,6 +2179,52 @@
       label: 'Medium confidence — shortened links (' + med.length + '), mostly one aggregator' });
   };
 
+  /* ---- 10e. Cross-platform events (semantic tier, preliminary) ---- */
+  P.cross_platform_events = function (host) {
+    var evs = T('cross_platform_semantic_events');
+    if (!evs || !evs.length) {
+      empty(host, 'No semantic cross-platform events in the current dataset (the semantic tier has not been published).');
+      return;
+    }
+    var rows = evs.filter(function (s) {
+      var plist = Array.isArray(s.platforms) ? s.platforms : [s.platforms];
+      return plist.some(function (p) { return S.platforms[p]; });
+    }).map(function (s) {
+      var plist = Array.isArray(s.platforms) ? s.platforms : [s.platforms];
+      return {
+        event_id: s.event_id, conf: s.match_confidence, large: !!s.large_event,
+        origin: s.origin_platform, platforms: plist.join(', '), nplat: s.n_platforms,
+        posts: s.n_unique_posts, all_posts: s.n_posts, authors: s.n_authors,
+        who: s.same_account_name === true ? 'Same account name (cross-posting)' : 'Different accounts',
+        views: s.observed_views, sim: s.min_sim,
+        first_seen: s.origin_time ? String(s.origin_time).split(' ')[0] : '—',
+        snippet: (s.large_event ? '[large event] ' : '') + (s.snippet || '')
+      };
+    });
+    if (!rows.length) { empty(host, 'No semantic cross-platform events in this platform selection.'); return; }
+    var cols = [
+      { k: 'origin', label: 'Earliest Observed Platform', strong: true },
+      { k: 'platforms', label: 'Platforms' },
+      { k: 'who', label: 'Who Posted' },
+      { k: 'posts', label: 'Unique Posts (1 per author & platform)', num: true, fmt: fmtInt },
+      { k: 'authors', label: 'Authors', num: true, fmt: fmtInt },
+      { k: 'views', label: 'Observed Views', num: true, fmt: function (v) { return v ? fmtCompact(v) : '—'; } },
+      { k: 'sim', label: 'Weakest Link (similarity)', num: true, fmt: function (v) { return v == null ? '—' : v.toFixed(2); } },
+      { k: 'first_seen', label: 'Earliest Observed Post' },
+      { k: 'snippet', label: 'First Post (sample)', wrap: true }
+    ];
+    function drill(r) {
+      return { view: 'cross_platform_event', params: { event_id: r.event_id },
+        title: 'Semantic event (' + r.conf + '): ' + r.platforms };
+    }
+    var high = rows.filter(function (r) { return r.conf === 'high'; });
+    var med = rows.filter(function (r) { return r.conf !== 'high'; });
+    tableView(host, cols, high, { open: true, rowDrill: drill, max: 300,
+      label: 'High confidence — every link at least 0.90 (' + high.length + ') — click a row to inspect all posts' });
+    tableView(host, cols, med, { open: false, rowDrill: drill, max: 300,
+      label: 'Medium confidence — some links 0.85 to 0.90 (' + med.length + ')' });
+  };
+
   /* ---- 11. Authors & coordination ---- */
   P.authors_scatter = function (host) {
     var pts = F.md.filter(function (r) { return isNum(r.author_1_hhi) && isNum(r.n_authors); })

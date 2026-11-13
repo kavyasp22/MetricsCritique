@@ -231,6 +231,19 @@ def build_query(view: str, qs: dict):
         """
         return sql, [link_id]
 
+    if view == "cross_platform_event":
+        event_id = qs.get("event_id", [None])[0]
+        if not event_id:
+            raise ValueError("event_id required")
+        sql = f"""
+            SELECT {POST_COLS}, count(*) OVER () AS total_rows
+            FROM metrics.cross_platform_semantic_posts cp
+            JOIN analytics.post_facts p ON p.post_uid = cp.post_uid
+            WHERE cp.event_id = ?
+            ORDER BY p.posted_at ASC
+        """
+        return sql, [event_id]
+
     if view == "entity":
         entity_uid = qs.get("entity_uid", [None])[0]
         if not entity_uid:
@@ -725,7 +738,7 @@ class Handler(SimpleHTTPRequestHandler):
                     cols = [c for c in rows.columns if c != "total_rows"]
                     records = rows[cols].to_dict(orient="records")
                     related = None
-                    if view not in ("cross_platform", "cross_platform_url"):
+                    if view not in ("cross_platform", "cross_platform_url", "cross_platform_event"):
                         try:
                             seed = min((r["post_uid"] for r in records), default=None) if records else None
                             related = compute_related(cur, view, qs, seed)
