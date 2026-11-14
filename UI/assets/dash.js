@@ -4299,23 +4299,23 @@
       {
         icon: '📈',
         title: '2. Activity & Virality',
-        subtitle: 'Volume & growth · Intensity · Persistence · Virality & reach',
+        subtitle: 'Volume & growth · Intensity · Persistence · Virality & reach · Author diversity · Readability',
         metrics: [
           { id: 'volume', label: '5. Volume & growth' },
           { id: 'intensity', label: '6. Intensity & surprise' },
           { id: 'persistence', label: '7. Persistence' },
-          { id: 'virality', label: '10. Virality & reach' }
+          { id: 'virality', label: '10. Virality & reach' },
+          { id: 'authors', label: '11. Author diversity & coordination' },
+          { id: 'readability', label: '12. Readability' }
         ]
       },
       {
         icon: '👥',
-        title: '3. Behaviour & Content',
-        subtitle: 'Tone · Hate/toxicity · Author diversity · Readability',
+        title: '3. Sentiment Analysis',
+        subtitle: 'Tone · Net sentiment score · Tone drift · Hate/toxicity (uncalibrated)',
         metrics: [
           { id: 'tone', label: '8. Tone' },
-          { id: 'hate', label: '9. Hate / toxicity' },
-          { id: 'authors', label: '11. Author diversity & coordination' },
-          { id: 'readability', label: '12. Readability' }
+          { id: 'hate', label: '9. Hate / toxicity' }
         ]
       },
       {
