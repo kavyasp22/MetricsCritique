@@ -2118,7 +2118,7 @@
       return { label: p, value: b.s,
         rows: [{ k: 'Observed views', color: K.focal, v: fmtCompact(b.s) },
           { k: 'cells', v: fmtInt(b.n) },
-          { k: metaName('reach_audience_norm'), v: b.ann ? fmt(b.an / b.ann, 2) + '×' : 'n/a (Telegram only)' }],
+          { k: metaName('reach_audience_norm'), v: b.ann ? fmt(b.an / b.ann, 2) + '×' : 'n/a (no author baseline)' }],
         note: 'Observed view-counter values only; platforms without a view counter are not shown.',
         drill: { view: 'platform', params: { platform: p }, title: p + ' — recent posts' } };
     }).sort(function (a, b) { return b.value - a.value; });
@@ -2150,22 +2150,15 @@
     var tableRows = filtered.slice(0, 35).map(function (s) {
       var plist = Array.isArray(s.platforms) ? s.platforms : [s.platforms];
       var dests = plist.filter(function (p) { return p !== s.origin_platform; });
-      var bMult = s.breadth_multiplier || (1.0 + 0.5 * (s.n_platforms - 1));
-      var uReach = s.unified_reach != null ? s.unified_reach : (s.total_views || 0);
-      var effReach = s.effective_reach != null ? s.effective_reach : (uReach * bMult);
       return {
         story_id: s.story_id,
         origin: s.origin_platform,
         destinations: dests.length ? dests.join(', ') : plist.join(', '),
         breadth: s.n_platforms,
-        breadth_multiplier: bMult,
         posts: s.n_posts,
         observed_views: s.observed_views != null ? s.observed_views : null,
-        imputed_views: s.imputed_views != null ? s.imputed_views : null,
-        ratio_source: s.ratio_source || '—',
+        viewless_engagement: s.viewless_engagement != null ? s.viewless_engagement : null,
         same_account: s.same_account_name === true ? 'Same account name (cross-posting)' : (s.same_account_name === false ? 'Different accounts' : '—'),
-        unified_reach: uReach,
-        effective_reach: effReach,
         lag: (s.spread_duration_hours != null ? s.spread_duration_hours + 'h' : '—'),
         snippet: s.snippet,
         first_seen: s.origin_time ? s.origin_time.split(' ')[0] : '—',
@@ -2180,22 +2173,19 @@
       { k: 'breadth', label: 'Breadth', num: true, fmt: function (v) { return v + ' platforms'; } },
       { k: 'posts', label: 'Total Posts', num: true, fmt: fmtInt },
       { k: 'observed_views', label: 'Observed Views', num: true, fmt: function (v) { return v == null ? '—' : fmtCompact(v); } },
-      { k: 'imputed_views', label: 'Estimated Views (experimental)', num: true, fmt: function (v) { return v == null ? '—' : fmtCompact(v); } },
-      { k: 'ratio_source', label: 'Estimate Basis' },
-      { k: 'unified_reach', label: 'Observed + Estimated (experimental)', num: true, fmt: fmtCompact },
-      { k: 'effective_reach', label: 'Breadth-weighted Index (experimental)', num: true, fmt: function (v, r) { return fmtCompact(v) + ' (' + (r.breadth_multiplier ? r.breadth_multiplier + 'x' : '1.0x') + ')'; } },
+      { k: 'viewless_engagement', label: 'Interactions on Posts Without a View Counter', num: true, fmt: function (v) { return v == null ? '—' : fmtCompact(v); } },
       { k: 'lag', label: 'Spread Lag' },
       { k: 'first_seen', label: 'Earliest Observed Post' },
       { k: 'origin_lag', label: 'Its Scrape Lag (days)', num: true, fmt: function (v) { return v == null ? '—' : v; } },
       { k: 'snippet', label: 'Narrative Message Sample', wrap: true }
     ], tableRows, {
       open: true,
-      label: 'Top Multi-Platform Narratives — observed views, with experimental estimates (' + tableRows.length + ' stories) — click any story to inspect all posts across platforms',
+      label: 'Top Multi-Platform Narratives — observed views only, no estimates (' + tableRows.length + ' stories) — click any story to inspect all posts across platforms',
       rowDrill: function (r) {
         return {
           view: 'cross_platform',
           params: { story_id: r.story_id },
-          title: 'Narrative Spread (earliest observed: ' + r.origin + ') → ' + r.destinations + ' (' + r.posts + ' posts · ' + fmtCompact(r.unified_reach) + ' reach)'
+          title: 'Narrative Spread (earliest observed: ' + r.origin + ') → ' + r.destinations + ' (' + r.posts + ' posts · ' + fmtCompact(r.observed_views || 0) + ' observed views)'
         };
       }
     });

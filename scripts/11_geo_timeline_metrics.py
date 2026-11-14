@@ -714,9 +714,9 @@ def main() -> int:
             con.execute(f'DROP TABLE IF EXISTS "{name}";')
             con.execute(f'CREATE TABLE "{name}" AS SELECT * FROM _stage_df;')
             con.unregister("_stage_df")
-            db_rows[name] = con.execute(f'SELECT count(*) FROM "{name}"').fetchone()[0]
-            # Alternative (same result), kept in case it is needed:
-            # db_rows[name] = con.execute(f'SELECT count(*) FROM "{name}"').fetchall()[0][0]
+            # fetchall() finishes the result; fetchone() leaves it open and the next register() then fails
+            # with ResourceInUseException (DuckDB version in .venv).
+            db_rows[name] = con.execute(f'SELECT count(*) FROM "{name}"').fetchall()[0][0]
         con.execute("COMMIT;")
     except Exception:
         con.execute("ROLLBACK;")

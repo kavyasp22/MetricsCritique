@@ -869,6 +869,45 @@ def leave_one_out_median(values: Sequence[float], min_others: int = 5) -> np.nda
     return out
 
 
+def thin_author_baseline_log(log_values: Sequence[float], authors: Sequence, *, min_others: int = 5
+                             ) -> tuple[np.ndarray, float, float]:
+    """Shrunk leave-one-out baseline (log scale) for authors with 1..min_others-1 OTHER posts.
+
+    For a post by an author with m other posts (1 <= m < min_others) the baseline is the empirical-Bayes
+    estimate  (m * mean(log others) + k * platform mean) / (m + k)  (Efron & Morris 1973), with
+    k = within-author variance / between-author variance (DerSimonian-Laird, `estimate_eb_k`).
+    The post's own value never enters its author term. The platform mean and k are estimated on every post of
+    the platform, so a post touches its own baseline only through them (an effect of order 1/N). Posts of other authors (m == 0 or m >= min_others)
+    get NaN: the caller keeps the existing leave-one-out median for m >= min_others, and no baseline for m == 0.
+    Returns (baseline_log, k, tau2).  All inputs are for ONE platform.
+    """
+    lv = np.asarray(log_values, dtype=float)
+    a = pd.Series(np.asarray(authors, dtype=object))
+    out = np.full(lv.shape, np.nan)
+    ok = np.isfinite(lv)
+    df = pd.DataFrame({"a": a.to_numpy(), "lv": lv})[ok]
+    if len(df) < 3:
+        return out, np.nan, np.nan
+    g = df.groupby("a")["lv"]
+    n, tot = g.transform("size").to_numpy(float), g.transform("sum").to_numpy(float)
+    am = g.agg("mean"); an = g.agg("size")
+    multi = an >= 2
+    if multi.sum() < 2:
+        return out, np.nan, np.nan
+    dev = (df["lv"].to_numpy() - g.transform("mean").to_numpy())[(n >= 2)]
+    within = float((dev ** 2).sum() / max(len(dev) - int(multi.sum()), 1))
+    k, tau2 = estimate_eb_k(am[multi].to_numpy(), an[multi].to_numpy(), within)
+    mu = float(df["lv"].mean())
+    m = n - 1.0
+    loo = np.where(m > 0, (tot - df["lv"].to_numpy()) / np.where(m > 0, m, 1.0), np.nan)
+    thin = (m >= 1) & (m < min_others)
+    res = (m * loo + k * mu) / (m + k)
+    sub = np.full(len(df), np.nan)
+    sub[thin] = res[thin]
+    out[np.flatnonzero(ok)] = sub
+    return out, float(k), float(tau2)
+
+
 def prior_window_drift(
     values: Sequence[float],
     counts: Sequence[float],
@@ -1038,6 +1077,18 @@ def run_self_checks(*, verbose: bool = False) -> dict:
     _w = _v.copy(); _w[4] = 1e9
     res["loo_median_ignores_own_value"] = bool(abs(_l[4] - leave_one_out_median(_w, 1)[4]) < 1e-12)
     res["loo_median_needs_min_others"] = bool(np.isnan(leave_one_out_median([1.0, 2.0, 3.0], 5)).all())
+    # --- thin-author shrunk baseline: only 1..4-other authors get one; own value never enters; pulled to platform mean ---
+    _lv = np.array([1.0, 3.0, 2.0, 2.0, 2.5, 2.2, 1.8, 2.1, 2.4, 2.0, 9.0, 9.2, 8.8, 5.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0])
+    _au = ["a"] * 2 + ["b"] * 8 + ["c"] * 3 + ["d"] + ["e"] * 7
+    _bl, _k, _t2 = thin_author_baseline_log(_lv, _au, min_others=5)
+    res["thin_baseline_only_for_thin_authors"] = bool(np.isfinite(_bl[0]) and np.isfinite(_bl[10]) and np.isnan(_bl[3]) and np.isnan(_bl[13]) and np.isnan(_bl[15]))
+    _rg = np.random.default_rng(3)
+    _big = np.r_[_rg.normal(2, 1, 3000), [1.0, 3.0]]
+    _bau = np.r_[_rg.integers(0, 600, 3000), [9001, 9001]]                       # many authors; the last two share one
+    _bb = thin_author_baseline_log(_big, _bau, min_others=5)[0]
+    _big2 = _big.copy(); _big2[-2] = 4.0                                         # change ONE post of the pair (+2 sd)
+    res["thin_baseline_ignores_own_value"] = bool(abs(thin_author_baseline_log(_big2, _bau, min_others=5)[0][-2] - _bb[-2]) < 5e-3)
+    res["thin_baseline_between_author_mean_and_platform_mean"] = bool(min(_lv[1], _lv.mean()) - 1e-9 <= _bl[0] <= max(_lv[1], _lv.mean()) + 1e-9)
 
     # --- 1. trailing baseline excludes the CURRENT day ---------------------
     base = np.array([2, 3, 2, 4, 3, 2, 5, 3, 2, 4, 3, 3, 2, 4, 3, 2, 3, 4, 2, 3], float)

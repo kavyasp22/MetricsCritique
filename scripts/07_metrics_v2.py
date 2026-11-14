@@ -115,6 +115,7 @@ PARAMS: dict = {
     "age_bands": [0.0, 0.5, 1.0, 2.0, 4.0, 7.0, 14.0, 30.0, 90.0],
     "virality_min_band_n": 20,
     # --- reach (F10) --------------------------------------------------
+    "channel_baseline_shrink": True,  # V3: shrunk baseline for authors with 1..min_others-1 other posts
     "channel_median_min_others": 5,   # other view-bearing posts by the same author needed for a baseline
     # --- tone: class mix, audience weight, drift (provisional; see reports/TONE_HATE_VALIDATION.md) --
     "tone_class_threshold": 0.15,   # |tone| above this = positive / negative (net sentiment score cut-off)
@@ -548,6 +549,17 @@ def enrich_posts(posts: pd.DataFrame, P: dict) -> pd.DataFrame:
     for _, _g in _tmp[_big].groupby(["platform", "author_uid"]):
         p.loc[_g.index, "chan_median_views"] = S.leave_one_out_median(
             _g["_v"].to_numpy(), P["channel_median_min_others"])
+    # V3: authors with 1..(min_others-1) OTHER view-bearing posts get a shrunk baseline (empirical Bayes toward the
+    # platform's mean log views) instead of no baseline; authors with >= min_others keep the plain leave-one-out median.
+    p["chan_baseline_shrunk"] = False
+    if P["channel_baseline_shrink"]:
+        for _pl, _g in _tmp.groupby("platform"):
+            _bl, _k, _t2 = S.thin_author_baseline_log(
+                np.log(_g["_v"].to_numpy()), _g["author_uid"].to_numpy(), min_others=P["channel_median_min_others"])
+            _hit = np.isfinite(_bl) & p.loc[_g.index, "chan_median_views"].isna().to_numpy()
+            p.loc[_g.index[_hit], "chan_median_views"] = np.exp(_bl[_hit])
+            p.loc[_g.index[_hit], "chan_baseline_shrunk"] = True
+            log(f"  thin-author reach baseline {_pl}: {int(_hit.sum()):,} posts (k={_k:.2f})") if _hit.any() else None
     vw2 = p["views"].where(p["views"] > 0)
     p["reach_audience_norm_post"] = np.where(
         p["chan_median_views"].notna() & vw2.notna(),

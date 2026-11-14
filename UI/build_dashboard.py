@@ -718,24 +718,10 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
         },
         "reach_audience_norm": {
             "display_name": "Audience-Normalized Reach (Channel Baseline Multiplier)",
-            "formula": "mean(views_post / median views of the same author's OTHER posts) — the post is excluded from its own baseline; needs >=5 other view-bearing posts",
+            "formula": "mean(views_post / baseline), baseline = median views of the same author's OTHER posts (>=5 others) or, for 1-4 others, an empirical-Bayes estimate shrunk toward the platform mean — the post is excluded from its own author baseline",
             "units": "ratio to channel median (e.g. 1.85× = 85% above baseline)",
             "caveats": "Defensible denominator for channel-based broadcasts (Telegram, YouTube). Evaluates whether a post exceeded its own account's typical audience footprint.",
-            "support_gate": "author baseline available (>=5 other view-bearing posts)"
-        },
-        "unified_reach": {
-            "display_name": "Cross-Platform Unified Story Reach (View Imputation)",
-            "formula": "Unified_Reach = Observed_Views + Imputed_Views, where Imputed_Views = viewless_engagement × clamp(observed_views / paired_engagement, 5.0, 80.0)",
-            "units": "total story audience impressions",
-            "caveats": "Aggregates true cross-network footprint for identical narrative clusters. Uses empirical interaction ratios from reporting networks (Telegram/YouTube/Twitter) to impute missing views on paired view-less networks (Instagram/Reddit/LinkedIn).",
-            "support_gate": "cross_platform_stories available (≥2 distinct platforms)"
-        },
-        "effective_reach": {
-            "display_name": "Network Breadth Multiplier & Effective Reach",
-            "formula": "Effective_Reach = Unified_Reach × [1.0 + 0.5 × (n_platforms - 1)]",
-            "units": "effective narrative impact impressions",
-            "caveats": "Evaluates coordinated multi-platform campaigns as a whole. Rewards cross-network penetration with a Breadth Multiplier (+50% per extra platform: 2 platforms = 1.5x, 3 platforms = 2.0x).",
-            "support_gate": "cross_platform_stories available (≥2 distinct platforms)"
+            "support_gate": "author baseline available (>=1 other view-bearing post)"
         },
         "severity": {
             "display_name": "Alert Severity Band",
@@ -825,7 +811,7 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
             "display_name": "Tone / Sentiment (Empirical Bayes Shrunk)",
             "formula": "(n × tone_mean + k × parent_mean) / (n + k), where k = sigma_w² / tau² (DerSimonian–Laird estimator)",
             "units": "sentiment valence [-1.0, +1.0]",
-            "caveats": "Shrinks small-sample cells toward topic, platform, and global empirical priors. Eliminates false sentiment volatility on 1-post cells.",
+            "caveats": "Shrinks small-sample cells toward topic, platform, and global empirical priors. Eliminates false sentiment volatility on 1-post cells. Tone measures the wording of the post, not the poster's attitude: a factual report of a bad event (an attack, an accident) is scored negative (Phase 0 check). A negative tone can therefore mean negative news, not a hostile audience.",
             "support_gate": "tone_n > 0"
         }
     }
@@ -1050,7 +1036,7 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
   <p class="ct">Tone mix by platform <span class="badge gray">provisional</span></p>
   <p class="cs">How many scored posts are positive, neutral or negative, per platform, never pooled across
   platforms (platforms differ too much: net scores range from about &minus;70 to +60). A post is
-  <b>positive</b> if its tone is above +0.15 and <b>negative</b> if below &minus;0.15. The <b>net sentiment
+  <b>positive</b> if its tone is above +0.15 and <b>negative</b> if below &minus;0.15. Tone reads the wording, not the poster&rsquo;s attitude: a factual report of a bad event is scored negative, so a low value can mean negative news rather than a hostile audience. The <b>net sentiment
   score</b> is 100 &times; (positive share &minus; negative share). <b>Audience-weighted tone</b> gives posts with
   more views and interactions more influence, with weight 1 + ln(1 + views + likes + comments + shares), so a
   post with no counter still counts once; where a platform has no counters it equals the plain average.
@@ -1117,14 +1103,14 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
   The bars below show <b>observed views only</b> (platforms with a view counter). Platforms
   without one are not shown; their activity is a separate quantity
   (<code>engagement_proxy</code>, a log-engagement score) and is never added to views.
-  For Telegram only, a channel's median views gives a defensible audience-size
-  denominator (<code>reach_audience_norm</code>), which is still a proxy. Never
+  An author's own typical views give a defensible comparison
+  (<code>reach_audience_norm</code>, mostly Telegram and Twitter, thinner elsewhere), which is still a proxy. Never
   present either as audience size.</p>
   <div class="plot" data-panel="reach_bars"></div>
 </div>
 <div class="card">
   <p class="ct">Cross-Platform Narrative Diffusion <span class="badge">multi-platform</span></p>
-  <p class="cs">Tracks narratives that appear with identical text on two or more platforms. <b>Observed views</b> are counter values. <b>Estimated views are experimental</b>: engagement on platforms without a view counter is multiplied by a views-per-engagement ratio taken from the same story (clamped to 5&ndash;80, default 20 when the story has no paired data; the &ldquo;Estimate Basis&rdquo; column says which). No data validates this estimate. Imputation counts one post per author and platform. The &ldquo;Who Posted&rdquo; column marks stories where the account name is the same on every platform: that is one account re-publishing its own text (cross-posting), not spread between different accounts; most stories are of this kind. The breadth-weighted index (1.0&times; to 2.0&times;) is an experimental index, not audience size. &ldquo;Earliest observed&rdquo; is the first post we collected, which depends on scrape lag.</p>
+  <p class="cs">Tracks narratives that appear with identical text on two or more platforms. <b>Observed views</b> are counter values summed over platforms that report views; nothing is estimated. Interactions on posts without a view counter are shown separately and are not converted into views. The &ldquo;Who Posted&rdquo; column marks stories where the account name is the same on every platform: that is one account re-publishing its own text (cross-posting), not spread between different accounts; most stories are of this kind. &ldquo;Earliest observed&rdquo; is the first post we collected, which depends on scrape lag.</p>
   <div class="plot" data-panel="cross_platform"></div>
 </div>
 <div class="card">
@@ -1152,7 +1138,7 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
   <b>large</b>: they may merge several related stories. Observed views only, no estimates.</p>
   <div class="plot" data-panel="cross_platform_events"></div>
 </div>
-{metric_bullets(meta, ['virality_pct', 'reach_proxy', 'reach_audience_norm', 'unified_reach', 'effective_reach'], md_cols | {'unified_reach', 'effective_reach'})}
+{metric_bullets(meta, ['virality_pct', 'reach_proxy', 'reach_audience_norm'], md_cols)}
 """)
 
     # --------------------------------------------------------------- 11 ----

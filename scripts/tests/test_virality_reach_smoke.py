@@ -146,13 +146,13 @@ def test_cross_platform_tables_present_and_consistent(mdb):
         SELECT
           count(*) FILTER (WHERE n_platforms < 2),
           count(*) FILTER (WHERE length(snippet) < 35),
-          count(*) FILTER (WHERE story_ratio IS NOT NULL AND (story_ratio < 5 OR story_ratio > 80)),
-          count(*) FILTER (WHERE abs(breadth_multiplier - (1 + 0.5*(n_platforms-1))) > 0.01),
-          count(*) FILTER (WHERE abs(unified_reach - (observed_views + imputed_views)) > 1),
-          count(*) FILTER (WHERE abs(effective_reach - unified_reach*breadth_multiplier) > 1),
+          count(*) FILTER (WHERE observed_views < 0 OR viewless_engagement < 0),
           count(*) FILTER (WHERE spread_duration_hours < 0)
         FROM cross_platform_stories""").fetchone()
-    assert bad == (0,) * 7, f"invariant violations (<2 plat, short, ratio, breadth, unified, effective, lag): {bad}"
+    assert bad == (0,) * 4, f"invariant violations (<2 plat, short, negative counts, lag): {bad}"
+    cols = {r[0] for r in mdb.execute("DESCRIBE cross_platform_stories").fetchall()}
+    # imputed views and the breadth multiplier were removed (V1/V2): they must not come back unnoticed
+    assert not cols & {"imputed_views", "story_ratio", "ratio_source", "unified_reach", "breadth_multiplier", "effective_reach"}
 
 
 @needs_metrics
@@ -312,7 +312,7 @@ def test_story_columns_consistent(stories19):
     st, _, _ = stories19
     assert (st.single_source == (st.n_authors < 2)).all()
     assert (st.n_authors >= 1).all()
-    assert (st.imputed_views >= 0).all()
+    assert (st.viewless_engagement >= 0).all()
     assert (st.origin_scrape_lag_days.dropna() >= 0).all()
 
 
@@ -332,17 +332,6 @@ def test_reach_split_observed_vs_engagement_proxy(m7):
     assert out["engagement_proxy"].tolist() == pytest.approx([np.log1p(10), np.log1p(10), 0.0])
     # legacy column unchanged: views when present, else ln(1 + E_sum)
     assert out["reach_proxy"].tolist() == pytest.approx([100.0, np.log1p(10), 0.0])
-
-
-@needs_analytics
-def test_ratio_source_consistent_with_story_ratio(stories19):
-    st, _, _ = stories19
-    assert set(st.ratio_source) <= {"story_paired", "clamped_low", "clamped_high", "default"}
-    assert (st.loc[st.ratio_source == "default", "story_ratio"] == 20.0).all()
-    assert (st.loc[st.ratio_source == "clamped_low", "story_ratio"] == 5.0).all()
-    assert (st.loc[st.ratio_source == "clamped_high", "story_ratio"] == 80.0).all()
-    paired = st[st.ratio_source == "story_paired"]
-    assert paired.story_ratio.between(5.0, 80.0).all()
 
 
 # --------------------------------------------------------------------------- 6. URL tier (R4)
@@ -537,16 +526,11 @@ def test_cross_platform_stories_match_independent_recompute(stories19):
     s = st.set_index("story_id")
     for sid, x in q.groupby("sid"):
         obs = x.loc[x.platform.isin(vp) & (x.v > 0), "v"].sum()
-        paired = x.loc[x.platform.isin(vp) & (x.v > 0), "eng"].sum()
         rep = x.sort_values(["eng", "posted_at"], ascending=[False, True]).drop_duplicates(["platform", "author_uid"])
         vless = rep.loc[~rep.platform.isin(full) & (rep.v == 0), "eng"].sum()
-        ratio = min(max(round(obs / paired, 2), 5.0), 80.0) if (paired > 0 and obs > 0) else 20.0
-        uni = round(obs + vless * ratio)
-        br = round(1 + 0.5 * (x.platform.nunique() - 1), 2)
         row = s.loc[sid]
         assert row.n_posts == len(x) and row.n_unique_posts == len(rep)
-        assert abs(row.observed_views - obs) <= 1 and abs(row.story_ratio - ratio) <= 0.01
-        assert abs(row.unified_reach - uni) <= 1 and abs(row.effective_reach - round(uni * br)) <= 1
+        assert abs(row.observed_views - obs) <= 1 and abs(row.viewless_engagement - vless) <= 1
 
 
 @needs_analytics

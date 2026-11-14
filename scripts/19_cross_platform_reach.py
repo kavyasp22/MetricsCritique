@@ -2,9 +2,10 @@
 """Compute Improvised Cross-Platform Reach & Narrative Diffusion.
 
 Implements Section 9 of the Virality & Reach Implementation Brief:
-1. Cross-Platform Unified Story Reach (Multi-Platform Aggregation)
-2. Network Diffusion Breadth Multiplier
-3. Cross-Platform View Imputation for View-Less Platforms
+1. Cross-Platform Story Reach: OBSERVED views only (counter values summed over view-bearing platforms).
+   The earlier view imputation (clamp 5-80) and breadth multiplier were removed: imputed views were 42% of reported
+   reach and rested on a fixed clamp the data contradict; every story has exactly 2 platforms, so the multiplier was constant.
+   `viewless_engagement` is reported as a measured number of interactions on posts that have no view counter.
 4. Updates metrics.duckdb (cross_platform_stories, cross_platform_posts)
 5. Updates UI/data/metrics.json and UI/data/metrics.json.gz
 """
@@ -47,7 +48,7 @@ def compute_cross_platform_reach(limit_stories: int = 150):
     #   view_plats : any post has views > 0            -> views>0 posts are OBSERVED reach
     #   full_plats : >= VIEW_COVERAGE of posts have views>0 (a real counter on every post);
     #                a 0/NULL views post there is a genuine zero, not "no counter".
-    # Viewless (imputed) = no counter at all, or partial-coverage counter (e.g. Twitter) with 0/NULL.
+    # Viewless = no counter at all, or partial-coverage counter (e.g. Twitter) with 0/NULL.
     cov = con.execute(
         "SELECT platform, avg((coalesce(views, 0) > 0)::int) AS cov FROM post_facts GROUP BY 1"
     ).fetchall()
@@ -106,7 +107,6 @@ def compute_cross_platform_reach(limit_stories: int = 150):
             sum(engagement) AS total_engagement,
             sum(views) AS total_views,
             sum(CASE WHEN platform IN ({VP}) AND views > 0 THEN views ELSE 0 END) AS observed_views,
-            sum(CASE WHEN platform IN ({VP}) AND views > 0 THEN engagement ELSE 0 END) AS paired_engagement,
             sum(CASE WHEN rep = 1 AND platform NOT IN ({FP}) AND (views = 0 OR views IS NULL) THEN engagement ELSE 0 END) AS viewless_engagement
         FROM cleaned
         WHERE clean_text NOT SIMILAR TO '^[0-9\\s\\.\\,\\:\\-\\_\\#\\@]+$'
@@ -117,22 +117,7 @@ def compute_cross_platform_reach(limit_stories: int = 150):
         SELECT 
             *,
             round(epoch(latest_time - origin_time) / 3600.0, 1) AS spread_duration_hours,
-            md5(clean_text) AS story_id,
-            CASE 
-                WHEN paired_engagement > 0 AND observed_views > 0 THEN 
-                    LEAST(GREATEST(round(observed_views * 1.0 / paired_engagement, 2), 5.0), 80.0)
-                ELSE 20.0 
-            END AS story_ratio,
-            -- where the ratio came from: 'story_paired' (this story's own views/engagement, inside
-            -- 5..80), 'clamped_low'/'clamped_high' (own ratio forced into the clamp), or 'default'
-            -- (no paired data, fixed 20). EXPERIMENTAL: no data validates it (see review notes).
-            CASE
-                WHEN paired_engagement > 0 AND observed_views > 0 THEN
-                    CASE WHEN observed_views * 1.0 / paired_engagement < 5.0 THEN 'clamped_low'
-                         WHEN observed_views * 1.0 / paired_engagement > 80.0 THEN 'clamped_high'
-                         ELSE 'story_paired' END
-                ELSE 'default'
-            END AS ratio_source
+            md5(clean_text) AS story_id
         FROM clusters
     ),
     improvised AS (
@@ -154,14 +139,9 @@ def compute_cross_platform_reach(limit_stories: int = 150):
             total_engagement,
             total_views AS raw_views,
             observed_views,
-            story_ratio,
-            ratio_source,
-            round(viewless_engagement * story_ratio, 0) AS imputed_views,
-            round(observed_views + (viewless_engagement * story_ratio), 0) AS unified_reach,
-            round(1.0 + 0.5 * (n_platforms - 1), 2) AS breadth_multiplier,
-            round((observed_views + (viewless_engagement * story_ratio)) * (1.0 + 0.5 * (n_platforms - 1)), 0) AS effective_reach
+            viewless_engagement
         FROM calculated
-        ORDER BY n_platforms DESC, effective_reach DESC, n_posts DESC
+        ORDER BY n_platforms DESC, observed_views DESC, total_engagement DESC, n_posts DESC
         LIMIT {limit_stories}
     )
     SELECT * FROM improvised

@@ -285,7 +285,8 @@ METRIC_META: list[dict] = [
     dict(metric_key="tone_mean", display_name="Tone (raw mean)", family="content",
          formula="mean tone_score over posts with tone_valid", units="[-1,1]", grain=_CELL,
          direction="higher=more positive", higher_is_worse=False,
-         caveats="unshrunk; noisy at small tone_n — prefer tone_eb", support_gate="tone_n>0"),
+         caveats=("unshrunk; noisy at small tone_n — prefer tone_eb. "
+                  "Tone measures the wording of the post, not the poster's attitude: a factual report of a bad event (an attack, an accident) is scored negative (Phase 0 check). A negative tone can therefore mean negative news, not a hostile audience."), support_gate="tone_n>0"),
     dict(metric_key="tone_eb", display_name="Tone (EB-shrunk)", family="content",
          formula="(n*mean + k*parent_mean)/(n+k), k = within_var/tau^2 (DerSimonian-Laird)",
          units="[-1,1]", grain=_CELL, direction="higher=more positive", higher_is_worse=False,
@@ -318,7 +319,8 @@ METRIC_META: list[dict] = [
          direction="higher=more positive",
          higher_is_worse=None,
          caveats=("%s Compare within a platform only: platform scores range from about -70 to +60, so a pooled "
-                  "score is not meaningful (NULL at the platform-rolled topic grain).") % "PROVISIONAL.",
+                  "score is not meaningful (NULL at the platform-rolled topic grain). "
+                  "Tone measures the wording of the post, not the poster's attitude: a factual report of a bad event (an attack, an accident) is scored negative (Phase 0 check). A negative tone can therefore mean negative news, not a hostile audience.") % "PROVISIONAL.",
          support_gate="tone_n>=5"),
     dict(metric_key="tone_weighted", display_name="Audience-weighted tone", family="content",
          formula="sum(tone x w) / sum(w), w = 1 + ln(1 + views + likes + comments + shares)", units="[-1,1]",
@@ -423,13 +425,16 @@ METRIC_META: list[dict] = [
     dict(metric_key="reach_audience_norm", display_name="Audience-normalised reach",
          family="engagement",
          formula=("mean over posts of views / median views of the same author's OTHER posts "
-                  "(leave-one-out; needs >=5 other view-bearing posts)"),
+                  "(leave-one-out). Authors with 1-4 other view-bearing posts use an empirical-Bayes baseline shrunk toward "
+                  "the platform mean log views (Efron & Morris 1973); authors with 5 or more use the plain median"),
          units="ratio to channel median", grain=_CELL,
          direction="higher=outperformed its own channel", higher_is_worse=None,
          caveats=("F10. The post itself is excluded from its own baseline. Available only where views "
-                  "exist and the author has >=5 OTHER view-bearing posts (mostly Telegram and "
-                  "Twitter; thin for Snapchat, TikTok and YouTube). Still a proxy."),
-         support_gate="author baseline available (>=5 other view-bearing posts)"),
+                  "exist and the author has >=1 OTHER view-bearing post (shrunk baseline for 1-4 others, "
+                  "plain median for >=5). Held-out check on Snapchat, TikTok and YouTube authors: the shrunk "
+                  "baseline had the lowest squared error (log scale 0.70 / 0.74 / 1.22 vs 1.11 / 0.82 / 1.85 for the raw mean of the "
+                  "others). Still a proxy."),
+         support_gate="author baseline available (>=1 other view-bearing post)"),
     # ---- diversity / coordination ----------------------------------------
     dict(metric_key="author_entropy", display_name="Author entropy", family="diversity",
          formula="Shannon entropy of the author post-count distribution in the cell",
