@@ -1855,3 +1855,31 @@ body[data-mode="military"] #basic-date-strip { display: none !important; }
 .lv-preset { font: inherit; font-size: 0.72rem; padding: 0.2rem 0.6rem; border-radius: 999px; cursor: pointer;
   border: 1px solid var(--rule, #44546a); background: transparent; color: var(--ink-2, inherit); }
 .lv-preset[aria-pressed="true"] { background: var(--gold, #c9a227); color: #111; border-color: var(--gold, #c9a227); font-weight: 600; }
+
+/* ------------------------------------------ collapsible explanations ---- */
+details.explain {
+  margin: 0.4rem 0 0.7rem;
+  border: var(--hair, 1px) solid var(--gold-border, #262e3d);
+  border-radius: 4px;
+  padding: 0.3rem 0.75rem;
+}
+details.explain > summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--gold, #e3bc4b);
+  list-style: none;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+}
+details.explain > summary::-webkit-details-marker { display: none; }
+details.explain > summary::before { content: "▸"; transition: transform 0.15s; }
+details.explain[open] > summary::before { transform: rotate(90deg); }
+details.explain > summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+details.explain .hint { font-weight: 400; font-size: 0.72rem; color: var(--ink-3); }
+details.explain[open] .hint { display: none; }
+details.explain > .cs { margin: 0.5rem 0 0.3rem; }
+details.explain > .fnote { margin: 0.4rem 0 0.3rem; }

@@ -47,6 +47,7 @@ import argparse
 import json
 import math
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -594,12 +595,13 @@ JSON_NOTES = {
         "with each alert's metric semantics (display name, formula, caveats, "
         "support gate) resolved in-band from metric_meta. Thresholds are "
         "Benjamini-Hochberg False Discovery Rate q-values computed per day, never raw z cutoffs "
-        "(spec §6.5). `severity` is evidence strength, not impact: a critical "
-        "q-value on a 4-post cell is strong evidence of a small thing."),
+        "(spec §6.5). `severity` is evidence strength, not impact: a very small "
+        "q-value on a 4-post cell is strong evidence of a small thing. Only two levels are produced, "
+        "high and medium; no alert is ever given a critical level."),
     "key_alerts_on_topic_not_hashtag": (
-        "Hashtags cover ~15% of the corpus and ~13% of Telegram, the dominant "
-        "source (spec §4). Alerts keyed on hashtags would be blind to ~85% of "
-        "collected material. Key on topic_id; treat tag_id as a secondary facet. "
+        "Hashtag coverage is very uneven (see run_meta.params_json.hashtag_coverage): high on "
+        "Instagram, TikTok, YouTube video and Mastodon, very low on Reddit, YouTube comments and "
+        "Telegram (spec §4). Key on topic_id; treat tag_id as a secondary facet. "
         "Alerts carrying a tag_id are marked grain='hashtag'."),
     "hate_is_blocked": (
         "The hate_* family is UNCALIBRATED and unpublishable (spec §6.3). A "
@@ -632,6 +634,26 @@ def esc(s) -> str:
             .replace(">", "&gt;").replace('"', "&quot;"))
 
 
+_CS_RE = re.compile(r'(<p class="ct">.*?</p>\s*)<p class="cs">(.*?)</p>', re.S)
+COLLAPSE_OVER = 260  # chars of visible text; shorter notes stay inline
+
+
+def collapse_long_notes(html_: str) -> str:
+    """Fold long card descriptions into a click-to-expand <details>.
+
+    Short notes stay visible; anything longer keeps a one-sentence teaser
+    and the full text opens on click.
+    """
+    def repl(m):
+        text = re.sub(r"<[^>]+>", "", m.group(2))
+        if len(re.sub(r"\s+", " ", text)) <= COLLAPSE_OVER:
+            return m.group(0)
+        return (m.group(1) + '<details class="explain"><summary>About this panel '
+                '<span class="hint">click to expand</span></summary>'
+                '<p class="cs">' + m.group(2) + '</p></details>')
+    return _CS_RE.sub(repl, html_)
+
+
 class Doc:
     def __init__(self):
         self.parts: list[str] = []
@@ -641,7 +663,7 @@ class Doc:
         self.parts.append(s)
 
     def html(self) -> str:
-        return "\n".join(self.parts)
+        return collapse_long_notes("\n".join(self.parts))
 
 
 def metric_bullets(meta: dict, keys, present) -> str:
@@ -725,7 +747,7 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
         },
         "severity": {
             "display_name": "Alert Severity Band",
-            "formula": "critical (q < 0.001) | high (q < 0.01) | medium (q < 0.05)",
+            "formula": "high | medium. Topic alerts: high if q < 0.01. Entity, risk and theme alerts: high if q < 0.01 and >= 10 posts and >= 2x baseline. Otherwise medium. (No critical level is produced.)",
             "units": "evidence strength category",
             "caveats": "Calibrated False Discovery Rate evidence strength (Benjamini–Hochberg), not arbitrary z threshold.",
             "support_gate": "surprise_q < 0.05 & support_ok"
@@ -854,8 +876,16 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
     # ---------------------------------------------------------------- 2 ----
     alert_body = f"""
 <div class="card">
-  <p class="ct">How a candidate becomes an alert</p>
-  <p class="cs">This is the logic the notification service will consume, so it is
+  <p class="ct">Alert severity</p>
+  <div class="fnote">Two severity levels are produced: <span class="sev high"><span class="ic">▲</span>high</span>
+  and <span class="sev medium"><span class="ic">●</span>medium</span>. <b>Topic alerts</b>: high if q &lt; 0.01, otherwise
+  medium. <b>Entity, risk and theme alerts</b>: high only if q &lt; 0.01 <em>and</em> at least 10 posts that day
+  <em>and</em> at least 2&times; the baseline; otherwise medium. All alerts have q &lt; 0.05. No alert is ever given a
+  &ldquo;critical&rdquo; level, and there is no &ldquo;low&rdquo; level.
+  </div>
+  <details class="explain">
+    <summary>How a candidate becomes an alert <span class="hint">click to expand</span></summary>
+    <p class="cs">This is the logic the notification service will consume, so it is
   spelled out rather than buried. Each cell's volume is tested against a
   Negative-Binomial baseline fitted on its own trailing window, giving an
   exceedance probability. Those p-values are corrected across every supported
@@ -863,12 +893,10 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
   <code>alert_flag</code> is <code>q &lt; 0.05</code> — a calibrated
   false-discovery rate, not an arbitrary z threshold. Cells that fail the support
   gate are never tested at all, so they cannot be flagged.</p>
-  <div class="fnote">Severity bands: <span class="sev critical"><span class="ic">◆</span>critical</span>
-  q &lt; 0.001 &nbsp;·&nbsp; <span class="sev high"><span class="ic">▲</span>high</span> q &lt; 0.01
-  &nbsp;·&nbsp; <span class="sev medium"><span class="ic">●</span>medium</span> q &lt; 0.05.
-  Severity is <b>evidence strength, not impact</b> — a critical q-value on a four-post
+    <div class="fnote">Severity is <b>evidence strength, not impact</b> — a very small q-value on a four-post
   cell is strong evidence of a small thing. Colour never carries the severity alone:
   every chip pairs an icon with the word.</div>
+  </details>
 </div>
 <div class="card">
   <p class="ct">Alert candidates per day</p>
@@ -1067,9 +1095,9 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
 <div class="warnbox">
   <div class="hd"><span aria-hidden="true">⚠</span> Uncalibrated — not publishable</div>
   <p style="margin:0 0 0.4rem">{esc(hate_caveat)}</p>
-  <p style="margin:0">Per spec §6.3 this family stays gated until
-  <code>reports/calibration_sample.csv</code> is hand-labelled and agreement is
-  measured. Until then: <b>do not quote these numbers, do not rank topics by them,
+  <p style="margin:0">Per spec §6.3 this family stays gated. A single-labeller Phase 0 check
+  (<code>reports/TONE_HATE_VALIDATION.md</code>) has been run, but it is not confirmed by a human and
+  the scores are still raw model probabilities, never calibrated. Until a human-confirmed sample exists: <b>do not quote these numbers, do not rank topics by them,
   and do not route a notification off them.</b> Gate:
   <span class="gate">{esc(hate_gate)}</span></p>
 </div>
@@ -1199,21 +1227,35 @@ silently vanishing from every denominator.</div>
     if have["tag_dim"]:
         tg = tables["tag_dim"]
         tag_cov = f"{len(tg):,} distinct tags are in <code>tag_dim</code>. "
+    # hashtag coverage is read from run_meta (written by script 07), never typed by hand
+    ht_overall, ht_rows, ht_hi, ht_lo = None, [], "", ""
+    try:
+        _rm = tables["run_meta"].iloc[0]
+        _hc = json.loads(_rm["params_json"])["hashtag_coverage"]
+        ht_overall = _hc["coverage_pct"]
+        ht_rows = sorted(((k, v["n"], v["coverage_pct"]) for k, v in _hc["per_platform"].items() if v["n"] >= 1000),
+                         key=lambda r: -r[2])
+        ht_hi = ", ".join(f"{k} {c:.0f}%" for k, n, c in ht_rows if c >= 40)
+        ht_lo = ", ".join(f"{k} {c:.1f}%" for k, n, c in ht_rows if c < 40)
+    except Exception:
+        pass
+    ht_sentence = (
+        f"Share of posts with at least one hashtag (field or mined from the text), at the last build: "
+        f"<b>well covered</b>: {esc(ht_hi)}; <b>barely covered</b>: {esc(ht_lo)}. "
+        f"Overall {ht_overall:.1f}% of all rows (posts plus YouTube comments, which almost never carry hashtags)."
+        if ht_overall is not None else "Hashtag coverage could not be read from run_meta.")
     section(doc, "14", "hashtags", "Hashtags",
             "Built, because hashtag alerting genuinely works where hashtags exist — "
             "and framed, because most of this corpus has none.",
             f"""
 <div class="warnbox">
   <div class="hd"><span aria-hidden="true">⚠</span> Coverage warning — spec §4</div>
-  <p style="margin:0 0 0.4rem">The <code>hashtags</code> field is populated for
-  LinkedIn (502/924) and Instagram (237/337) and is <b>empty for Telegram, YouTube,
-  Reddit and Facebook</b>. Mining inline <code>#tags</code> from post text adds only
-  Telegram 1,883/14,595 (12.9%) and Reddit 66/2,107 (3.1%).</p>
-  <p style="margin:0 0 0.4rem"><b>Hashtags cover roughly 15% of the corpus and ~13%
-  of Telegram, the dominant source. A hashtag-keyed alerting system would be blind to
-  about 85% of collected material.</b></p>
+  <p style="margin:0 0 0.4rem">{ht_sentence}</p>
+  <p style="margin:0 0 0.4rem"><b>Coverage is very uneven: a hashtag-keyed alerting system would see Instagram,
+  TikTok, YouTube videos and Mastodon well, and almost nothing on Reddit, YouTube comments or Telegram
+  (the largest source).</b></p>
   <p style="margin:0">{tag_cov}<b>Key alerts on <code>topic_id</code></b>, which covers
-  79% of posts with the remainder explicitly <code>unassigned</code>; treat hashtag
+  about 92% of posts (457,752 of 497,530 at the last build) with the remainder explicitly <code>unassigned</code>; treat hashtag
   and keyword as secondary facets. Alerts in
   <code>UI/data/metrics.json</code> that came from a hashtag are tagged
   <code>grain: "hashtag"</code> so a consumer can weight them accordingly.</p>
@@ -1223,7 +1265,7 @@ silently vanishing from every denominator.</div>
   {'<div class="plot" data-panel="tags"></div>' if have['tag_metrics_daily'] else awaiting('tag_metrics_daily')}
 </div>
 """,
-            badges='<span class="badge crit">⚠ ~15% coverage</span>')
+            badges='<span class="badge crit">⚠ uneven coverage</span>')
 
     # --------------------------------------------------------------- 15 ----
     cr = contract_report
@@ -1272,15 +1314,16 @@ silently vanishing from every denominator.</div>
     <li><b>The corpus is live.</b> It ingests while it is read, so any two queries run
     separately disagree. Every extract runs inside one <code>REPEATABLE READ</code>
     snapshot; production Postgres is read-only and nothing is ever written back.</li>
-    <li><b>The collector is a confounder.</b> Telegram went 422 → 1,393 posts/day
-    while active channels went 18 → 24. All trend metrics are computed on the
+    <li><b>The collector is a confounder.</b> In the extract of 26 Oct 2026, Telegram's daily posts rose from
+    about 138 (first two weeks of the collection window) to about 544 (last two weeks) while distinct active
+    channels rose from about 13 to 19. All trend metrics are computed on the
     effort-normalised log rate for exactly this reason; raw counts are kept beside
     them for transparency, not for trends.</li>
-    <li><b>Duplicates were a prerequisite, not hygiene.</b> Telegram had 37% exact
+    <li><b>Duplicates were a prerequisite, not hygiene.</b> At the first extract (before de-duplication) Telegram had 37% exact
     duplicate <code>post_url</code>s (Reddit 36%, Instagram 43% duplicate text), which
     inflated every Telegram volume figure by roughly 1.6× before dedup.</li>
     <li><b>Sparsity is handled in the model, not by clipping.</b> v1's robust-z reached
-    |z| = 143 on cells of ≤ 2 posts because MAD collapsed toward zero. v2 uses a
+    |z| = 59 on this extract (143 on the first one) on cells of ≤ 2 posts because MAD collapsed toward zero. v2 uses a
     Negative-Binomial exceedance probability and a support gate, so a single post
     against a small baseline scores as the non-event it is.</li>
     <li><b>Absent is not zero.</b> Reddit has no engagement fields at all; Facebook has
@@ -1292,10 +1335,21 @@ silently vanishing from every denominator.</div>
     not measurable from a single snapshot; an append-only
     <code>engagement_snapshots</code> table was seeded so the honest version becomes
     available later.</li>
-    <li><b>The corpus is multilingual.</b> Telegram is 62% English, then ru/zh-cn/bn/uk/hi
-    plus 2,626 <code>unknown</code>. English-only NLP would silently mishandle ~38%,
+    <li><b>The corpus is multilingual.</b> Telegram is 63% English (43,003 of 68,452 posts), then ru, zh, hi and bn,
+    plus 7,326 <code>unknown</code>. English-only NLP would silently mishandle ~37%,
     so tone and toxicity use local multilingual models — and nothing leaves the
     network.</li>
+    <li><b>Alerts are leads, not confirmed events.</b> Only two severity levels exist (high, medium). Under the
+    stricter Benjamini–Yekutieli correction about 58% of alerts survive (49 of 85 on the 26 Oct data).</li>
+    <li><b>Day rule.</b> Topic and geo metrics place a post on its <code>posted_at</code> day, or on its scrape day when
+    it has no posting date.</li>
+    <li><b>Tone reads wording, not attitude.</b> A factual report of a bad event is scored negative, so a low tone
+    can mean negative news rather than a hostile audience. Tone labels are not yet human-confirmed.</li>
+    <li><b>Cross-platform reach is observed views only.</b> The earlier imputed views and breadth multiplier were
+    removed (imputed views were 42% of reported reach and rested on a fixed clamp the data contradict).</li>
+    <li><b>Readability is one scale.</b> LIX for every language; Chinese, Japanese, Thai and Burmese are not scored.</li>
+    <li><b>Weekday pattern.</b> There is no explicit weekday term; the effort offset absorbs most of it (weekend/weekday
+    median ratio 0.73 raw, 0.88 after the offset).</li>
   </ul>
 </div>
 <div class="card">

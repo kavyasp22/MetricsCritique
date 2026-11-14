@@ -2011,7 +2011,8 @@ def main(argv: Optional[list] = None) -> int:
                 "scope": P["fdr_scope"], "pvalue_kind": P["fdr_pvalue_kind"]},
         "hate_calibrated": P["hate_calibrated"],
         "hate_caveat": ("uncalibrated: a war/terror corpus over-fires toxicity models; "
-                        "reports/calibration_sample.csv is not yet hand-labelled"),
+                        "scores are raw model probabilities, never calibrated; the Phase 0 check "
+                        "(reports/TONE_HATE_VALIDATION.md) is single-labeller and not human-confirmed"),
     }
     # Switch provenance. Keys are added ONLY when a switch is off its default, so the
     # default run's params_json differs from the pre-switch code only by the new PARAMS.

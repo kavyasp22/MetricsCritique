@@ -2493,6 +2493,12 @@
       if ((r.V || 0) <= 2) { v2++; }
       vSum += (r.V || 0);
     });
+    var rmq = T('run_meta')[0], pjq = {};
+    try { pjq = JSON.parse((rmq && rmq.params_json) || '{}'); } catch (e) { pjq = {}; }
+    var v1MaxZ = ((pjq.d1_before_after || {}).v1 || {}).max_abs_z;
+    v1MaxZ = isNum(v1MaxZ) ? Math.round(v1MaxZ) : 'a very large value';
+    var hc = pjq.hashtag_coverage || {}, hcp = hc.per_platform || {};
+    var tgHc = hcp.telegram ? ', Telegram ' + hcp.telegram.coverage_pct.toFixed(1) + '%' : '';
     var rows = [
       { k: 'Cells in selection', v: fmtInt(tot), n: 'topic × platform × day' },
       { k: 'Cells inside collection window', v: fmtInt(inw) + ' (' + fmtPct(inw / (tot || 1), 1) + ')',
@@ -2501,15 +2507,19 @@
       { k: 'Cells passing support gate', v: fmtInt(ok) + ' (' + fmtPct(ok / (tot || 1), 1) + ')',
         n: metaGate('surprise') },
       { k: 'Cells with V ≤ 2', v: fmtInt(v2) + ' (' + fmtPct(v2 / (tot || 1), 1) + ')',
-        n: 'This is the class of cell that produced |z| = 143 in v1. Here they are gated to NULL instead.' },
+        n: 'This is the class of cell that gave v1 a robust z of up to ' + v1MaxZ + '. Here they are gated to NULL instead.' },
       { k: 'Posts represented', v: fmtInt(vSum), n: 'Sum of V across the selection.' },
       { k: 'Multiplicity control', v: 'Benjamini–Hochberg, α = 0.05, per day',
         n: 'Alert thresholds are False Discovery Rate q-values, never raw z cutoffs.' },
       { k: 'Hate/toxicity family', v: 'BLOCKED — uncalibrated',
-        n: 'Gated until reports/calibration_sample.csv is hand-labelled.' },
+        n: 'Raw model probabilities, never calibrated. A single-labeller check exists (reports/TONE_HATE_VALIDATION.md) but is not human-confirmed.' },
+      { k: 'Cross-platform reach', v: 'Observed views only',
+        n: 'Imputed views and the breadth multiplier were removed (they were 42% of reported reach).' },
+      { k: 'Day rule', v: 'Posted date, else scrape date',
+        n: 'Posts without a posting date are placed on the day they were collected.' },
       { k: 'Reach', v: 'PROXY only', n: 'No follower or subscriber counts exist anywhere in the corpus.' },
-      { k: 'Hashtag coverage', v: '~15% of corpus, ~13% of Telegram',
-        n: 'Alerting must key on topic_id; hashtag and keyword are secondary facets.' }
+      { k: 'Hashtag coverage', v: isNum(hc.coverage_pct) ? hc.coverage_pct.toFixed(1) + '% of rows' + tgHc : 'not available',
+        n: 'Very uneven by platform (high on Instagram, TikTok, YouTube video, Mastodon; very low on Reddit and YouTube comments). Alerting must key on topic_id; hashtag and keyword are secondary facets.' }
     ];
     var dl = h('dl', { class: 'kv' });
     rows.forEach(function (r) {
@@ -3045,7 +3055,7 @@
     }
 
     legend(host, [
-      { color: K.focal, label: 'high severity (q < 0.01)', box: true },
+      { color: K.focal, label: 'high severity (q < 0.01; entity, risk and theme alerts also need >= 10 posts and >= 2x baseline)', box: true },
       { color: K.context, label: 'medium severity (q < 0.05)', box: true }
     ]);
 
