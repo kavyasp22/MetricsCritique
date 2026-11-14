@@ -225,3 +225,11 @@ from the data rather than hardcoding them.
    render it visibly gated.
 4. Every z-like or p-like metric carries its `support_n`.
 5. Alert thresholds come from **FDR q-values**, not raw z cutoffs.
+
+## 7. Changes of 2026-11 (spec changes)
+- **Cross-platform reach (`19`)**: view imputation, `story_ratio`, `ratio_source`, `imputed_views`, `unified_reach`, `breadth_multiplier` and `effective_reach` were removed. `cross_platform_stories` keeps `observed_views` (counter values over view-bearing platforms) and `viewless_engagement` (interactions on posts without a counter, never converted to views).
+- **`reach_audience_norm`**: baseline = median views of the author's OTHER posts when there are >= 5; for 1-4 other posts, an empirical-Bayes estimate shrunk toward the platform mean log views (k = within / between variance, DerSimonian-Laird). Switch: `channel_baseline_shrink`.
+- **Tone**: new columns `tone_pos_n`, `tone_neg_n`, `tone_*_share`, `net_sentiment_score`, `tone_weighted`, `tone_weight_cov`, `tone_drift_*` (provisional); caveat that tone reads wording, not attitude.
+- **Readability**: `readability_mean` is LIX for every language; `readability_fk_grade` (English only) is per post and not aggregated.
+- **Day rule**: topic and geo metrics both use `posted_at`, falling back to `scraped_at`.
+- **Metric text**: `momentum` (direction, not forecast), `surprise` (weekday handling), `alert_flag` (BY survival), `burst_state` (sensitivity to `s`) now carry measured caveats in `metric_meta`.

@@ -263,3 +263,14 @@ Soft top-2 counts, HMM bursts and event chains are wired into `07` as opt-in swi
 ~39% (floor 50%), cluster stability ARI <= 0.26, soft-membership alert churn unexplained,
 HMM unproven on precision. `07` now orders its source reads (previously nondeterministic).
 Verdict for the topic-keyed layer: **PARTIAL/UNSOUND as keys** -- read topic metrics as provisional.
+
+## 2026-11-14 — reach, tone and core-signal finalisation (data to 2026-10-26)
+Verdicts and what changed (full table: Metrics_Finalisation_Two_Day_Action_Plan.docx; numbers: `reports/CORE_SIGNAL_CHECKS.md`, `reports/TONE_HATE_VALIDATION.md`, both generated, not committed):
+- **Cross-platform reach — SOUND after removal.** Imputed views (clamp 5-80) were 42% of reported reach and 36 of 76 stories sat at the clamp; the breadth multiplier was a constant 1.5 (every story has 2 platforms). Both removed from `19`; `cross_platform_stories` now carries `observed_views` and `viewless_engagement` only.
+- **Author-normalised reach — PARTIAL.** Authors with 1-4 other posts get an empirical-Bayes baseline (`stats_v2.thin_author_baseline_log`); held-out check beat the raw mean on Snapchat, TikTok, YouTube. Still a proxy.
+- **Surprise / alerts / burst / momentum — checked, no formula change.** Weekday pattern is mostly absorbed by the effort offset (weekend/weekday median 0.73 -> 0.88); under Benjamini-Yekutieli 49 of 85 alerts survive (alerts are leads); burst days depend on `s` (overlap 0.70-0.77 at s=3 / 1.5); momentum describes direction and is negatively related to the next 7 days (-0.35), so it is not a forecast.
+- **Tone — PARTIAL (provisional).** Reads wording, not attitude: factual reports of bad events score negative. Weighted tone ~ unweighted (Spearman 0.989). Single-labeller validation, not human-confirmed. Hate stays uncalibrated and hidden.
+- **Readability — SOUND.** One LIX scale for every language; the language label 'nan' bug fixed (`04b_readability_only.py`).
+- **Geo panels** now use `posted_at`, falling back to `scraped_at` like the topic panels (`11`).
+- **Risk / theme labels — PARTIAL.** Hand check: ~40% / 31% clearly right (70% / 55% loose), below the script's 72% claim. CAMEO event codes still unpopulated.
+- Known open: `check_taxonomy` 7/9 (theme/subtype cards not found in the rendered page); same-topic chain linking needs a decision (`test_chains_build_and_types` is xfail); `test_id_column_types.py` needs a DB with `topic_code_crosswalk`; fresh prod extract + GPU stages + rebuild pending.
