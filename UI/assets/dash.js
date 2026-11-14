@@ -2228,11 +2228,16 @@
         title: 'Shared link (' + r.conf + '): ' + r.url };
     }
     var high = rows.filter(function (r) { return r.conf === 'high'; });
-    var med = rows.filter(function (r) { return r.conf !== 'high'; });
+    var med = rows.filter(function (r) { return r.conf === 'medium'; });
+    var low = rows.filter(function (r) { return r.conf === 'low'; });
     tableView(host, cols, high, { open: true, rowDrill: drill,
       label: 'High confidence — full article links (' + high.length + ') — click a row to inspect all posts, including repeats' });
     tableView(host, cols, med, { open: false, rowDrill: drill,
       label: 'Medium confidence — shortened links (' + med.length + '), mostly one aggregator' });
+    if (low.length) {
+      tableView(host, cols, low, { open: false, rowDrill: drill,
+        label: 'Low confidence — same link but posts more than 21 days apart (' + low.length + '): usually a shared reference or app link, not one story' });
+    }
   };
 
   /* ---- 10e. Cross-platform events (semantic tier, preliminary) ---- */

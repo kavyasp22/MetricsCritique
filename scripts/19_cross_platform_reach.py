@@ -198,10 +198,16 @@ _TRACKING = ("utm_", "at_", "fbclid", "gclid", "igshid", "mc_", "ref_", "ref=", 
 URL_DENY_HOSTS = {"creativecommons.org", "t.me", "wa.me", "chat.whatsapp.com", "whatsapp.com",
                   "forms.gle", "rzp.io", "paypal.com", "paypal.me", "facebook.com", "instagram.com",
                   "twitter.com", "x.com", "linkedin.com", "youtube.com", "youtu.be", "tiktok.com",
-                  "play.google.com", "apps.apple.com"}
+                  "play.google.com", "apps.apple.com",
+                  # app-install deep links (a promo footer, not a story)
+                  "sng.link", "timesofindia.sng.link", "onelink.me", "app.link", "page.link", "adj.st", "smart.link"}
 URL_SHORTENERS = {"tinyurl.com", "bit.ly", "lnkd.in", "is.gd", "t.co", "ow.ly", "goo.gl", "buff.ly",
                   "rb.gy", "cutt.ly", "shorturl.at"}
 URL_MIN_PATH = 12  # shorter paths are usually a site home page, not an article
+# A shared NEWS link is posted within days. In the hand review (100 links, 14 Nov 2026) all 5 wrong full-article links
+# were reference or app links whose posts were 26-622 days apart; the correct ones had a median spread of 0.1 days.
+# Full links whose posts span more than this many days are kept but labelled 'low' confidence.
+URL_MAX_SPREAD_DAYS = 21
 
 
 def normalise_url(u: str):
@@ -257,7 +263,9 @@ def compute_url_links():
         rows.append(dict(
             link_id=hashlib.md5(key.encode()).hexdigest(),
             url=key, host=first.host,
-            match_confidence="medium" if first.host in URL_SHORTENERS else "high",
+            match_confidence=("medium" if first.host in URL_SHORTENERS else
+                              ("low" if (x.posted_at.max() - x.posted_at.min()).total_seconds() > URL_MAX_SPREAD_DAYS * 86400
+                               else "high")),
             n_platforms=int(x.platform.nunique()), n_posts=int(len(x)),
             # one post per (platform, author): an account re-posting the same link 100+ times counts once
             n_unique_posts=int(x.groupby(["platform", "author_uid"]).ngroups),
@@ -273,7 +281,7 @@ def compute_url_links():
         ["link_id", "post_uid", "platform", "posted_at"]].copy()
     posts["posted_at"] = posts["posted_at"].astype(str)
     print(f"-> URL tier: {len(links)} shared-URL links ({(links.match_confidence=='high').sum()} high, "
-          f"{(links.match_confidence=='medium').sum()} medium), {len(posts)} posts.")
+          f"{(links.match_confidence=='medium').sum()} medium, {(links.match_confidence=='low').sum()} low), {len(posts)} posts.")
     return links, posts
 
 

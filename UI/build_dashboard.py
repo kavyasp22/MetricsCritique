@@ -1119,8 +1119,11 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
   posting the <b>same article link</b> (tracking parameters removed). It finds stories that exact-text
   matching misses, such as a translated post or a different headline for the same article. It only
   covers posts that contain a link, shows <b>observed views only</b> (no estimates), and is not
-  merged into the narratives above. Precision was judged by hand on a sample of 40 links and has
-  not been independently reviewed. <b>High</b> = a full article link; <b>medium</b> = a shortened
+  merged into the narratives above. Precision was judged by hand by one reviewer on 100 links (not
+  independently reviewed): full article links 35 of 40 judged right, shortened links 48 of 48. All 5
+  wrong full links were reference or app links whose posts were 26 days or more apart, so such links
+  (posts more than 21 days apart) are now <b>low</b> confidence and listed separately.
+  <b>High</b> = a full article link, posts within 21 days; <b>medium</b> = a shortened
   link, where the destination is not visible and most cases are one news aggregator posting the
   same item on two platforms, so treat them as one source, not independent spread.</p>
   <div class="plot" data-panel="cross_platform_urls"></div>
@@ -1132,8 +1135,9 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
   at least 0.85, posted within 3 days of each other, identical text excluded (that is the exact-text
   table above). Connected posts form an <b>event</b>. Unlike the exact-text table, most events here
   involve <b>different accounts</b>, so they show real spread of one story. Precision was judged by
-  hand on 40 random pairs (all were the same event) and has not been independently reviewed;
-  similarity below 0.80 was not tested. <b>High</b> = every link in the event is at least 0.90;
+  hand by one reviewer on 100 events (not independently reviewed): high 45 of 45 and medium 42 of 44
+  judged right; 9 rows were marked unsure because the reviewer could not read the language, and one of
+  the 2 wrong ones was a Dhivehi post matched to an unrelated English one. Similarity below 0.80 was not tested. <b>High</b> = every link in the event is at least 0.90;
   <b>medium</b> = some links are 0.85 to 0.90. Events with more than 30 distinct texts are marked
   <b>large</b>: they may merge several related stories. Observed views only, no estimates.</p>
   <div class="plot" data-panel="cross_platform_events"></div>

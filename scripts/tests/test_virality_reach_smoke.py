@@ -367,9 +367,13 @@ def test_url_links_invariants(m19, url_tier):
     assert links.link_id.is_unique
     assert (links.n_platforms >= 2).all() and (links.n_authors >= 2).all()
     assert not links.host.isin(m19.URL_DENY_HOSTS).any()
-    assert set(links.match_confidence) <= {"high", "medium"}
+    assert set(links.match_confidence) <= {"high", "medium", "low"}
     assert (links.loc[links.match_confidence == "medium", "host"].isin(m19.URL_SHORTENERS)).all()
-    assert (links.loc[links.match_confidence == "high", "host"].isin(m19.URL_SHORTENERS) == False).all()  # noqa: E712
+    assert (links.loc[links.match_confidence != "medium", "host"].isin(m19.URL_SHORTENERS) == False).all()  # noqa: E712
+    # 'low' = a non-shortened link whose posts span more than URL_MAX_SPREAD_DAYS; 'high' must be within it
+    assert (links.loc[links.match_confidence == "high", "spread_duration_hours"] <= m19.URL_MAX_SPREAD_DAYS * 24).all()
+    assert (links.loc[links.match_confidence == "low", "spread_duration_hours"] > m19.URL_MAX_SPREAD_DAYS * 24).all()
+    assert not links.host.isin(["timesofindia.sng.link", "sng.link", "onelink.me"]).any()   # app deep links are denied
     assert (links.spread_duration_hours >= 0).all() and (links.observed_views >= 0).all()
     # repeat posts by one author count once
     assert (links.n_unique_posts <= links.n_posts).all()

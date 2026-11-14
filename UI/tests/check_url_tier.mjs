@@ -38,7 +38,7 @@ const host = doc.querySelector('[data-panel="cross_platform_urls"]');
 check('URL tier table shipped in metrics.json', nLinks > 0, `${nLinks} links`);
 check('panel host exists', !!host);
 const sums = host ? [...host.querySelectorAll('summary')].map((s) => s.textContent) : [];
-check('two tables: high (open) and medium (collapsed)', sums.length === 2 && /High/.test(sums[0]) && /Medium/.test(sums[1]), sums.join(' | '));
+check('tables: high (open), medium and low (collapsed)', sums.length >= 2 && /High/.test(sums[0]) && /Medium/.test(sums[1]) && (sums.length === 2 || /Low/.test(sums[2])), sums.join(' | '));
 const rows = host ? host.querySelectorAll('details')[0]?.querySelectorAll('tbody tr').length : 0;
 check('high table has rows', rows > 0, `${rows} rows`);
 check('card says preliminary', /preliminary/i.test(doc.body.textContent) && /Shared-Link Narratives/.test(doc.body.textContent));
