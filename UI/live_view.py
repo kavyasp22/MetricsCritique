@@ -86,7 +86,7 @@ def _compute(days: int, military: tuple[str, ...], today: date) -> dict:
             # cast to VARCHAR first: reading TIMESTAMPTZ natively needs pytz
             d_end = con.execute(
                 "SELECT max(CAST(CAST(coalesce(posted_at, scraped_at) AS VARCHAR) AS DATE)) "
-                "FROM post_facts").fetchone()[0]
+                "FROM post_facts").fetchall()[0][0]   # fetchall() closes the result; register() needs that
             if d_end is None:
                 out["error"] = "no posts"
                 return out
@@ -104,7 +104,7 @@ def _compute(days: int, military: tuple[str, ...], today: date) -> dict:
                 "GROUP BY 1", [start, anchor]).fetchall()}
             prev_total = con.execute(
                 f"SELECT count(*) FROM post_facts WHERE {day_expr} BETWEEN ? AND ?",
-                [prev_start, start - timedelta(days=1)]).fetchone()[0]
+                [prev_start, start - timedelta(days=1)]).fetchall()[0][0]
             out["volume"] = {"daily": [tot.get(d, 0) for d in days_list],
                              "total": sum(tot.values()), "prev_total": prev_total}
 
@@ -113,15 +113,18 @@ def _compute(days: int, military: tuple[str, ...], today: date) -> dict:
                             "domain_names": names})
                 return out
 
-            # routed posts in the window, joined to post day on the analytics side
-            uids = con.execute(
-                f"SELECT post_uid, {day_expr}, platform FROM post_facts WHERE {day_expr} "
-                "BETWEEN ? AND ?", [prev_start, anchor]).fetchall()
-            g.execute("CREATE TEMP TABLE w(post_uid VARCHAR, day DATE, platform VARCHAR)")
-            g.executemany("INSERT INTO w VALUES (?,?,?)", uids)
-            routed = g.execute(
-                "SELECT w.post_uid, w.day, w.platform, r.domain_1, r.domain_2, r.confidence_1, "
-                "r.event_mode FROM w JOIN post_route_v1 r USING (post_uid) WHERE r.ok").fetchall()
+            # routed posts in the window, joined to post day on the analytics side. The (small) routed set is
+            # registered as a table and joined inside DuckDB; the old row-by-row insert of EVERY post in the
+            # window took 25-60 s and made the date-range buttons look stuck.
+            import pandas as pd
+            rdf = g.execute("SELECT post_uid, domain_1, domain_2, confidence_1, event_mode "
+                            "FROM post_route_v1 WHERE ok").df()
+            con.register("routed_df", rdf)
+            routed = con.execute(
+                f"SELECT p.post_uid, {day_expr} AS d, p.platform, r.domain_1, r.domain_2, r.confidence_1, "
+                "r.event_mode FROM post_facts p JOIN routed_df r ON r.post_uid = p.post_uid "
+                f"WHERE {day_expr} BETWEEN ? AND ?", [prev_start, anchor]).fetchall()
+            con.unregister("routed_df")
             win = [r for r in routed if r[1] >= start]
             prev = [r for r in routed if r[1] < start]
             idx = {d: i for i, d in enumerate(days_list)}
@@ -165,8 +168,7 @@ def _compute(days: int, military: tuple[str, ...], today: date) -> dict:
             m_uids = [r[0] for r in m_win]
             ents, recent = [], []
             if m_uids:
-                g.execute("CREATE TEMP TABLE m(post_uid VARCHAR)")
-                g.executemany("INSERT INTO m VALUES (?)", [(u,) for u in m_uids])
+                g.register("m", pd.DataFrame({"post_uid": m_uids}))
                 try:
                     ents = [{"name": n, "entity_type": t, "level": l, "n": c, "posts": pc}
                             for n, t, l, c, pc in g.execute(

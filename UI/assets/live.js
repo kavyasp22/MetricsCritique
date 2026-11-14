@@ -203,7 +203,7 @@
     OV_PRESETS.forEach(function (pr) {
       var b = h('button', { class: 'lv-preset', type: 'button', text: pr[1] });
       b.setAttribute('aria-pressed', L.ovDays === pr[0] ? 'true' : 'false');
-      b.addEventListener('click', function () { L.ovDays = pr[0]; pollOv(); renderOverviewCard(); });
+      b.addEventListener('click', function () { L.ovDays = pr[0]; L.ovData = null; pollOv(); renderOverviewCard(); });   // null = show 'Loading…' until the new range arrives
       presets.appendChild(b);
     });
     host.appendChild(presets);
