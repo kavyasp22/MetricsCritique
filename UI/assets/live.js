@@ -7,7 +7,8 @@
 
   var URL = 'api/live/overview';
   var KEY_DOMAINS = 'z-mil-domains';
-  var L = { data: null, timer: null, dead: false, domains: null, days: 7 };
+  var L = { data: null, timer: null, dead: false, domains: null, days: 7, ovDays: 7, ovData: null };
+  var OV_PRESETS = [[7, '7 days'], [14, '14 days'], [30, '1 month'], [90, '3 months']];
 
   function h(tag, attrs, kids) {
     var e = document.createElement(tag);
@@ -196,8 +197,20 @@
     }
     if (!host) { return; }
     host.textContent = '';
-    var d = L.data;
-    host.appendChild(h('p', { class: 'bp-t', text: 'Topics now — past ' + L.days + ' days' }));
+    var d = L.ovData;
+    host.appendChild(h('p', { class: 'bp-t', text: 'Topics now — past ' + ((d && d.days) ? d.days.length : L.ovDays) + ' days' }));
+    var presets = h('div', { class: 'lv-presets' });
+    OV_PRESETS.forEach(function (pr) {
+      var b = h('button', { class: 'lv-preset', type: 'button', text: pr[1] });
+      b.setAttribute('aria-pressed', L.ovDays === pr[0] ? 'true' : 'false');
+      b.addEventListener('click', function () { L.ovDays = pr[0]; pollOv(); renderOverviewCard(); });
+      presets.appendChild(b);
+    });
+    host.appendChild(presets);
+    if (!d && L.data && L.data.available) {
+      host.appendChild(h('div', { class: 'fnote', text: 'Loading…' }));
+      return;
+    }
     if (!d || !d.available || !d.domains) {
       host.appendChild(h('div', { class: 'fnote', text: 'Live topics appear when the server is running with routing data.' }));
       return;
@@ -216,13 +229,22 @@
     renderOverviewCard();
   }
 
+  /* The overview card has its own date range (7 days / 14 days / 1 month / 3 months); Military mode keeps 7 days. */
+  function pollOv() {
+    if (L.ovDays === L.days) { L.ovData = L.data; paint(); return Promise.resolve(); }
+    return fetch(URL + '?days=' + L.ovDays, { cache: 'no-store' }).then(function (r) {
+      if (!r.ok) { throw new Error('http ' + r.status); }
+      return r.json();
+    }).then(function (d) { L.ovData = d; paint(); }).catch(function () { paint(); });
+  }
+
   function poll() {
     if (L.dead) { return Promise.resolve(); }
     var q = URL + '?days=' + L.days + (L.domains ? '&domains=' + encodeURIComponent(L.domains.join(',')) : '');
     return fetch(q, { cache: 'no-store' }).then(function (r) {
       if (!r.ok) { throw new Error('http ' + r.status); }
       return r.json();
-    }).then(function (d) { L.data = d; paint(); })
+    }).then(function (d) { L.data = d; return pollOv(); })
       .catch(function () {
         if (!L.data) { L.dead = true; }   // static snapshot (no API): stop polling
         paint();
@@ -238,6 +260,7 @@
     var mil = mode === 'military';
     mv.style.display = mil ? '' : 'none';
     if (mil) {
+      document.body.setAttribute('data-mode', 'military');   // hides the shared date-range bar (CSS)
       basic.style.display = 'none'; adv.style.display = 'none';
       bb.setAttribute('aria-pressed', 'false'); ab.setAttribute('aria-pressed', 'false');
       store('z-mode', 'military');

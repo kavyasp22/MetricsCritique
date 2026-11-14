@@ -76,6 +76,16 @@ check('military domains highlighted', mv.querySelectorAll('.lv-dom.mil').length 
 const chip = [...mv.querySelectorAll('.lv-chips .chip')].find((b) => b.textContent.startsWith('D02'));
 chip.click(); await wait(100);
 check('toggling a domain re-queries with domains=', urls.some((u) => /domains=.*D02/.test(decodeURIComponent(u))));
+// overview card date range: 7 days / 14 days / 1 month / 3 months, each re-queries with its own days=
+const ovBtns = [...d.querySelectorAll('#lv-overview .lv-preset')];
+check('overview card has 4 range buttons', ovBtns.map((b) => b.textContent).join('|') === '7 days|14 days|1 month|3 months');
+check('7 days is pressed by default', ovBtns[0].getAttribute('aria-pressed') === 'true');
+d.getElementById('mode-basic-btn').click();
+for (const [label, n] of [['14 days', 14], ['1 month', 30], ['3 months', 90]]) {
+  [...d.querySelectorAll('#lv-overview .lv-preset')].find((b) => b.textContent === label).click(); await wait(150);
+  check(`"${label}" queries days=${n}`, urls.some((u) => new RegExp('days=' + n + '(&|$)').test(u)));
+  check(`"${label}" becomes the pressed button`, [...d.querySelectorAll('#lv-overview .lv-preset')].find((b) => b.textContent === label).getAttribute('aria-pressed') === 'true');
+}
 d.getElementById('mode-basic-btn').click();
 check('Overview button leaves military mode', mv.style.display === 'none' && d.getElementById('basic-view').style.display === '');
 w.close();
