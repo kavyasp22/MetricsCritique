@@ -11,6 +11,7 @@ because the point of an independent check is that it be independent.
 """
 from __future__ import annotations
 
+import pytest
 import importlib.util
 import sys
 from pathlib import Path
@@ -54,6 +55,7 @@ def chk(name: str, cond, detail: str = "") -> None:
 
 
 def test_wilson() -> None:
+    pytest.importorskip("statsmodels")   # reference implementation; not installed in .venv
     from statsmodels.stats.proportion import proportion_confint
     cases = [(0, 10), (1, 10), (3, 20), (13, 18), (18, 25), (50, 100),
              (99, 100), (100, 100), (8, 8)]

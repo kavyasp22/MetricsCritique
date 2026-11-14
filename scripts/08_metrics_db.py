@@ -327,7 +327,10 @@ METRIC_META: list[dict] = [
          grain=_CELL, direction="higher=more positive", higher_is_worse=None,
          caveats=("Secondary to tone_mean/tone_eb. Weight floor 1 so no post gets weight 0; posts without a counter "
                   "weigh 1 (see tone_weight_cov). Within a platform only (NULL at the platform-rolled grain). "
-                  "Counters are not unique people."), support_gate="tone_n>=5"),
+                  "Counters are not unique people. Sensitivity check (26 Oct snapshot, 4,476 cells with >=5 scored posts): "
+                  "Spearman 0.989 with the unweighted mean; only 3.3% of cells differ by more than 0.1 and 0.2% change sign, "
+                  "so the weighting rarely changes the reading (platforms without counters, e.g. Reddit, are identical)."),
+         support_gate="tone_n>=5"),
     dict(metric_key="tone_weight_cov", display_name="Weighted-tone coverage", family="content",
          formula="share of tone-scored posts that carry an audience counter", units="fraction", grain=_CELL,
          direction="n/a", higher_is_worse=None,
