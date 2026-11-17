@@ -2020,6 +2020,48 @@ details.dtt-block[open] > summary::before { transform: rotate(90deg); }
 .dtt-track { display: block; height: 6px; background: rgba(143, 163, 191, 0.15); border-radius: 3px; overflow: hidden; }
 .dtt-bar { display: block; height: 6px; background: var(--gold, #e3bc4b); border-radius: 3px; }
 
+/* ---- burst episodes: sticky X-axis date header & scrollable Y-axis rows ---- */
+.gantt-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--grid, #202b3c);
+  border-radius: 6px;
+  background: var(--sunken, #0a0f18);
+  margin: 0.4rem 0 0.8rem;
+}
+.gantt-inner {
+  display: flex;
+  flex-direction: column;
+}
+.gantt-header {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: var(--elev, #161e2b);
+  border-bottom: 1px solid var(--grid, #263346);
+  user-select: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+.gantt-body {
+  max-height: 400px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule, #334155) transparent;
+}
+.gantt-body::-webkit-scrollbar {
+  width: 7px;
+}
+.gantt-body::-webkit-scrollbar-track {
+  background: rgba(10, 15, 24, 0.5);
+}
+.gantt-body::-webkit-scrollbar-thumb {
+  background: var(--rule, #334155);
+  border-radius: 4px;
+}
+.gantt-body::-webkit-scrollbar-thumb:hover {
+  background: var(--gold, #e3bc4b);
+}
+
 /* ==========================================================================
    Collapsible Right Sidebar Metrics Panel (Overview page)
    ========================================================================== */

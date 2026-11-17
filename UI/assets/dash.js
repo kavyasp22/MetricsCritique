@@ -1406,31 +1406,64 @@
   function gantt(host, cfg) {
     if (!cfg.rows.length) { empty(host, cfg.emptyMsg || 'No episodes detected in the current selection.'); return; }
     var rowH = 22, labelW = cfg.labelW || 200;
-    var m = { t: 6, r: 16, b: 24, l: labelW };
+    var m = { t: 4, r: 24, b: 8, l: labelW };
     var inner = Math.max(280, (cfg.width || 700) - labelW - m.r);
     var w = labelW + inner + m.r;
-    var ht = m.t + cfg.rows.length * rowH + m.b;
-    var scroll = h('div', { class: 'scrollx' });
-    host.appendChild(scroll);
-    var F = frame(scroll, { width: w, height: ht, margin: m, title: cfg.title });
     var days = cfg.days;
-    var x = linScale(0, Math.max(days.length - 1, 1), 0, F.iw);
+    var x = linScale(0, Math.max(days.length - 1, 1), 0, inner);
     var idx = {}; days.forEach(function (d, i) { idx[d] = i; });
 
     var want = Math.max(2, Math.min(7, days.length));
     var st = Math.max(1, Math.floor((days.length - 1) / (want - 1)));
+
+    var outer = h('div', { class: 'gantt-wrap' });
+    var innerWrap = h('div', { class: 'gantt-inner', style: 'min-width:' + w + 'px;width:' + w + 'px;' });
+    outer.appendChild(innerWrap);
+    host.appendChild(outer);
+
+    /* --- 1. Fixed / Sticky X-Axis Date Header --- */
+    var headerHt = 26;
+    var headerBox = h('div', { class: 'gantt-header' });
+    var headerSvg = el('svg', { width: w, height: headerHt, viewBox: '0 0 ' + w + ' ' + headerHt, style: 'display:block;' });
+    var headerG = el('g', { transform: 'translate(' + m.l + ',0)' });
+
+    headerG.appendChild(svgText(-8, 14, BURST_VIEW === 'platform' ? 'Topic' : 'Platform',
+      { anchor: 'end', baseline: 'middle', size: 9, fill: K.ink3, weight: 600 }));
+
     for (var i = 0; i < days.length; i += st) {
-      F.g.appendChild(el('line', {
-        x1: x(i), x2: x(i), y1: 0, y2: cfg.rows.length * rowH,
+      var xi = x(i);
+      headerG.appendChild(svgText(xi, 13, fmtDay(days[i]),
+        { anchor: 'middle', size: 8.5, tabular: true, fill: K.ink2 }));
+      headerG.appendChild(el('line', {
+        x1: xi, x2: xi, y1: 19, y2: headerHt,
         stroke: K.grid, 'stroke-width': 1
       }));
-      F.g.appendChild(svgText(x(i), cfg.rows.length * rowH + 13, fmtDay(days[i]),
-        { anchor: 'middle', size: 8.5, tabular: true }));
+    }
+    headerSvg.appendChild(headerG);
+    headerBox.appendChild(headerSvg);
+    innerWrap.appendChild(headerBox);
+
+    /* --- 2. Scrollable Rows Body (Y-Axis) --- */
+    var totalRowsHt = cfg.rows.length * rowH;
+    var bodyHt = m.t + totalRowsHt + m.b;
+    var bodyBox = h('div', { class: 'gantt-body' });
+    var bodySvg = el('svg', { width: w, height: bodyHt, viewBox: '0 0 ' + w + ' ' + bodyHt, style: 'display:block;' });
+    if (cfg.title) {
+      var ti = el('title'); ti.textContent = cfg.title; bodySvg.appendChild(ti);
+    }
+    var bodyG = el('g', { transform: 'translate(' + m.l + ',' + m.t + ')' });
+
+    for (var i = 0; i < days.length; i += st) {
+      var xi = x(i);
+      bodyG.appendChild(el('line', {
+        x1: xi, x2: xi, y1: 0, y2: totalRowsHt,
+        stroke: K.grid, 'stroke-width': 1
+      }));
     }
 
     cfg.rows.forEach(function (r, ri) {
       var y = ri * rowH + rowH / 2;
-      F.g.appendChild(svgText(-8, y, r.label, { anchor: 'end', baseline: 'middle', size: 9.5, fill: K.ink2 }));
+      bodyG.appendChild(svgText(-8, y, r.label, { anchor: 'end', baseline: 'middle', size: 9.5, fill: K.ink2 }));
       var i0 = idx[r.start], i1 = idx[r.end];
       if (i0 == null) { i0 = 0; }
       if (i1 == null) { i1 = days.length - 1; }
@@ -1454,9 +1487,14 @@
       hoverable(hit, function () { return r.label; }, function () { return r.rows; },
         function () { return r.note; });
       attachDrill(hit, r.drill);
-      F.g.appendChild(g);
+      bodyG.appendChild(g);
     });
-    return F;
+
+    bodySvg.appendChild(bodyG);
+    bodyBox.appendChild(bodySvg);
+    innerWrap.appendChild(bodyBox);
+
+    return { headerSvg: headerSvg, svg: bodySvg, g: bodyG, w: w, h: bodyHt, iw: inner, ih: totalRowsHt };
   }
 
   /* ---------------------------------------------------------- swimlane ---- */
@@ -2240,7 +2278,7 @@
       sum.appendChild(cntSpan);
       det.appendChild(sum);
 
-      var plotWrap = h('div', { style: 'overflow-x:auto;padding:0.4rem 0 0.6rem' });
+      var plotWrap = h('div', { class: 'burst-plot-wrap' });
       gantt(plotWrap, {
         days: F.days,
         width: Math.max(600, (host.clientWidth || 760)),
