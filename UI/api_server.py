@@ -136,8 +136,35 @@ def build_query(view: str, qs: dict):
         topic_id = qs.get("topic_id", [None])[0]
         if not topic_id:
             raise ValueError("topic_id required")
-        where.append("pt.topic_id = ?")
-        params.append(topic_id)
+        platform = qs.get("platform", [None])[0]
+        if platform == "youtube_comment":
+            c_where = []
+            if topic_id in ("t004", "t005"):
+                c_where.append("pt.topic_id IN ('t004', 't005')")
+            else:
+                c_where.append("pt.topic_id = ?")
+                params.append(topic_id)
+            _day_clause(qs, c_where, params, col="c.posted_at")
+            sql = f"""
+                SELECT c.comment_uid AS post_uid, 'youtube_comment' AS platform, c.posted_at,
+                       coalesce(c.author_display_name, 'anonymous') AS author_name,
+                       left(coalesce(c.text, ''), 500) AS text,
+                       '' AS url,
+                       pt.confidence,
+                       count(*) OVER () AS total_rows
+                FROM analytics.comment_facts c
+                JOIN analytics.post_facts pf ON c.video_id = pf.native_id AND pf.platform = 'youtube_video'
+                JOIN analytics.post_topic pt ON pt.post_uid = pf.post_uid
+                WHERE {' AND '.join(c_where)}
+                ORDER BY c.posted_at DESC
+            """
+            return sql, params
+
+        if topic_id in ("t004", "t005"):
+            where.append("pt.topic_id IN ('t004', 't005')")
+        else:
+            where.append("pt.topic_id = ?")
+            params.append(topic_id)
         _platform_clause(qs, where, params)
         _day_clause(qs, where, params)
         sql = f"""
@@ -157,6 +184,36 @@ def build_query(view: str, qs: dict):
         # v2 keyword topics (t0xx, analytics.post_topic) handled above.
         cluster_id = qs.get("cluster_id", [None])[0]
         topic_id = qs.get("topic_id", [None])[0]
+        platform = qs.get("platform", [None])[0]
+        if platform == "youtube_comment":
+            c_where = []
+            if topic_id and str(topic_id).startswith("p"):
+                c_where.append("pt.parent_topic_id = ?")
+                params.append(topic_id)
+            elif topic_id:
+                c_where.append("pt.topic_id = ?")
+                params.append(topic_id)
+            elif cluster_id is not None:
+                c_where.append("pt.cluster_id = ?")
+                params.append(int(cluster_id))
+            else:
+                raise ValueError("cluster_id or topic_id required")
+            _day_clause(qs, c_where, params, col="c.posted_at")
+            sql = f"""
+                SELECT c.comment_uid AS post_uid, 'youtube_comment' AS platform, c.posted_at,
+                       coalesce(c.author_display_name, 'anonymous') AS author_name,
+                       left(coalesce(c.text, ''), 500) AS text,
+                       '' AS url,
+                       pt.confidence,
+                       count(*) OVER () AS total_rows
+                FROM analytics.comment_facts c
+                JOIN analytics.post_facts pf ON c.video_id = pf.native_id AND pf.platform = 'youtube_video'
+                JOIN geo.{TOPIC_POST} pt ON pt.post_uid = pf.post_uid
+                WHERE {' AND '.join(c_where)}
+                ORDER BY c.posted_at DESC
+            """
+            return sql, params
+
         if topic_id and str(topic_id).startswith("p"):
             # A parent drill returns the union of its sub-topics' posts, the same
             # contract as a CAMEO parent-code drill. Clicking a parent that showed
@@ -300,12 +357,40 @@ def build_query(view: str, qs: dict):
         platform = qs.get("platform", [None])[0]
         if not platform:
             raise ValueError("platform required")
+        sentiment = qs.get("sentiment", [None])[0]
+        if platform == "youtube_comment":
+            c_where = []
+            _day_clause(qs, c_where, params, col="c.posted_at")
+            where_sql = f"WHERE {' AND '.join(c_where)}" if c_where else ""
+            sql = f"""
+                SELECT c.comment_uid AS post_uid, 'youtube_comment' AS platform, c.posted_at,
+                       coalesce(c.author_display_name, 'anonymous') AS author_name,
+                       left(coalesce(c.text, ''), 500) AS text,
+                       '' AS url,
+                       count(*) OVER () AS total_rows
+                FROM analytics.comment_facts c
+                {where_sql}
+                ORDER BY c.posted_at DESC
+            """
+            return sql, params
         where.append("p.platform = ?")
         params.append(platform)
         _day_clause(qs, where, params)
+        join_sql = ""
+        score_col = ""
+        if sentiment:
+            join_sql = "JOIN analytics.post_scores sc ON sc.post_uid = p.post_uid"
+            score_col = ", round(sc.tone_score, 3) AS tone_score"
+            if sentiment == "positive":
+                where.append("sc.tone_score > 0.15 AND sc.tone_valid = true")
+            elif sentiment == "negative":
+                where.append("sc.tone_score < -0.15 AND sc.tone_valid = true")
+            elif sentiment == "neutral":
+                where.append("sc.tone_score >= -0.15 AND sc.tone_score <= 0.15 AND sc.tone_valid = true")
         sql = f"""
-            SELECT {POST_COLS}, count(*) OVER () AS total_rows
+            SELECT {POST_COLS}{score_col}, count(*) OVER () AS total_rows
             FROM analytics.post_facts p
+            {join_sql}
             WHERE {' AND '.join(where)}
             ORDER BY p.posted_at DESC
         """
