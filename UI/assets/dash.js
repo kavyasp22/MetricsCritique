@@ -2199,18 +2199,176 @@
 
   /* ---- 4. Burst episodes ---- */
   var BURST_VIEW = 'platform'; // 'platform' | 'topic'
+  var BURST_SEL_PLATS = null;  // map of plat -> bool, or null = all
+  var BURST_SEL_TOPICS = null; // map of topic_id -> bool, or null = all
+
+  function makeBurstFilterDropdown(title, keys, store, labeller, countsMap, onChange) {
+    var wrap = h('div', { class: 'burst-filter-wrap' });
+    var trigger = h('button', { type: 'button', class: 'burst-dd-trigger' });
+    var trigText = h('span', {});
+    var arrow = h('span', { class: 'burst-dd-arrow', text: '▼' });
+    trigger.appendChild(trigText);
+    trigger.appendChild(arrow);
+
+    var menu = h('div', { class: 'burst-dd-menu', style: 'display:none;' });
+
+    // Header with Title and Select All / Clear
+    var hdr = h('div', { class: 'burst-dd-header' });
+    var titleEl = h('span', { class: 'burst-dd-title', text: title });
+    var acts = h('div', { class: 'burst-dd-actions' });
+    var selAll = h('button', { type: 'button', class: 'burst-dd-act-btn', text: 'Select all' });
+    var clear = h('button', { type: 'button', class: 'burst-dd-act-btn', text: 'Clear' });
+    acts.appendChild(selAll);
+    acts.appendChild(clear);
+    hdr.appendChild(titleEl);
+    hdr.appendChild(acts);
+    menu.appendChild(hdr);
+
+    // Search input
+    var searchWrap = h('div', { class: 'burst-dd-search-wrap' });
+    var search = h('input', { type: 'text', class: 'burst-dd-search', placeholder: 'Search ' + title.toLowerCase() + '…' });
+    searchWrap.appendChild(search);
+    menu.appendChild(searchWrap);
+
+    // List container
+    var list = h('div', { class: 'burst-dd-list' });
+    menu.appendChild(list);
+    wrap.appendChild(trigger);
+    wrap.appendChild(menu);
+
+    function getLabel(k) { return labeller ? labeller(k) : k; }
+
+    function refreshTrigger() {
+      var sel = keys.filter(function (k) { return store[k]; });
+      if (sel.length === keys.length) {
+        trigText.textContent = 'All ' + title.toLowerCase() + ' (' + keys.length + ')';
+      } else if (sel.length === 0) {
+        trigText.textContent = 'None (' + title + ')';
+      } else if (sel.length === 1) {
+        trigText.textContent = getLabel(sel[0]);
+      } else if (sel.length <= 2) {
+        trigText.textContent = sel.map(getLabel).join(', ');
+      } else {
+        trigText.textContent = sel.length + ' ' + title.toLowerCase();
+      }
+    }
+
+    function renderList(query) {
+      list.textContent = '';
+      var q = (query || '').toLowerCase().trim();
+      keys.forEach(function (k) {
+        var lbl = getLabel(k);
+        if (q && lbl.toLowerCase().indexOf(q) === -1) { return; }
+        var item = h('label', { class: 'burst-dd-item' });
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !!store[k];
+        cb.addEventListener('change', function () {
+          store[k] = cb.checked;
+          refreshTrigger();
+          onChange();
+        });
+        var txt = h('span', { text: lbl });
+        item.appendChild(cb);
+        item.appendChild(txt);
+        if (countsMap && countsMap[k] != null) {
+          var cnt = h('span', { class: 'burst-dd-count', text: '(' + countsMap[k] + ')' });
+          item.appendChild(cnt);
+        }
+        list.appendChild(item);
+      });
+    }
+
+    selAll.addEventListener('click', function (e) {
+      e.stopPropagation();
+      keys.forEach(function (k) { store[k] = true; });
+      renderList(search.value);
+      refreshTrigger();
+      onChange();
+    });
+
+    clear.addEventListener('click', function (e) {
+      e.stopPropagation();
+      keys.forEach(function (k) { store[k] = false; });
+      renderList(search.value);
+      refreshTrigger();
+      onChange();
+    });
+
+    search.addEventListener('input', function () {
+      renderList(search.value);
+    });
+
+    trigger.addEventListener('click', function (e) {
+      e.stopPropagation();
+      document.querySelectorAll('.burst-filter-wrap.open').forEach(function (w) {
+        if (w !== wrap) {
+          w.classList.remove('open');
+          var m = w.querySelector('.burst-dd-menu');
+          if (m) { m.style.display = 'none'; }
+        }
+      });
+      var isOpen = wrap.classList.toggle('open');
+      menu.style.display = isOpen ? 'flex' : 'none';
+      if (isOpen) {
+        renderList('');
+        setTimeout(function () { search.focus(); }, 50);
+      }
+    });
+
+    document.addEventListener('click', function (e) {
+      if (!wrap.contains(e.target)) {
+        wrap.classList.remove('open');
+        menu.style.display = 'none';
+      }
+    });
+    menu.addEventListener('click', function (e) { e.stopPropagation(); });
+
+    refreshTrigger();
+    return wrap;
+  }
 
   P.bursts = function (host) {
-    var rows = F.bursts.slice().sort(function (a, b) { return day(a.start_day) < day(b.start_day) ? -1 : 1; });
-    if (!rows.length) { empty(host, 'No burst episodes overlap this window/filter selection.'); return; }
+    var allRows = F.bursts.slice().sort(function (a, b) { return day(a.start_day) < day(b.start_day) ? -1 : 1; });
+    if (!allRows.length) { empty(host, 'No burst episodes overlap this window/filter selection.'); return; }
 
-    /* --- control bar: Group by + Expand/Collapse --- */
+    var platCounts = {}, topicCounts = {};
+    allRows.forEach(function (e) {
+      var p = e.platform || '(unknown)';
+      var t = e.topic_id || 'unassigned';
+      platCounts[p] = (platCounts[p] || 0) + 1;
+      topicCounts[t] = (topicCounts[t] || 0) + 1;
+    });
+
+    var availPlats = Object.keys(platCounts).sort();
+    var availTopics = Object.keys(topicCounts).sort();
+
+    if (!BURST_SEL_PLATS) {
+      BURST_SEL_PLATS = {};
+      availPlats.forEach(function (p) { BURST_SEL_PLATS[p] = true; });
+    } else {
+      availPlats.forEach(function (p) { if (BURST_SEL_PLATS[p] == null) { BURST_SEL_PLATS[p] = true; } });
+    }
+
+    if (!BURST_SEL_TOPICS) {
+      BURST_SEL_TOPICS = {};
+      availTopics.forEach(function (t) { BURST_SEL_TOPICS[t] = true; });
+    } else {
+      availTopics.forEach(function (t) { if (BURST_SEL_TOPICS[t] == null) { BURST_SEL_TOPICS[t] = true; } });
+    }
+
+    var rows = allRows.filter(function (e) {
+      var p = e.platform || '(unknown)';
+      var t = e.topic_id || 'unassigned';
+      return !!BURST_SEL_PLATS[p] && !!BURST_SEL_TOPICS[t];
+    });
+
+    /* --- control bar: Group by + Platforms Dropdown + Topics Dropdown + Expand/Collapse --- */
     var ctlWrap = h('div', { class: 'burst-ctl-wrap' });
 
     /* view toggle row */
     var viewRow = h('div', { class: 'burst-ctl-bar' });
-    var lblEl = h('span', { class: 'burst-ctl-lbl' });
-    lblEl.textContent = 'Group by:';
+    var lblEl = h('span', { class: 'burst-ctl-lbl', text: 'Group by:' });
     viewRow.appendChild(lblEl);
     ['platform', 'topic'].forEach(function (v) {
       var btn = h('button', { type: 'button', class: 'burst-btn' + (BURST_VIEW === v ? ' active' : '') });
@@ -2222,6 +2380,21 @@
       });
       viewRow.appendChild(btn);
     });
+
+    // Add Platforms dropdown
+    var platDd = makeBurstFilterDropdown('Platforms', availPlats, BURST_SEL_PLATS, null, platCounts, function () {
+      host.textContent = '';
+      P.bursts(host);
+    });
+    viewRow.appendChild(platDd);
+
+    // Add Topics dropdown
+    var topicDd = makeBurstFilterDropdown('Topics', availTopics, BURST_SEL_TOPICS, topicLabel, topicCounts, function () {
+      host.textContent = '';
+      P.bursts(host);
+    });
+    viewRow.appendChild(topicDd);
+
     ctlWrap.appendChild(viewRow);
 
     /* expand / collapse row */
@@ -2240,6 +2413,12 @@
     actRow.appendChild(bShut);
     ctlWrap.appendChild(actRow);
     host.appendChild(ctlWrap);
+
+    if (!rows.length) {
+      var noMatch = h('div', { class: 'caveat', text: 'No burst episodes match the selected platform and topic filters. Use the dropdowns above to select platforms and topics.' });
+      host.appendChild(noMatch);
+      return;
+    }
 
     /* --- legend --- */
     legend(host, [

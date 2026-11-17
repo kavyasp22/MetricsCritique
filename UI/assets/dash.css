@@ -2373,6 +2373,146 @@ body:not(.mp-sidebar-open) #basic-view .basic-wrap {
 .burst-btn.active { background: var(--gold, #e3bc4b); color: #000; border-color: var(--gold, #e3bc4b); font-weight: 700; }
 .burst-actions { display: flex; flex-wrap: wrap; gap: 0.4rem 0.8rem; align-items: center; margin: 0.4rem 0 0.2rem; }
 
+/* ---- Burst episodes filter dropdowns ---- */
+.burst-filter-wrap {
+  position: relative;
+  display: inline-block;
+  margin-left: 0.35rem;
+}
+.burst-dd-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: var(--sunken, #0f1520);
+  border: 1px solid var(--gold-border, #44546a);
+  border-radius: 6px;
+  padding: 0.22rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ink, #ffffff);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  font-family: inherit;
+}
+.burst-dd-trigger:hover {
+  border-color: var(--gold, #e3bc4b);
+  background: var(--elev, #18202d);
+}
+.burst-dd-arrow {
+  font-size: 0.6rem;
+  color: var(--ink-3, #94a3b8);
+  transition: transform 0.15s;
+}
+.burst-filter-wrap.open .burst-dd-arrow {
+  transform: rotate(180deg);
+}
+.burst-dd-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 100;
+  min-width: 230px;
+  max-width: 320px;
+  background: #0c1424;
+  border: 1px solid #1e2c45;
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.75);
+  padding: 0.5rem 0;
+  display: flex;
+  flex-direction: column;
+}
+.burst-dd-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.2rem 0.8rem 0.45rem;
+  border-bottom: 1px solid #1b263b;
+}
+.burst-dd-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.01em;
+}
+.burst-dd-actions {
+  display: flex;
+  gap: 0.6rem;
+  font-size: 0.72rem;
+}
+.burst-dd-act-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: #60a5fa;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.burst-dd-act-btn:hover {
+  color: #93c5fd;
+  text-decoration: underline;
+}
+.burst-dd-search-wrap {
+  padding: 0.45rem 0.7rem 0.35rem;
+}
+.burst-dd-search {
+  width: 100%;
+  background: #111a2e;
+  border: 1px solid #202e48;
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.74rem;
+  color: #ffffff;
+  box-sizing: border-box;
+  outline: none;
+  font-family: inherit;
+}
+.burst-dd-search:focus {
+  border-color: #3b82f6;
+}
+.burst-dd-list {
+  max-height: 220px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.2rem 0;
+  scrollbar-width: thin;
+  scrollbar-color: #334155 transparent;
+}
+.burst-dd-list::-webkit-scrollbar {
+  width: 6px;
+}
+.burst-dd-list::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 3px;
+}
+.burst-dd-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.78rem;
+  color: #cbd5e1;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s;
+}
+.burst-dd-item:hover {
+  background: #17243c;
+  color: #ffffff;
+}
+.burst-dd-item input[type="checkbox"] {
+  accent-color: var(--gold, #e3bc4b);
+  cursor: pointer;
+  margin: 0;
+}
+.burst-dd-count {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---- Excel-style table column filter ---- */
 .th-content {
   display: inline-flex;
