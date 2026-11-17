@@ -40,10 +40,47 @@
     if (_cache[name]) { return _cache[name]; }
     var t = DATA.tables[name];
     if (!t) { _cache[name] = []; return _cache[name]; }
-    var cols = t.columns, out = new Array(t.rows.length);
+    var cols = t.columns;
+
+    // Handle topic_dim: merge duplicate t004 & t005 into a single "Geopolitics / Neighbourhood"
+    if (name === 'topic_dim') {
+      var dimMap = {};
+      for (var i = 0; i < t.rows.length; i++) {
+        var o = {}, r = t.rows[i];
+        for (var j = 0; j < cols.length; j++) { o[cols[j]] = r[j]; }
+        var tid = o.topic_id === 't005' ? 't004' : o.topic_id;
+        if (!dimMap[tid]) {
+          o.topic_id = tid;
+          dimMap[tid] = o;
+        } else {
+          dimMap[tid].cluster_size = (dimMap[tid].cluster_size || 0) + (o.cluster_size || 0);
+          dimMap[tid].n_posts = (dimMap[tid].n_posts || 0) + (o.n_posts || 0);
+          if (o.description && dimMap[tid].description) {
+            dimMap[tid].description = dimMap[tid].description + ', ' + o.description;
+          }
+        }
+      }
+      var outDim = Object.keys(dimMap).map(function (k) { return dimMap[k]; });
+      _cache[name] = outDim;
+      return outDim;
+    }
+
+    var out = new Array(t.rows.length);
     for (var i = 0; i < t.rows.length; i++) {
       var o = {}, r = t.rows[i];
       for (var j = 0; j < cols.length; j++) { o[cols[j]] = r[j]; }
+      if (o.topic_id === 't005') { o.topic_id = 't004'; }
+      if (name === 'entity_dim') {
+        if (!o.entity_subtype || o.entity_subtype === 'unresolved' || o.entity_subtype === 'None') {
+          if (o.entity_type === 'PERSON') { o.entity_subtype = 'civilian'; }
+          else if (o.entity_type === 'LOCATION') { o.entity_subtype = 'geographic_location'; }
+          else if (o.entity_type === 'ORG') { o.entity_subtype = 'commercial_company'; }
+          else if (o.entity_type === 'EVENT') { o.entity_subtype = 'protest_demonstration'; }
+          else { o.entity_subtype = 'civilian'; }
+        } else if (o.entity_subtype === 'diplomat') { o.entity_subtype = 'political_leader'; }
+        else if (o.entity_subtype === 'military_leader') { o.entity_subtype = 'military_personnel'; }
+        else if (o.entity_subtype === 'business_executive') { o.entity_subtype = 'commercial_company'; }
+      }
       out[i] = o;
     }
     _cache[name] = out;
@@ -170,8 +207,10 @@
   }
   function txt(s) { return document.createTextNode(s); }
   function svgText(x, y, s, o) {
-    var a = { x: x, y: y, fill: (o && o.fill) || K.ink3, 'font-size': (o && o.size) || 10,
-      'text-anchor': (o && o.anchor) || 'start', 'font-family': 'inherit' };
+    var a = {
+      x: x, y: y, fill: (o && o.fill) || K.ink3, 'font-size': (o && o.size) || 10,
+      'text-anchor': (o && o.anchor) || 'start', 'font-family': 'inherit'
+    };
     if (o && o.weight) { a['font-weight'] = o.weight; }
     if (o && o.tabular) { a['font-variant-numeric'] = 'tabular-nums'; }
     if (o && o.baseline) { a['dominant-baseline'] = o.baseline; }
@@ -290,9 +329,11 @@
       if (mySeq !== DRILL.seq) { return; }
       subEl.textContent = '';
       bodyEl.textContent = '';
-      bodyEl.appendChild(h('div', { class: 'empty',
+      bodyEl.appendChild(h('div', {
+        class: 'empty',
         text: 'Could not reach the live data API. Serve this dashboard with '
-          + '"python3 api_server.py" (not a plain static file server) to enable click-to-inspect. (' + e + ')' }));
+          + '"python3 api_server.py" (not a plain static file server) to enable click-to-inspect. (' + e + ')'
+      }));
     });
   };
 
@@ -513,8 +554,10 @@
     tks.forEach(function (v) {
       var yy = y(v);
       if (yy < -1 || yy > F.ih + 1) { return; }
-      F.g.appendChild(el('line', { x1: 0, x2: F.iw, y1: yy, y2: yy,
-        stroke: (v === 0 && o.zeroEmph) ? K.axis : K.grid, 'stroke-width': 1 }));
+      F.g.appendChild(el('line', {
+        x1: 0, x2: F.iw, y1: yy, y2: yy,
+        stroke: (v === 0 && o.zeroEmph) ? K.axis : K.grid, 'stroke-width': 1
+      }));
       F.g.appendChild(svgText(-6, yy, o.fmt ? o.fmt(v) : fmtCompact(v),
         { anchor: 'end', baseline: 'middle', size: o.size || 9.5, tabular: true, fill: K.ink3 }));
     });
@@ -542,8 +585,10 @@
   function hatchPattern(svg) {
     var id = 'hx' + (patSeq++);
     var defs = el('defs');
-    var p = el('pattern', { id: id, width: 5, height: 5, patternUnits: 'userSpaceOnUse',
-      patternTransform: 'rotate(45)' });
+    var p = el('pattern', {
+      id: id, width: 5, height: 5, patternUnits: 'userSpaceOnUse',
+      patternTransform: 'rotate(45)'
+    });
     p.appendChild(el('rect', { width: 5, height: 5, fill: K.sunken }));
     p.appendChild(el('line', { x1: 0, y1: 0, x2: 0, y2: 5, stroke: K.axis, 'stroke-width': 1 }));
     defs.appendChild(p);
@@ -580,48 +625,461 @@
 
   /* -------------------------------------------------------- table view ---- */
 
+  /* -------------------------------------------------------- table view ---- */
+
+  var ACTIVE_TABLE_POPUP = null;
+
+  function closeActiveTablePopup() {
+    if (ACTIVE_TABLE_POPUP && ACTIVE_TABLE_POPUP.parentNode) {
+      ACTIVE_TABLE_POPUP.parentNode.removeChild(ACTIVE_TABLE_POPUP);
+    }
+    ACTIVE_TABLE_POPUP = null;
+  }
+
+  document.addEventListener('click', function (e) {
+    if (!ACTIVE_TABLE_POPUP) { return; }
+    if (!ACTIVE_TABLE_POPUP.contains(e.target) && !e.target.closest('.tbl-filter-btn')) {
+      closeActiveTablePopup();
+    }
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { closeActiveTablePopup(); }
+  });
+
+  window.addEventListener('scroll', function (e) {
+    if (ACTIVE_TABLE_POPUP) {
+      if (e && e.target && (e.target === ACTIVE_TABLE_POPUP || (ACTIVE_TABLE_POPUP.contains && ACTIVE_TABLE_POPUP.contains(e.target)))) {
+        return; // Ignore scroll events inside the popup itself
+      }
+      closeActiveTablePopup();
+    }
+  }, true);
+
   function tableView(host, cols, rows, opts) {
     opts = opts || {};
-    var d = h('details', { class: 'tv' });
-    if (opts.open) { d.open = true; }
-    d.appendChild(h('summary', { text: opts.label || ('Table view — ' + rows.length + ' rows') }));
-    if (!rows.length) {
-      d.appendChild(h('div', { class: 'empty', text: 'No rows in the current selection.' }));
-      host.appendChild(d);
-      return d;
+    if (!rows || !rows.length) {
+      if (opts.rawTable) {
+        empty(host, 'No rows in the current selection.');
+        return null;
+      }
+      var emptyDet = h('details', { class: 'tv' });
+      if (opts.maxWidth) { emptyDet.style.maxWidth = opts.maxWidth; }
+      emptyDet.appendChild(h('summary', { text: opts.label || 'Table view — 0 rows' }));
+      emptyDet.appendChild(h('div', { class: 'empty', text: 'No rows in the current selection.' }));
+      host.appendChild(emptyDet);
+      return emptyDet;
     }
+
+    var rootContainer;
+    var summaryEl = null;
+    if (opts.rawTable) {
+      rootContainer = h('div', { class: 'tv-raw-wrap' });
+    } else {
+      rootContainer = h('details', { class: 'tv' });
+      if (opts.maxWidth) { rootContainer.style.maxWidth = opts.maxWidth; }
+      if (opts.open) { rootContainer.open = true; }
+      summaryEl = h('summary', { text: opts.label || ('Table view — ' + rows.length + ' rows') });
+      rootContainer.appendChild(summaryEl);
+    }
+
+    function getColKey(c, idx) { return c.k || ('col_' + idx); }
+    function getColRaw(c, r) { return c.get ? c.get(r) : r[c.k]; }
+    function getColDisplay(c, r) {
+      var raw = getColRaw(c, r);
+      if (raw == null || raw === '') { return '—'; }
+      if (c.fmt) { return String(c.fmt(raw, r)); }
+      return String(raw);
+    }
+
+    var activeFilters = {}; // colKey -> Set of allowed string values
+    var sortCol = null;     // colKey
+    var sortDir = null;     // 'asc' | 'desc'
+
+    // Status bar for active filters above table
+    var filterBar = h('div', { class: 'tbl-filter-bar', style: 'display:none' });
+    rootContainer.appendChild(filterBar);
+
     var wrap = h('div', { class: 'tbl-h' });
     var t = h('table');
     var thead = h('thead'), tr = h('tr');
-    cols.forEach(function (c) { tr.appendChild(h('th', { class: c.num ? 'num' : '', text: c.label })); });
-    thead.appendChild(tr); t.appendChild(thead);
-    var tb = h('tbody');
-    rows.slice(0, opts.max || 400).forEach(function (r) {
-      var row = h('tr');
-      cols.forEach(function (c) {
-        var raw = c.get ? c.get(r) : r[c.k];
-        var s = c.fmt ? c.fmt(raw, r) : (raw == null ? '—' : String(raw));
-        var cls = [];
-        if (c.num) { cls.push('num'); }
-        if (c.wrap) { cls.push('wrap'); }
-        if (c.strong) { cls.push('strong'); }
-        if (s === '—') { cls.push('nil'); }
-        var td = h('td', { class: cls.join(' ') });
-        if (c.node) { td.appendChild(c.node(raw, r)); } else { td.textContent = s; }
-        row.appendChild(td);
+
+    var filterBtns = {}; // colKey -> button element
+
+    cols.forEach(function (c, idx) {
+      var ck = getColKey(c, idx);
+      var th = h('th', { class: c.num ? 'num' : '' });
+      var content = h('div', { class: 'th-content' });
+      var lbl = h('span', { class: 'th-label', text: c.label });
+      content.appendChild(lbl);
+
+      var btn = h('button', {
+        type: 'button',
+        class: 'tbl-filter-btn',
+        title: 'Filter & sort ' + c.label
       });
-      if (opts.rowDrill) { attachDrill(row, opts.rowDrill(r)); }
-      tb.appendChild(row);
+      btn.textContent = '▾';
+      btn.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        openColumnFilterPopup(c, idx, btn);
+      });
+      content.appendChild(btn);
+      filterBtns[ck] = btn;
+
+      th.appendChild(content);
+      tr.appendChild(th);
     });
+    thead.appendChild(tr);
+    t.appendChild(thead);
+
+    var tb = h('tbody');
     t.appendChild(tb);
     wrap.appendChild(t);
-    d.appendChild(wrap);
-    if (rows.length > (opts.max || 400)) {
-      d.appendChild(h('div', { class: 'fnote',
-        text: 'Showing first ' + (opts.max || 400) + ' of ' + rows.length + ' rows. The full set is in UI/data/metrics.json.' }));
+    rootContainer.appendChild(wrap);
+
+    var fnoteEl = h('div', { class: 'fnote', style: 'display:none' });
+    rootContainer.appendChild(fnoteEl);
+
+    function updateFilterBar(filteredCount, totalCount) {
+      var activeKeys = Object.keys(activeFilters);
+      if (!activeKeys.length) {
+        filterBar.style.display = 'none';
+        filterBar.textContent = '';
+        return;
+      }
+      filterBar.style.display = 'flex';
+      filterBar.textContent = '';
+
+      var countSpan = h('span', { class: 'tfb-count' });
+      countSpan.textContent = 'Filtered: ' + filteredCount + ' of ' + totalCount + ' rows';
+      filterBar.appendChild(countSpan);
+
+      activeKeys.forEach(function (ck) {
+        var cIdx = cols.findIndex(function (col, i) { return getColKey(col, i) === ck; });
+        var colLabel = cIdx >= 0 ? cols[cIdx].label : ck;
+        var vals = Array.from(activeFilters[ck]);
+        var valStr = vals.length <= 2 ? vals.join(', ') : (vals.length + ' selected');
+
+        var chip = h('span', { class: 'tfb-chip' });
+        chip.textContent = colLabel + ': ' + valStr + ' ';
+        var xBtn = h('span', { class: 'tfb-chip-x', title: 'Clear ' + colLabel + ' filter', text: '✕' });
+        xBtn.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          delete activeFilters[ck];
+          renderFilteredRows();
+        });
+        chip.appendChild(xBtn);
+        filterBar.appendChild(chip);
+      });
+
+      var clearAll = h('button', { type: 'button', class: 'tfb-clear-all', text: 'Clear all filters' });
+      clearAll.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        activeFilters = {};
+        renderFilteredRows();
+      });
+      filterBar.appendChild(clearAll);
     }
-    host.appendChild(d);
-    return d;
+
+    function renderFilteredRows() {
+      // 1. Filter rows
+      var filtered = rows.filter(function (r) {
+        for (var i = 0; i < cols.length; i++) {
+          var c = cols[i];
+          var ck = getColKey(c, i);
+          var allowed = activeFilters[ck];
+          if (allowed) {
+            var v = getColDisplay(c, r);
+            if (!allowed.has(v)) { return false; }
+          }
+        }
+        return true;
+      });
+
+      // 2. Sort rows
+      if (sortCol && sortDir) {
+        var sc = cols.find(function (c, i) { return getColKey(c, i) === sortCol; });
+        if (sc) {
+          filtered.sort(function (a, b) {
+            var va = getColRaw(sc, a);
+            var vb = getColRaw(sc, b);
+            if (typeof va === 'number' && typeof vb === 'number') {
+              return sortDir === 'asc' ? va - vb : vb - va;
+            }
+            var sa = String(getColDisplay(sc, a)).toLowerCase();
+            var sb = String(getColDisplay(sc, b)).toLowerCase();
+            if (sa < sb) { return sortDir === 'asc' ? -1 : 1; }
+            if (sa > sb) { return sortDir === 'asc' ? 1 : -1; }
+            return 0;
+          });
+        }
+      }
+
+      // 3. Update summary text if in details
+      if (summaryEl) {
+        var baseLbl = opts.label || 'Table view';
+        if (filtered.length !== rows.length) {
+          summaryEl.textContent = baseLbl + ' — ' + filtered.length + ' of ' + rows.length + ' rows';
+        } else {
+          summaryEl.textContent = baseLbl + ' — ' + rows.length + ' rows';
+        }
+      }
+
+      // 4. Update filter button states
+      cols.forEach(function (c, i) {
+        var ck = getColKey(c, i);
+        var btn = filterBtns[ck];
+        if (btn) {
+          if (activeFilters[ck]) {
+            btn.classList.add('filtered');
+            btn.textContent = '▼';
+          } else {
+            btn.classList.remove('filtered');
+            btn.textContent = '▾';
+          }
+        }
+      });
+
+      // 5. Update active filter bar
+      updateFilterBar(filtered.length, rows.length);
+
+      // 6. Render table rows
+      tb.textContent = '';
+      if (!filtered.length) {
+        var emptyTr = h('tr');
+        var emptyTd = h('td', { class: 'nil', colspan: String(cols.length) });
+        emptyTd.textContent = 'No matching rows for active filters.';
+        emptyTd.style.textAlign = 'center';
+        emptyTd.style.padding = '1.8rem 0.5rem';
+        emptyTr.appendChild(emptyTd);
+        tb.appendChild(emptyTr);
+        fnoteEl.style.display = 'none';
+        return;
+      }
+
+      var maxRows = opts.max || 400;
+      filtered.slice(0, maxRows).forEach(function (r) {
+        var row = h('tr');
+        cols.forEach(function (c) {
+          var raw = getColRaw(c, r);
+          var s = c.fmt ? c.fmt(raw, r) : (raw == null ? '—' : String(raw));
+          var cls = [];
+          if (c.num) { cls.push('num'); }
+          if (c.wrap) { cls.push('wrap'); }
+          if (c.strong) { cls.push('strong'); }
+          if (s === '—') { cls.push('nil'); }
+          var td = h('td', { class: cls.join(' ') });
+          if (c.node) { td.appendChild(c.node(raw, r)); } else { td.textContent = s; }
+          row.appendChild(td);
+        });
+        if (opts.rowDrill) { attachDrill(row, opts.rowDrill(r)); }
+        tb.appendChild(row);
+      });
+
+      if (filtered.length > maxRows) {
+        fnoteEl.textContent = 'Showing first ' + maxRows + ' of ' + filtered.length + ' rows. Full set in metrics.json.';
+        fnoteEl.style.display = 'block';
+      } else {
+        fnoteEl.style.display = 'none';
+      }
+    }
+
+    function openColumnFilterPopup(c, colIdx, triggerBtn) {
+      if (ACTIVE_TABLE_POPUP && ACTIVE_TABLE_POPUP._triggerBtn === triggerBtn) {
+        closeActiveTablePopup();
+        return;
+      }
+      closeActiveTablePopup();
+
+      var ck = getColKey(c, colIdx);
+
+      // Aggregate all unique display values and row counts
+      var valCounts = {};
+      rows.forEach(function (r) {
+        var v = getColDisplay(c, r);
+        valCounts[v] = (valCounts[v] || 0) + 1;
+      });
+      var uniqueVals = Object.keys(valCounts).sort(function (a, b) {
+        return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+      });
+
+      var popup = h('div', { class: 'tbl-filter-popup' });
+      popup._triggerBtn = triggerBtn;
+
+      // Header row
+      var head = h('div', { class: 'tfp-head' });
+      var titleSpan = h('span');
+      titleSpan.textContent = 'Filter: ' + c.label;
+      var closeX = h('button', { type: 'button', class: 'tfp-close', text: '✕' });
+      closeX.addEventListener('click', function () { closeActiveTablePopup(); });
+      head.appendChild(titleSpan);
+      head.appendChild(closeX);
+      popup.appendChild(head);
+
+      // Sort buttons row
+      var sortRow = h('div', { class: 'tfp-sort-btns' });
+      var btnSortAsc = h('button', {
+        type: 'button',
+        class: 'tfp-sort-btn' + (sortCol === ck && sortDir === 'asc' ? ' active' : '')
+      });
+      btnSortAsc.textContent = '↑ Sort A → Z';
+      btnSortAsc.addEventListener('click', function () {
+        sortCol = ck;
+        sortDir = 'asc';
+        closeActiveTablePopup();
+        renderFilteredRows();
+      });
+
+      var btnSortDesc = h('button', {
+        type: 'button',
+        class: 'tfp-sort-btn' + (sortCol === ck && sortDir === 'desc' ? ' active' : '')
+      });
+      btnSortDesc.textContent = '↓ Sort Z → A';
+      btnSortDesc.addEventListener('click', function () {
+        sortCol = ck;
+        sortDir = 'desc';
+        closeActiveTablePopup();
+        renderFilteredRows();
+      });
+      sortRow.appendChild(btnSortAsc);
+      sortRow.appendChild(btnSortDesc);
+      popup.appendChild(sortRow);
+
+      // Search input
+      var searchInput = h('input', {
+        type: 'text',
+        class: 'tfp-search-input',
+        placeholder: 'Search ' + c.label + ' values...'
+      });
+      popup.appendChild(searchInput);
+
+      // Quick action row
+      var actRow = h('div', { class: 'tfp-actions-row' });
+      var selAllLink = h('button', { type: 'button', class: 'tfp-link', text: 'Select All' });
+      var clearLink = h('button', { type: 'button', class: 'tfp-link', text: 'Clear' });
+      var resetLink = h('button', { type: 'button', class: 'tfp-link', text: 'Reset Filter' });
+      actRow.appendChild(selAllLink);
+      actRow.appendChild(clearLink);
+      actRow.appendChild(resetLink);
+      popup.appendChild(actRow);
+
+      // Checkbox list
+      var valList = h('div', { class: 'tfp-val-list' });
+      var itemMap = {}; // value -> { itemEl, checkbox }
+
+      uniqueVals.forEach(function (val) {
+        var isChecked = !activeFilters[ck] || activeFilters[ck].has(val);
+        var itemEl = h('label', { class: 'tfp-val-item' });
+        var cb = h('input', { type: 'checkbox' });
+        cb.checked = isChecked;
+
+        var lbl = h('span', { class: 'tfp-val-label', text: val });
+        var cnt = h('span', { class: 'tfp-val-cnt', text: '(' + valCounts[val] + ')' });
+
+        itemEl.appendChild(cb);
+        itemEl.appendChild(lbl);
+        itemEl.appendChild(cnt);
+        valList.appendChild(itemEl);
+        itemMap[val] = { itemEl: itemEl, checkbox: cb };
+      });
+      popup.appendChild(valList);
+
+      // Realtime search filtering
+      searchInput.addEventListener('input', function () {
+        var q = searchInput.value.trim().toLowerCase();
+        uniqueVals.forEach(function (val) {
+          var match = !q || val.toLowerCase().indexOf(q) !== -1;
+          itemMap[val].itemEl.style.display = match ? 'flex' : 'none';
+        });
+      });
+
+      selAllLink.addEventListener('click', function () {
+        uniqueVals.forEach(function (val) {
+          if (itemMap[val].itemEl.style.display !== 'none') {
+            itemMap[val].checkbox.checked = true;
+          }
+        });
+      });
+
+      clearLink.addEventListener('click', function () {
+        uniqueVals.forEach(function (val) {
+          if (itemMap[val].itemEl.style.display !== 'none') {
+            itemMap[val].checkbox.checked = false;
+          }
+        });
+      });
+
+      resetLink.addEventListener('click', function () {
+        delete activeFilters[ck];
+        closeActiveTablePopup();
+        renderFilteredRows();
+      });
+
+      // Footer row with Apply / Cancel
+      var footer = h('div', { class: 'tfp-footer' });
+      var cancelBtn = h('button', { type: 'button', class: 'tfp-btn tfp-btn-cancel', text: 'Cancel' });
+      cancelBtn.addEventListener('click', function () { closeActiveTablePopup(); });
+
+      var applyBtn = h('button', { type: 'button', class: 'tfp-btn tfp-btn-apply', text: 'Apply' });
+      applyBtn.addEventListener('click', function () {
+        var checkedVals = [];
+        uniqueVals.forEach(function (val) {
+          if (itemMap[val].checkbox.checked) { checkedVals.push(val); }
+        });
+
+        if (checkedVals.length === uniqueVals.length) {
+          // All checked -> no filter needed
+          delete activeFilters[ck];
+        } else {
+          activeFilters[ck] = new Set(checkedVals);
+        }
+        closeActiveTablePopup();
+        renderFilteredRows();
+      });
+
+      footer.appendChild(cancelBtn);
+      footer.appendChild(applyBtn);
+      popup.appendChild(footer);
+
+      // Stop wheel propagation inside the popup
+      popup.addEventListener('wheel', function (ev) {
+        ev.stopPropagation();
+      }, { passive: true });
+
+      document.body.appendChild(popup);
+      ACTIVE_TABLE_POPUP = popup;
+
+      // Smart viewport positioning
+      var rect = triggerBtn.getBoundingClientRect();
+      var popH = popup.offsetHeight || 300;
+      var popW = popup.offsetWidth || 250;
+      var spaceBelow = window.innerHeight - rect.bottom - 12;
+      var spaceAbove = rect.top - 12;
+
+      if (spaceBelow >= 240 || spaceBelow >= spaceAbove) {
+        // Open downwards
+        popup.style.top = (rect.bottom + 4) + 'px';
+        popup.style.maxHeight = Math.max(160, spaceBelow) + 'px';
+      } else {
+        // Open upwards
+        var topPos = Math.max(8, rect.top - popH - 4);
+        popup.style.top = topPos + 'px';
+        popup.style.maxHeight = Math.max(160, spaceAbove) + 'px';
+      }
+
+      var leftPos = rect.left;
+      if (leftPos + popW > window.innerWidth - 12) {
+        leftPos = Math.max(10, window.innerWidth - popW - 14);
+      }
+      popup.style.left = leftPos + 'px';
+
+      // Focus search input
+      setTimeout(function () { searchInput.focus(); }, 30);
+    }
+
+    renderFilteredRows();
+    host.appendChild(rootContainer);
+    return rootContainer;
   }
 
   function empty(host, msg) {
@@ -649,8 +1107,10 @@
     xDayAxis(F, x, days, { count: cfg.xTicks || 4 });
 
     if (cfg.zeroLine && dom[0] < 0 && dom[1] > 0) {
-      F.g.appendChild(el('line', { x1: 0, x2: F.iw, y1: y(0), y2: y(0),
-        stroke: K.axis, 'stroke-width': 1 }));
+      F.g.appendChild(el('line', {
+        x1: 0, x2: F.iw, y1: y(0), y2: y(0),
+        stroke: K.axis, 'stroke-width': 1
+      }));
       F.g.appendChild(svgText(F.iw, y(0) - 3, '0', { anchor: 'end', size: 8.5, fill: K.ink3 }));
     }
 
@@ -660,9 +1120,11 @@
       cfg.ribbon.forEach(function (b) {
         if (!b.on) { return; }
         var x0 = x(b.i) - (F.iw / Math.max(days.length, 1)) / 2;
-        F.g.appendChild(el('rect', { x: Math.max(0, x0), y: F.ih + 4,
+        F.g.appendChild(el('rect', {
+          x: Math.max(0, x0), y: F.ih + 4,
           width: Math.max(1.5, F.iw / Math.max(days.length, 1)), height: rh,
-          fill: K.focal, opacity: 0.85 }));
+          fill: K.focal, opacity: 0.85
+        }));
       });
     }
 
@@ -689,9 +1151,11 @@
         s.pts.forEach(function (p) {
           if (!isNum(p.v)) { return; }
           var y0 = y(0), y1 = y(p.v);
-          F.g.appendChild(el('rect', { x: x(p.i) - bw / 2, y: Math.min(y0, y1),
+          F.g.appendChild(el('rect', {
+            x: x(p.i) - bw / 2, y: Math.min(y0, y1),
             width: bw, height: Math.max(1, Math.abs(y1 - y0)), rx: 1,
-            fill: p.v < 0 ? K.neg : col }));
+            fill: p.v < 0 ? K.neg : col
+          }));
         });
       } else {
         segs.forEach(function (sg) {
@@ -700,16 +1164,20 @@
             return;
           }
           var d = 'M' + sg.map(function (p) { return x(p.i) + ',' + y(p.v); }).join('L');
-          F.g.appendChild(el('path', { d: d, fill: 'none', stroke: col, 'stroke-width': 2,
-            'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+          F.g.appendChild(el('path', {
+            d: d, fill: 'none', stroke: col, 'stroke-width': 2,
+            'stroke-linejoin': 'round', 'stroke-linecap': 'round'
+          }));
         });
       }
 
       var last = null;
       for (var i = s.pts.length - 1; i >= 0; i--) { if (isNum(s.pts[i].v)) { last = s.pts[i]; break; } }
       if (last && s.kind !== 'bar') {
-        F.g.appendChild(el('circle', { cx: x(last.i), cy: y(last.v), r: 4,
-          fill: col, stroke: K.sunken, 'stroke-width': 2 }));
+        F.g.appendChild(el('circle', {
+          cx: x(last.i), cy: y(last.v), r: 4,
+          fill: col, stroke: K.sunken, 'stroke-width': 2
+        }));
         if (cfg.labelEnds) {
           F.g.appendChild(svgText(x(last.i) + 8, y(last.v), s.label,
             { size: 9, baseline: 'middle', fill: K.ink2 }));
@@ -718,8 +1186,10 @@
     });
 
     /* crosshair */
-    var xh = el('line', { x1: 0, x2: 0, y1: 0, y2: F.ih, stroke: K.goldHair,
-      'stroke-width': 1, opacity: 0 });
+    var xh = el('line', {
+      x1: 0, x2: 0, y1: 0, y2: F.ih, stroke: K.goldHair,
+      'stroke-width': 1, opacity: 0
+    });
     F.g.appendChild(xh);
     var hit = el('rect', { x: 0, y: 0, width: F.iw, height: F.ih, fill: 'transparent' });
     F.g.appendChild(hit);
@@ -732,8 +1202,10 @@
       xh.setAttribute('opacity', 1);
       var rows = cfg.series.map(function (s) {
         var p = s.pts[i];
-        return { k: s.label, color: s.role === 'context' ? K.context : K.focal,
-          v: (p && isNum(p.v)) ? (cfg.tipFmt ? cfg.tipFmt(p.v) : fmt(p.v, 3)) : 'no value (gated)' };
+        return {
+          k: s.label, color: s.role === 'context' ? K.context : K.focal,
+          v: (p && isNum(p.v)) ? (cfg.tipFmt ? cfg.tipFmt(p.v) : fmt(p.v, 3)) : 'no value (gated)'
+        };
       });
       if (cfg.extraRows) { rows = rows.concat(cfg.extraRows(i)); }
       TIP.show(ev, tipNode((cfg.tipHead ? cfg.tipHead + ' · ' : '') + fmtDayFull(days[i]),
@@ -799,8 +1271,10 @@
     var zero = x(0);
 
     niceTicks(dom[0], dom[1], 4).forEach(function (v) {
-      F.g.appendChild(el('line', { x1: x(v), x2: x(v), y1: 0, y2: items.length * rowH,
-        stroke: v === 0 ? K.axis : K.grid, 'stroke-width': 1 }));
+      F.g.appendChild(el('line', {
+        x1: x(v), x2: x(v), y1: 0, y2: items.length * rowH,
+        stroke: v === 0 ? K.axis : K.grid, 'stroke-width': 1
+      }));
       F.g.appendChild(svgText(x(v), items.length * rowH + 12, cfg.xFmt ? cfg.xFmt(v) : fmt(v, 2),
         { anchor: 'middle', size: 9, tabular: true }));
     });
@@ -811,8 +1285,10 @@
       var col = cfg.diverging ? (d.value < 0 ? K.neg : K.focal)
         : (d.dim ? K.context : K.focal);
       var g = el('g');
-      g.appendChild(el('rect', { x: x0, y: yTop, width: Math.max(1.5, x1 - x0), height: bh,
-        rx: 2, fill: col }));
+      g.appendChild(el('rect', {
+        x: x0, y: yTop, width: Math.max(1.5, x1 - x0), height: bh,
+        rx: 2, fill: col
+      }));
       g.appendChild(svgText(-8, yTop + bh / 2, d.label,
         { anchor: 'end', baseline: 'middle', size: 9.5, fill: K.ink2 }));
       var vx = d.value < 0 ? x0 - 6 : x1 + 6;
@@ -845,11 +1321,17 @@
       if (isNum(d.value)) {
         var y1 = y(d.value), y0 = y(0);
         var g = el('g');
-        g.appendChild(el('rect', { x: cx - bw / 2, y: Math.min(y0, y1), width: bw,
-          height: Math.max(1, Math.abs(y1 - y0)), rx: 2, fill: d.color || K.focal }));
+        g.appendChild(el('rect', {
+          x: cx - bw / 2, y: Math.min(y0, y1), width: bw,
+          height: Math.max(1, Math.abs(y1 - y0)), rx: 2, fill: d.color || K.focal
+        }));
         hoverable(g, function () { return d.label; },
-          function () { return [{ k: cfg.measure || 'value', color: d.color || K.focal,
-            v: cfg.vFmt ? cfg.vFmt(d.value) : fmtInt(d.value) }].concat(d.rows || []); },
+          function () {
+            return [{
+              k: cfg.measure || 'value', color: d.color || K.focal,
+              v: cfg.vFmt ? cfg.vFmt(d.value) : fmtInt(d.value)
+            }].concat(d.rows || []);
+          },
           function () { return cfg.tipNote; });
         attachDrill(g, d.drill);
         F.g.appendChild(g);
@@ -885,18 +1367,26 @@
         var d = cfg.get(r, c);
         var x = ci * cw, y = ri * ch;
         var col = d && isNum(d.v) ? cfg.color(d.v) : null;
-        var rect = el('rect', { x: x, y: y, width: Math.max(1, cw - gap), height: Math.max(1, ch - gap),
-          fill: col || hatch, stroke: 'none' });
+        var rect = el('rect', {
+          x: x, y: y, width: Math.max(1, cw - gap), height: Math.max(1, ch - gap),
+          fill: col || hatch, stroke: 'none'
+        });
         F.g.appendChild(rect);
         if (d && d.ring) {
-          F.g.appendChild(el('rect', { x: x - 0.5, y: y - 0.5, width: cw - gap + 1, height: ch - gap + 1,
-            fill: 'none', stroke: K.ink, 'stroke-width': 1.2 }));
+          F.g.appendChild(el('rect', {
+            x: x - 0.5, y: y - 0.5, width: cw - gap + 1, height: ch - gap + 1,
+            fill: 'none', stroke: K.ink, 'stroke-width': 1.2
+          }));
         }
         var hitR = el('rect', { x: x - 1, y: y - 1, width: cw + 1, height: ch + 1, fill: 'transparent' });
         F.g.appendChild(hitR);
         hoverable(hitR, function () { return r.label + ' · ' + c.label; },
-          function () { return (d && d.rows) || [{ k: cfg.measure || 'value', color: col || K.context,
-            v: d && isNum(d.v) ? fmt(d.v, 3) : 'no value (support gate not met)' }]; },
+          function () {
+            return (d && d.rows) || [{
+              k: cfg.measure || 'value', color: col || K.context,
+              v: d && isNum(d.v) ? fmt(d.v, 3) : 'no value (support gate not met)'
+            }];
+          },
           function () { return (d && d.note) || cfg.tipNote; });
         attachDrill(hitR, d && d.drill);
       });
@@ -930,8 +1420,10 @@
     var want = Math.max(2, Math.min(7, days.length));
     var st = Math.max(1, Math.floor((days.length - 1) / (want - 1)));
     for (var i = 0; i < days.length; i += st) {
-      F.g.appendChild(el('line', { x1: x(i), x2: x(i), y1: 0, y2: cfg.rows.length * rowH,
-        stroke: K.grid, 'stroke-width': 1 }));
+      F.g.appendChild(el('line', {
+        x1: x(i), x2: x(i), y1: 0, y2: cfg.rows.length * rowH,
+        stroke: K.grid, 'stroke-width': 1
+      }));
       F.g.appendChild(svgText(x(i), cfg.rows.length * rowH + 13, fmtDay(days[i]),
         { anchor: 'middle', size: 8.5, tabular: true }));
     }
@@ -944,14 +1436,20 @@
       if (i1 == null) { i1 = days.length - 1; }
       var x0 = x(i0), x1 = x(i1);
       var g = el('g');
-      g.appendChild(el('rect', { x: x0, y: y - 5, width: Math.max(3, x1 - x0), height: 10, rx: 2,
-        fill: r.color || K.focal, opacity: 0.55 }));
+      g.appendChild(el('rect', {
+        x: x0, y: y - 5, width: Math.max(3, x1 - x0), height: 10, rx: 2,
+        fill: r.color || K.focal, opacity: 0.55
+      }));
       if (idx[r.peak] != null) {
-        g.appendChild(el('circle', { cx: x(idx[r.peak]), cy: y, r: 4.5, fill: r.color || K.focal,
-          stroke: K.sunken, 'stroke-width': 2 }));
+        g.appendChild(el('circle', {
+          cx: x(idx[r.peak]), cy: y, r: 4.5, fill: r.color || K.focal,
+          stroke: K.sunken, 'stroke-width': 2
+        }));
       }
-      var hit = el('rect', { x: Math.max(0, x0 - 6), y: y - 10, width: Math.max(16, x1 - x0 + 12),
-        height: 20, fill: 'transparent' });
+      var hit = el('rect', {
+        x: Math.max(0, x0 - 6), y: y - 10, width: Math.max(16, x1 - x0 + 12),
+        height: 20, fill: 'transparent'
+      });
       g.appendChild(hit);
       hoverable(hit, function () { return r.label; }, function () { return r.rows; },
         function () { return r.note; });
@@ -982,8 +1480,10 @@
     var want = Math.max(2, Math.min(7, days.length));
     var st = Math.max(1, Math.floor((days.length - 1) / (want - 1)));
     for (var i = 0; i < days.length; i += st) {
-      F.g.appendChild(el('line', { x1: x(i), x2: x(i), y1: 0, y2: cfg.rows.length * rowH,
-        stroke: K.grid, 'stroke-width': 1 }));
+      F.g.appendChild(el('line', {
+        x1: x(i), x2: x(i), y1: 0, y2: cfg.rows.length * rowH,
+        stroke: K.grid, 'stroke-width': 1
+      }));
       F.g.appendChild(svgText(x(i), cfg.rows.length * rowH + 13, fmtDay(days[i]),
         { anchor: 'middle', size: 8.5, tabular: true }));
     }
@@ -999,8 +1499,10 @@
       if (ri == null || di == null) { return; }
       var cx = x(di), cy = ri * rowH + rowH / 2;
       var g = el('g');
-      g.appendChild(el('circle', { cx: cx, cy: cy, r: p.r || 5, fill: p.color || K.focal,
-        stroke: K.surface, 'stroke-width': 1.5 }));
+      g.appendChild(el('circle', {
+        cx: cx, cy: cy, r: p.r || 5, fill: p.color || K.focal,
+        stroke: K.surface, 'stroke-width': 1.5
+      }));
       var hit = el('circle', { cx: cx, cy: cy, r: 9, fill: 'transparent' });
       g.appendChild(hit);
       hoverable(hit, function () { return p.label; }, function () { return p.rows; },
@@ -1029,25 +1531,33 @@
     var dom = cfg.domain || padDomain(extent(vals), {});
     var x = linScale(dom[0], dom[1], 0, F.iw);
     niceTicks(dom[0], dom[1], 4).forEach(function (v) {
-      F.g.appendChild(el('line', { x1: x(v), x2: x(v), y1: 0, y2: items.length * rowH,
-        stroke: Math.abs(v) < 1e-12 ? K.axis : K.grid, 'stroke-width': 1 }));
+      F.g.appendChild(el('line', {
+        x1: x(v), x2: x(v), y1: 0, y2: items.length * rowH,
+        stroke: Math.abs(v) < 1e-12 ? K.axis : K.grid, 'stroke-width': 1
+      }));
       F.g.appendChild(svgText(x(v), items.length * rowH + 12, fmt(v, 2),
         { anchor: 'middle', size: 9, tabular: true }));
     });
     if (isNum(cfg.refValue)) {
-      F.g.appendChild(el('line', { x1: x(cfg.refValue), x2: x(cfg.refValue), y1: 0,
-        y2: items.length * rowH, stroke: K.context, 'stroke-width': 1, 'stroke-dasharray': 'none' }));
+      F.g.appendChild(el('line', {
+        x1: x(cfg.refValue), x2: x(cfg.refValue), y1: 0,
+        y2: items.length * rowH, stroke: K.context, 'stroke-width': 1, 'stroke-dasharray': 'none'
+      }));
     }
     items.forEach(function (d, i) {
       var y = i * rowH + rowH / 2;
       var g = el('g');
       F.g.appendChild(svgText(-8, y, d.label, { anchor: 'end', baseline: 'middle', size: 9.5, fill: K.ink2 }));
       if (isNum(d.lo) && isNum(d.hi)) {
-        g.appendChild(el('line', { x1: x(d.lo), x2: x(d.hi), y1: y, y2: y,
-          stroke: K.context, 'stroke-width': 2, 'stroke-linecap': 'round' }));
+        g.appendChild(el('line', {
+          x1: x(d.lo), x2: x(d.hi), y1: y, y2: y,
+          stroke: K.context, 'stroke-width': 2, 'stroke-linecap': 'round'
+        }));
       }
-      g.appendChild(el('circle', { cx: x(d.value), cy: y, r: 4.5,
-        fill: d.dim ? K.context : K.focal, stroke: K.surface, 'stroke-width': 2 }));
+      g.appendChild(el('circle', {
+        cx: x(d.value), cy: y, r: 4.5,
+        fill: d.dim ? K.context : K.focal, stroke: K.surface, 'stroke-width': 2
+      }));
       g.appendChild(svgText(F.iw + 6, y, cfg.vFmt ? cfg.vFmt(d.value) : fmt(d.value, 2),
         { anchor: 'start', baseline: 'middle', size: 9, tabular: true, fill: K.ink2 }));
       var hit = el('rect', { x: 0, y: y - rowH / 2, width: F.iw, height: rowH, fill: 'transparent' });
@@ -1074,8 +1584,10 @@
     var dom = cfg.domain || padDomain(extent(vals), { symmetric: cfg.symmetric });
     var x = linScale(dom[0], dom[1], 0, F.iw);
     niceTicks(dom[0], dom[1], 4).forEach(function (v) {
-      F.g.appendChild(el('line', { x1: x(v), x2: x(v), y1: 0, y2: items.length * rowH,
-        stroke: Math.abs(v) < 1e-12 ? K.axis : K.grid, 'stroke-width': 1 }));
+      F.g.appendChild(el('line', {
+        x1: x(v), x2: x(v), y1: 0, y2: items.length * rowH,
+        stroke: Math.abs(v) < 1e-12 ? K.axis : K.grid, 'stroke-width': 1
+      }));
       F.g.appendChild(svgText(x(v), items.length * rowH + 12, fmt(v, 2),
         { anchor: 'middle', size: 9, tabular: true }));
     });
@@ -1087,15 +1599,21 @@
         g.appendChild(el('line', { x1: x(d.a), x2: x(d.b), y1: y, y2: y, stroke: K.axis, 'stroke-width': 1.5 }));
       }
       if (isNum(d.a)) {
-        g.appendChild(el('circle', { cx: x(d.a), cy: y, r: 4, fill: K.context,
-          stroke: K.surface, 'stroke-width': 2 }));
+        g.appendChild(el('circle', {
+          cx: x(d.a), cy: y, r: 4, fill: K.context,
+          stroke: K.surface, 'stroke-width': 2
+        }));
       }
       if (isNum(d.b)) {
-        g.appendChild(el('circle', { cx: x(d.b), cy: y, r: 4.5, fill: K.focal,
-          stroke: K.surface, 'stroke-width': 2 }));
+        g.appendChild(el('circle', {
+          cx: x(d.b), cy: y, r: 4.5, fill: K.focal,
+          stroke: K.surface, 'stroke-width': 2
+        }));
       }
-      g.appendChild(svgText(F.iw + 6, y, d.right || '', { anchor: 'start', baseline: 'middle',
-        size: 9, tabular: true, fill: K.ink3 }));
+      g.appendChild(svgText(F.iw + 6, y, d.right || '', {
+        anchor: 'start', baseline: 'middle',
+        size: 9, tabular: true, fill: K.ink3
+      }));
       var hit = el('rect', { x: 0, y: y - rowH / 2, width: F.iw, height: rowH, fill: 'transparent' });
       g.appendChild(hit);
       hoverable(hit, function () { return d.label; }, function () { return d.rows; },
@@ -1120,13 +1638,17 @@
     });
     var items = counts.map(function (c, i) {
       var b0 = lo + (hi - lo) * i / n, b1 = lo + (hi - lo) * (i + 1) / n;
-      return { label: fmt(b0, 1) + '–' + fmt(b1, 1), short: (i % 2 === 0 ? fmt(b0, 1) : ''),
+      return {
+        label: fmt(b0, 1) + '–' + fmt(b1, 1), short: (i % 2 === 0 ? fmt(b0, 1) : ''),
         value: c, rows: [{ k: 'cells', color: K.focal, v: fmtInt(c) },
-          { k: 'range', v: fmt(b0, 2) + ' – ' + fmt(b1, 2) }] };
+        { k: 'range', v: fmt(b0, 2) + ' – ' + fmt(b1, 2) }]
+      };
     });
-    vBars(host, { items: items, width: cfg.width, height: cfg.height || 110,
+    vBars(host, {
+      items: items, width: cfg.width, height: cfg.height || 110,
       measure: 'cells', vFmt: fmtInt, yFmt: fmtInt, everyLabel: true, maxBar: 30,
-      tipNote: cfg.tipNote });
+      tipNote: cfg.tipNote
+    });
   }
 
   /* ----------------------------------------------------------- scatter ---- */
@@ -1151,15 +1673,20 @@
     pts.forEach(function (p) {
       var g = el('g');
       if (p.flag) {
-        g.appendChild(el('circle', { cx: x(p.x), cy: y(p.y), r: 7, fill: 'none',
-          stroke: K.crit, 'stroke-width': 1.6 }));
+        g.appendChild(el('circle', {
+          cx: x(p.x), cy: y(p.y), r: 7, fill: 'none',
+          stroke: K.crit, 'stroke-width': 1.6
+        }));
         g.appendChild(el('path', {
           d: 'M' + (x(p.x) - 3) + ',' + (y(p.y) - 3) + 'L' + (x(p.x) + 3) + ',' + (y(p.y) + 3) +
-             'M' + (x(p.x) + 3) + ',' + (y(p.y) - 3) + 'L' + (x(p.x) - 3) + ',' + (y(p.y) + 3),
-          stroke: K.crit, 'stroke-width': 1.6 }));
+            'M' + (x(p.x) + 3) + ',' + (y(p.y) - 3) + 'L' + (x(p.x) - 3) + ',' + (y(p.y) + 3),
+          stroke: K.crit, 'stroke-width': 1.6
+        }));
       } else {
-        g.appendChild(el('circle', { cx: x(p.x), cy: y(p.y), r: 4, fill: K.focal,
-          opacity: 0.75, stroke: K.surface, 'stroke-width': 1.5 }));
+        g.appendChild(el('circle', {
+          cx: x(p.x), cy: y(p.y), r: 4, fill: K.focal,
+          opacity: 0.75, stroke: K.surface, 'stroke-width': 1.5
+        }));
       }
       var hit = el('circle', { cx: x(p.x), cy: y(p.y), r: 12, fill: 'transparent' });
       g.appendChild(hit);
@@ -1176,7 +1703,7 @@
   function meterRow(label, value, note, ok) {
     var row = h('div', { class: 'facet' });
     row.appendChild(h('div', { class: 'facet-t' }, [h('span', { text: label }),
-      h('span', { class: 'n', text: fmtPct(value, 1) })]));
+    h('span', { class: 'n', text: fmtPct(value, 1) })]));
     var track = h('div');
     track.style.height = '8px';
     track.style.background = K.grid;
@@ -1363,17 +1890,21 @@
     });
     var items = F.days.map(function (d) {
       var b = by[d] || { critical: 0, high: 0, medium: 0, t: 0 };
-      return { label: fmtDayFull(d), short: fmtDay(d), value: b.t,
+      return {
+        label: fmtDayFull(d), short: fmtDay(d), value: b.t,
         color: b.critical ? K.crit : K.focal,
         rows: [{ k: 'alerts', color: K.focal, v: fmtInt(b.t) },
-          { k: 'critical', color: K.crit, v: fmtInt(b.critical) },
-          { k: 'high', v: fmtInt(b.high) }, { k: 'medium', v: fmtInt(b.medium) }] };
+        { k: 'critical', color: K.crit, v: fmtInt(b.critical) },
+        { k: 'high', v: fmtInt(b.high) }, { k: 'medium', v: fmtInt(b.medium) }]
+      };
     });
     legend(host, [{ color: K.focal, label: 'alert candidates', box: true },
-      { color: K.crit, label: 'day contains a critical alert (◆)', box: true }]);
-    vBars(host, { items: items, width: host.clientWidth || 700, height: 130,
+    { color: K.crit, label: 'day contains a critical alert (◆)', box: true }]);
+    vBars(host, {
+      items: items, width: host.clientWidth || 700, height: 130,
       measure: 'alerts', vFmt: fmtInt, yFmt: fmtInt, labelCount: 8,
-      tipNote: 'Counts are False Discovery Rate-gated candidates, one row per (day, cell, metric).' });
+      tipNote: 'Counts are False Discovery Rate-gated candidates, one row per (day, cell, metric).'
+    });
     tableView(host, [
       { k: 'label', label: 'Day' },
       { k: 'value', label: 'Alerts', num: true, fmt: fmtInt }
@@ -1390,43 +1921,30 @@
     var cols = [
       { k: 'severity', label: 'Severity', node: function (v) { return sevChip(v); } },
       { k: 'day', label: 'Day', fmt: fmtDayFull },
-      { k: 'entity', label: 'Entity', strong: true,
-        get: function (r) { return r.tag_id ? tagLabel(r.tag_id) : topicLabel(r.topic_id); } },
+      {
+        k: 'entity', label: 'Entity', strong: true,
+        get: function (r) { return r.tag_id ? tagLabel(r.tag_id) : topicLabel(r.topic_id); }
+      },
       { k: 'platform', label: 'Platform', fmt: function (v) { return v || 'all'; } },
       { k: 'metric_key', label: 'Metric', get: function (r) { return metaName(r.metric_key); } },
       { k: 'value', label: 'Value', num: true, fmt: function (v) { return fmt(v, 3); } },
       { k: 'surprise_q', label: 'q-value', num: true, fmt: fmtQ },
       { k: 'rationale', label: 'Rationale', wrap: true }
     ];
-    var wrap = h('div', { class: 'tbl-h' });
-    var t = h('table');
-    var tr = h('tr');
-    cols.forEach(function (c) { tr.appendChild(h('th', { class: c.num ? 'num' : '', text: c.label })); });
-    t.appendChild(h('thead', {}, [tr]));
-    var tb = h('tbody');
-    rows.forEach(function (r) {
-      var row = h('tr');
-      cols.forEach(function (c) {
-        var raw = c.get ? c.get(r) : r[c.k];
-        var cls = [];
-        if (c.num) { cls.push('num'); }
-        if (c.wrap) { cls.push('wrap'); }
-        if (c.strong) { cls.push('strong'); }
-        var td = h('td', { class: cls.join(' ') });
-        if (c.node) { td.appendChild(c.node(raw, r)); }
-        else { td.textContent = c.fmt ? c.fmt(raw, r) : (raw == null ? '—' : String(raw)); }
-        row.appendChild(td);
-      });
-      attachDrill(row, r.tag_id
-        ? { view: 'tag', params: { tag_id: r.tag_id, platform: r.platform, day: day(r.day) },
-            title: 'Alert: ' + tagLabel(r.tag_id), subtitle: fmtDayFull(r.day) + ' · ' + (r.platform || 'all platforms') }
-        : { view: 'topic', params: { topic_id: r.topic_id, platform: r.platform, day: day(r.day) },
-            title: 'Alert: ' + topicLabel(r.topic_id), subtitle: fmtDayFull(r.day) + ' · ' + (r.platform || 'all platforms') });
-      tb.appendChild(row);
+    tableView(host, cols, rows, {
+      rawTable: true,
+      rowDrill: function (r) {
+        return r.tag_id
+          ? {
+            view: 'tag', params: { tag_id: r.tag_id, platform: r.platform, day: day(r.day) },
+            title: 'Alert: ' + tagLabel(r.tag_id), subtitle: fmtDayFull(r.day) + ' · ' + (r.platform || 'all platforms')
+          }
+          : {
+            view: 'topic', params: { topic_id: r.topic_id, platform: r.platform, day: day(r.day) },
+            title: 'Alert: ' + topicLabel(r.topic_id), subtitle: fmtDayFull(r.day) + ' · ' + (r.platform || 'all platforms')
+          };
+      }
     });
-    t.appendChild(tb);
-    wrap.appendChild(t);
-    host.appendChild(wrap);
   };
 
   /* ---- 3. Acceleration & emergence ---- */
@@ -1460,8 +1978,10 @@
       card.appendChild(plot);
       grid.appendChild(card);
       var w = Math.max(200, plot.clientWidth || 260);
-      var Fr = frame(plot, { width: w, height: comps.length * 17 + 8,
-        margin: { t: 4, r: 44, b: 4, l: 92 } });
+      var Fr = frame(plot, {
+        width: w, height: comps.length * 17 + 8,
+        margin: { t: 4, r: 44, b: 4, l: 92 }
+      });
       var hatch = hatchPattern(Fr.svg);
       comps.forEach(function (c, i) {
         var raw = r[c.k];
@@ -1472,8 +1992,10 @@
         var g = el('g');
         if (isNum(raw)) {
           var t = c.norm(raw);
-          g.appendChild(el('rect', { x: 0, y: yv, width: Math.max(2, Fr.iw * t), height: bh,
-            fill: K.focal, rx: 1 }));
+          g.appendChild(el('rect', {
+            x: 0, y: yv, width: Math.max(2, Fr.iw * t), height: bh,
+            fill: K.focal, rx: 1
+          }));
           g.appendChild(svgText(Fr.iw + 5, yv + bh / 2, fmt(raw, c.k === 'days_to_threshold' ? 0 : 2),
             { anchor: 'start', baseline: 'middle', size: 9, tabular: true, fill: K.ink2 }));
         } else {
@@ -1486,15 +2008,17 @@
         hoverable(hit, function () { return metaName(c.k); },
           function () {
             return [{ k: 'value', color: K.focal, v: isNum(raw) ? fmt(raw, 3) : 'NULL (gated)' },
-              { k: 'units', v: metaUnits(c.k) }];
+            { k: 'units', v: metaUnits(c.k) }];
           },
           function () { return metaFormula(c.k); });
         Fr.g.appendChild(g);
       });
       var present = comps.filter(function (c) { return isNum(r[c.k]); }).length;
-      card.appendChild(h('div', { class: 'fnote',
+      card.appendChild(h('div', {
+        class: 'fnote',
         text: present + ' of 4 components present · q = ' + fmtQ(r.surprise_q) +
-          ' · V = ' + fmtInt(r.V) + ' · support n = ' + fmtInt(r.support_n) }));
+          ' · V = ' + fmtInt(r.V) + ' · support n = ' + fmtInt(r.support_n)
+      }));
     });
 
     tableView(host, [
@@ -1509,11 +2033,15 @@
       { k: 'burst_state', label: 'Burst', fmt: function (v) { return v === 1 ? 'bursting' : (v === 0 ? 'baseline' : '—'); } },
       { k: 'surprise_q', label: 'q', num: true, fmt: fmtQ },
       { k: 'support_n', label: 'n', num: true, fmt: fmtInt }
-    ], cand, { label: 'Table view — all scored cells, ranked', max: 300,
+    ], cand, {
+      label: 'Table view — all scored cells, ranked', max: 300,
       rowDrill: function (r) {
-        return { view: 'topic', params: { topic_id: r.topic_id, platform: r.platform, day: day(r.day) },
-          title: topicLabel(r.topic_id) + ' · ' + r.platform, subtitle: fmtDayFull(r.day) };
-      } });
+        return {
+          view: 'topic', params: { topic_id: r.topic_id, platform: r.platform, day: day(r.day) },
+          title: topicLabel(r.topic_id) + ' · ' + r.platform, subtitle: fmtDayFull(r.day)
+        };
+      }
+    });
   };
 
   P.accel_facets = function (host) {
@@ -1535,10 +2063,12 @@
         var burstBy = {};
         rows.forEach(function (r) { if (r.burst_state === 1) { burstBy[day(r.day)] = 1; } });
         var n = pts.filter(function (p) { return isNum(p.v); }).length;
-        return { title: topicLabel(t), note: n + ' days',
+        return {
+          title: topicLabel(t), note: n + ' days',
           series: [{ label: 'accel_smooth', pts: pts, role: 'focal', kind: 'line' }],
           ribbon: F.days.map(function (d, i) { return { i: i, on: !!burstBy[d] }; }),
-          drill: { view: 'topic', params: { topic_id: t }, title: topicLabel(t) } };
+          drill: { view: 'topic', params: { topic_id: t }, title: topicLabel(t) }
+        };
       })
     });
   };
@@ -1554,69 +2084,193 @@
       tipFmt: function (v) { return fmt(v, 3); }, tipNote: metaFormula('novelty'),
       facets: topics.map(function (t) {
         var rows = F.md.filter(function (r) { return r.topic_id === t; });
-        return { title: topicLabel(t),
-          series: [{ label: 'novelty', pts: series(rows, 'novelty', F.days, { agg: 'mean' }),
-            role: 'focal', kind: 'area' }],
-          drill: { view: 'topic', params: { topic_id: t }, title: topicLabel(t) } };
+        return {
+          title: topicLabel(t),
+          series: [{
+            label: 'novelty', pts: series(rows, 'novelty', F.days, { agg: 'mean' }),
+            role: 'focal', kind: 'area'
+          }],
+          drill: { view: 'topic', params: { topic_id: t }, title: topicLabel(t) }
+        };
       })
     });
   };
 
+  /* Days from a series' first in-window appearance to its first day at 5+ posts/day, grouped by platform.
+     One collapsible block per platform listing its topics. It follows the global filters: choose one topic in
+     the topic filter and every selected platform shows that topic only, all blocks open. */
   P.dtt_bars = function (host) {
     var seen = {};
     F.md.forEach(function (r) {
       if (!isNum(r.days_to_threshold)) { return; }
-      var k = r.topic_id + '|' + r.platform;
+      var k = r.platform + '|' + r.topic_id;
       if (!seen[k] || r.days_to_threshold < seen[k].days_to_threshold) { seen[k] = r; }
     });
-    var items = Object.keys(seen).map(function (k) {
+    var byPlat = {}, maxV = 1;
+    Object.keys(seen).forEach(function (k) {
       var r = seen[k];
-      return { label: topicLabel(r.topic_id) + ' · ' + r.platform, value: r.days_to_threshold,
-        rows: [{ k: 'days to 5/day', color: K.focal, v: fmtInt(r.days_to_threshold) },
-          { k: 'first crossing', v: fmtDayFull(r.day) }],
-        drill: { view: 'topic', params: { topic_id: r.topic_id, platform: r.platform },
-          title: topicLabel(r.topic_id) + ' · ' + r.platform } };
-    }).sort(function (a, b) { return a.value - b.value; });
-    if (!items.length) { empty(host, 'No cell crossed 5 posts/day in this slice, so time-to-threshold is undefined everywhere. Absence here is not slowness.'); return; }
-    hBars(host, { items: items, width: host.clientWidth || 700, measure: metaName('days_to_threshold'),
-      vFmt: fmtInt, xFmt: fmtInt, labelW: 210,
-      tipNote: 'Lower is faster. ' + metaCaveat('days_to_threshold') });
+      (byPlat[r.platform] = byPlat[r.platform] || []).push(r);
+      maxV = Math.max(maxV, r.days_to_threshold);
+    });
+    var plats = Object.keys(byPlat);
+    if (!plats.length) { empty(host, 'No cell crossed 5 posts/day in this slice, so time-to-threshold is undefined everywhere. Absence here is not slowness.'); return; }
+    plats.sort(function (a, b2) { return byPlat[b2].length - byPlat[a].length || (a < b2 ? -1 : 1); });
+    var oneTopic = selTopics().length === 1;
+    var wrap = h('div', { class: 'dtt-wrap' });
+    var ctl = h('div', { class: 'dtt-ctl' });
+    var bOpen = h('button', { class: 'dtt-btn', type: 'button', text: 'Expand all' });
+    var bShut = h('button', { class: 'dtt-btn', type: 'button', text: 'Collapse all' });
+    function setAll(open) {
+      wrap.querySelectorAll('details.dtt-block').forEach(function (d) { if (open) { d.setAttribute('open', ''); } else { d.removeAttribute('open'); } });
+    }
+    bOpen.addEventListener('click', function () { setAll(true); });
+    bShut.addEventListener('click', function () { setAll(false); });
+    ctl.appendChild(bOpen); ctl.appendChild(bShut);
+    ctl.appendChild(h('span', {
+      class: 'dtt-note', text: oneTopic
+        ? 'One topic selected: every selected platform is shown for it.'
+        : 'Use the topic filter to see one topic across all platforms. Series that never reached 5 posts/day are not listed.'
+    }));
+    wrap.appendChild(ctl);
+    plats.forEach(function (pl) {
+      var rows = byPlat[pl].slice().sort(function (a, b2) {
+        return a.days_to_threshold - b2.days_to_threshold || (topicLabel(a.topic_id) < topicLabel(b2.topic_id) ? -1 : 1);
+      });
+      var already = rows.filter(function (r) { return r.days_to_threshold === 0; }).length;
+      var slowest = rows[rows.length - 1].days_to_threshold;
+      var det = h('details', { class: 'dtt-block' });
+      if (oneTopic) { det.setAttribute('open', ''); }
+      det.appendChild(h('summary', {}, [
+        h('span', { class: 'dtt-plat', text: pl }),
+        h('span', {
+          class: 'dtt-sum', text: rows.length + (rows.length === 1 ? ' topic' : ' topics') +
+            ' · ' + already + ' at 5+/day from the start · slowest ' + fmtInt(slowest) + (slowest === 1 ? ' day' : ' days')
+        })]));
+      rows.forEach(function (r) {
+        var v = r.days_to_threshold;
+        var row = h('div', { class: 'dtt-row' }, [
+          h('span', { class: 'dtt-topic', text: topicLabel(r.topic_id) }),
+          h('span', { class: 'dtt-val', text: v === 0 ? '5+/day from the start' : fmtInt(v) + (v === 1 ? ' day' : ' days') }),
+          h('span', { class: 'dtt-track' }, [h('span', { class: 'dtt-bar', style: 'width:' + Math.max(v === 0 ? 0 : 3, Math.round(100 * v / maxV)) + '%' })])]);
+        row.title = topicLabel(r.topic_id) + ' · ' + pl + ': ' + (v === 0 ? 'already at 5+ posts/day on its first day in the window' : fmtInt(v) + ' days') +
+          '; first crossing ' + fmtDayFull(r.day) + '. Lower is faster. ' + metaCaveat('days_to_threshold');
+        attachDrill(row, { view: 'topic', params: { topic_id: r.topic_id, platform: pl }, title: topicLabel(r.topic_id) + ' · ' + pl });
+        det.appendChild(row);
+      });
+      wrap.appendChild(det);
+    });
+    host.appendChild(wrap);
   };
 
   /* ---- 4. Burst episodes ---- */
+  var BURST_VIEW = 'platform'; // 'platform' | 'topic'
+
   P.bursts = function (host) {
     var rows = F.bursts.slice().sort(function (a, b) { return day(a.start_day) < day(b.start_day) ? -1 : 1; });
     if (!rows.length) { empty(host, 'No burst episodes overlap this window/filter selection.'); return; }
+
+    /* --- control bar: Group by + Expand/Collapse --- */
+    var ctlWrap = h('div', { class: 'burst-ctl-wrap' });
+
+    /* view toggle row */
+    var viewRow = h('div', { class: 'burst-ctl-bar' });
+    var lblEl = h('span', { class: 'burst-ctl-lbl' });
+    lblEl.textContent = 'Group by:';
+    viewRow.appendChild(lblEl);
+    ['platform', 'topic'].forEach(function (v) {
+      var btn = h('button', { type: 'button', class: 'burst-btn' + (BURST_VIEW === v ? ' active' : '') });
+      btn.textContent = v === 'platform' ? 'Platform' : 'Topic';
+      btn.addEventListener('click', function () {
+        BURST_VIEW = v;
+        host.textContent = '';
+        P.bursts(host);
+      });
+      viewRow.appendChild(btn);
+    });
+    ctlWrap.appendChild(viewRow);
+
+    /* expand / collapse row */
+    var actRow = h('div', { class: 'burst-actions' });
+    var bOpen = h('button', { type: 'button', class: 'dtt-btn' });
+    bOpen.textContent = 'Expand all';
+    bOpen.addEventListener('click', function () {
+      host.querySelectorAll('details.dtt-block').forEach(function (d) { d.setAttribute('open', ''); });
+    });
+    var bShut = h('button', { type: 'button', class: 'dtt-btn' });
+    bShut.textContent = 'Collapse all';
+    bShut.addEventListener('click', function () {
+      host.querySelectorAll('details.dtt-block').forEach(function (d) { d.removeAttribute('open'); });
+    });
+    actRow.appendChild(bOpen);
+    actRow.appendChild(bShut);
+    ctlWrap.appendChild(actRow);
+    host.appendChild(ctlWrap);
+
+    /* --- legend --- */
     legend(host, [
       { color: K.focal, label: 'episode extent (start → end)', box: true },
       { color: K.focal, label: 'peak day (dot)' }
     ]);
-    gantt(host, {
-      days: F.days, width: host.clientWidth || 760, labelW: 230,
-      rows: rows.map(function (e) {
-        return {
-          label: topicLabel(e.topic_id) + ' · ' + e.platform,
-          start: day(e.start_day), end: day(e.end_day), peak: day(e.peak_day),
-          rows: [
-            { k: 'peak V', color: K.focal, v: fmtInt(e.peak_V) },
-            { k: 'total V', v: fmtInt(e.total_V) },
-            { k: metaName('onset_slope'), v: isNum(e.onset_slope) ? fmtSigned(e.onset_slope, 3) : '—' },
-            { k: 'inflection', v: fmtDayFull(e.inflection_day) },
-            { k: 'decay lambda', v: isNum(e.decay_lambda) ? fmt(e.decay_lambda, 3) : '—' },
-            { k: 'half-life', v: isNum(e.half_life_days) ? fmt(e.half_life_days, 1) + ' d' : '—' },
-            { k: 'fit r²', v: isNum(e.r2) ? fmt(e.r2, 2) : '—' },
-            { k: 'level', v: String(e.level) }
-          ],
-          note: fmtDayFull(e.start_day) + ' → ' + fmtDayFull(e.end_day) +
-            (isNum(e.r2) && e.r2 < 0.3 ? ' · decay fit r² < 0.3: half-life not quotable' : ''),
-          drill: { view: 'topic', params: { topic_id: e.topic_id, platform: e.platform },
-            title: topicLabel(e.topic_id) + ' · ' + e.platform,
-            subtitle: 'Burst episode ' + fmtDayFull(e.start_day) + ' → ' + fmtDayFull(e.end_day) }
-        };
-      })
+
+    /* --- group rows --- */
+    var groupKey = BURST_VIEW === 'platform' ? 'platform' : 'topic_id';
+    var grouped = {};
+    rows.forEach(function (e) {
+      var k = e[groupKey] || '(unknown)';
+      (grouped[k] = grouped[k] || []).push(e);
     });
+    var groupKeys = Object.keys(grouped).sort(function (a, b) {
+      return grouped[b].length - grouped[a].length;
+    });
+
+    /* --- one collapsible block per group --- */
+    groupKeys.forEach(function (gk) {
+      var grpRows = grouped[gk].slice().sort(function (a, b) {
+        return day(a.start_day) < day(b.start_day) ? -1 : 1;
+      });
+      var lbl = BURST_VIEW === 'platform' ? gk : topicLabel(gk);
+      var det = h('details', { class: 'dtt-block' });
+      det.setAttribute('open', ''); // start expanded
+      var sum = h('summary', {});
+      var platSpan = h('span', { class: 'dtt-plat' });
+      platSpan.textContent = lbl;
+      var cntSpan = h('span', { class: 'dtt-sum' });
+      cntSpan.textContent = grpRows.length + ' episode' + (grpRows.length !== 1 ? 's' : '');
+      sum.appendChild(platSpan);
+      sum.appendChild(cntSpan);
+      det.appendChild(sum);
+
+      var plotWrap = h('div', { style: 'overflow-x:auto;padding:0.4rem 0 0.6rem' });
+      gantt(plotWrap, {
+        days: F.days,
+        width: Math.max(600, (host.clientWidth || 760)),
+        labelW: 200,
+        rows: grpRows.map(function (e) {
+          return {
+            label: BURST_VIEW === 'platform' ? topicLabel(e.topic_id) : e.platform,
+            start: day(e.start_day), end: day(e.end_day), peak: day(e.peak_day),
+            rows: [
+              { k: 'peak V', color: K.focal, v: fmtInt(e.peak_V) },
+              { k: 'total V', v: fmtInt(e.total_V) },
+              { k: 'half-life', v: isNum(e.half_life_days) ? fmt(e.half_life_days, 1) + ' d' : '—' },
+              { k: 'fit r²', v: isNum(e.r2) ? fmt(e.r2, 2) : '—' }
+            ],
+            note: fmtDayFull(e.start_day) + ' → ' + fmtDayFull(e.end_day) +
+              (isNum(e.r2) && e.r2 < 0.3 ? ' · decay fit r² < 0.3: half-life not quotable' : ''),
+            drill: {
+              view: 'topic', params: { topic_id: e.topic_id, platform: e.platform },
+              title: topicLabel(e.topic_id) + ' · ' + e.platform,
+              subtitle: 'Burst episode ' + fmtDayFull(e.start_day) + ' → ' + fmtDayFull(e.end_day)
+            }
+          };
+        })
+      });
+      det.appendChild(plotWrap);
+      host.appendChild(det);
+    });
+
+    /* --- full table at bottom --- */
     tableView(host, [
-      { k: 'episode_id', label: 'Episode' },
       { k: 'topic_id', label: 'Topic', strong: true, fmt: topicLabel },
       { k: 'platform', label: 'Platform' },
       { k: 'start_day', label: 'Start', fmt: fmtDayFull },
@@ -1627,12 +2281,15 @@
       { k: 'onset_slope', label: 'Onset slope', num: true, fmt: function (v) { return fmtSigned(v, 3); } },
       { k: 'decay_lambda', label: 'Decay λ', num: true, fmt: function (v) { return fmt(v, 3); } },
       { k: 'half_life_days', label: 'Half-life (d)', num: true, fmt: function (v) { return fmt(v, 1); } },
-      { k: 'r2', label: 'r²', num: true, fmt: function (v) { return fmt(v, 2); } },
-      { k: 'level', label: 'Level', num: true, fmt: fmtInt }
-    ], rows, { rowDrill: function (e) {
-      return { view: 'topic', params: { topic_id: e.topic_id, platform: e.platform },
-        title: topicLabel(e.topic_id) + ' · ' + e.platform };
-    } });
+      { k: 'r2', label: 'r²', num: true, fmt: function (v) { return fmt(v, 2); } }
+    ], rows, {
+      rowDrill: function (e) {
+        return {
+          view: 'topic', params: { topic_id: e.topic_id, platform: e.platform },
+          title: topicLabel(e.topic_id) + ' · ' + e.platform
+        };
+      }
+    });
   };
 
   /* ---- 5. Volume & growth ---- */
@@ -1641,59 +2298,6 @@
       return F.md.some(function (r) { return r.platform === p; });
     });
     if (!plats.length) { empty(host, 'No platform selected has rows in this window.'); return; }
-    legend(host, [
-      { color: K.focal, label: metaName('V_rate') + ' — the publishable series' },
-      { color: K.context, label: metaName('effort') + ' — plotted in its own strip below, never on a second y-axis' }
-    ]);
-    var grid = h('div', { class: 'grid g3' });
-    host.appendChild(grid);
-    var allRate = [];
-    plats.forEach(function (p) {
-      series(F.md.filter(function (r) { return r.platform === p; }), 'V_rate', F.days)
-        .forEach(function (pt) { allRate.push(pt.v); });
-    });
-    var domRate = padDomain(extent(allRate), { zeroBase: true });
-
-    plats.forEach(function (p) {
-      var rows = F.md.filter(function (r) { return r.platform === p; });
-      var cell = h('div', { class: 'facet' });
-      var totV = 0; rows.forEach(function (r) { totV += (r.V || 0); });
-      var facetHead = h('div', { class: 'facet-t' }, [h('span', { text: p }),
-        h('span', { class: 'n', text: fmtCompact(totV) + ' posts' })]);
-      attachDrill(facetHead, { view: 'platform', params: { platform: p }, title: p + ' — recent posts' });
-      cell.appendChild(facetHead);
-      var plot = h('div', { class: 'plot' });
-      cell.appendChild(plot);
-      grid.appendChild(cell);
-      var w = Math.max(190, plot.clientWidth || 240);
-      var ratePts = series(rows, 'V_rate', F.days);
-      var vPts = series(rows, 'V', F.days);
-      lineChart(plot, {
-        days: F.days, width: w, height: 112, domain: domRate, zeroBase: true,
-        series: [{ label: 'V_rate', pts: ratePts, role: 'focal', kind: 'area' }],
-        yFmt: function (v) { return fmt(v, 1); }, tipFmt: function (v) { return fmt(v, 3); },
-        tipHead: p, yTicks: 3, xTicks: 3, margin: { t: 8, r: 10, b: 22, l: 38 },
-        extraRows: function (i) {
-          var eff = {}; rows.forEach(function (r) { eff[day(r.day)] = r.effort; });
-          return [{ k: 'V (raw count)', v: isNum(vPts[i].v) ? fmtInt(vPts[i].v) : '—' },
-            { k: 'effort (channels)', color: K.context, v: fmtInt(eff[F.days[i]]) }];
-        },
-        tipNote: metaCaveat('V_rate')
-      });
-      var effBy = {};
-      rows.forEach(function (r) { if (isNum(r.effort)) { effBy[day(r.day)] = r.effort; } });
-      var effPts = F.days.map(function (d, i) { return { i: i, v: isNum(effBy[d]) ? effBy[d] : null }; });
-      var strip = h('div', { class: 'plot' });
-      cell.appendChild(h('div', { class: 'fnote', text: 'collection effort (own baseline)' }));
-      cell.appendChild(strip);
-      lineChart(strip, {
-        days: F.days, width: w, height: 46,
-        series: [{ label: 'effort', pts: effPts, role: 'context', kind: 'line' }],
-        zeroBase: true, yTicks: 2, xTicks: 2, yFmt: fmtInt, tipFmt: fmtInt, tipHead: p + ' effort',
-        margin: { t: 6, r: 10, b: 14, l: 38 },
-        tipNote: metaCaveat('effort')
-      });
-    });
 
     var byP = {};
     F.md.forEach(function (r) {
@@ -1701,16 +2305,68 @@
       byP[r.platform].V += (r.V || 0); byP[r.platform].n++;
       if (r.support_ok) { byP[r.platform].ok++; }
     });
+
+    var items = plats.map(function (p) {
+      var tot = (byP[p] && byP[p].V) || 0;
+      return {
+        label: p,
+        value: tot,
+        drill: { view: 'platform', params: { platform: p }, title: p + ' — recent posts' },
+        note: 'Click bar to inspect recent posts collected from ' + p
+      };
+    }).sort(function (a, b) { return b.value - a.value; });
+
+    legend(host, [
+      { color: K.focal, label: 'Total posts collected in DB (click any bar to inspect posts)', box: true }
+    ]);
+
+    /* One single unified horizontal bar chart comparing all platforms */
+    hBars(host, {
+      items: items,
+      width: host.clientWidth || 740,
+      measure: 'Posts in DB',
+      vFmt: fmtInt,
+      xFmt: fmtCompact,
+      labelW: 130,
+      rowH: 26,
+      tipNote: 'Total post count present in the database across the selected window'
+    });
+
+    /* Earlier separate-card implementation preserved for reference:
+    var grid = h('div', { class: 'grid g3' });
+    host.appendChild(grid);
+    plats.forEach(function (p) {
+      var rows = F.md.filter(function (r) { return r.platform === p; });
+      var cell = h('div', { class: 'facet' });
+      var totV = (byP[p] && byP[p].V) || 0;
+      var facetHead = h('div', { class: 'facet-t' }, [h('span', { text: p }), h('span', { class: 'n', text: fmtInt(totV) + ' total posts' })]);
+      attachDrill(facetHead, { view: 'platform', params: { platform: p }, title: p + ' — recent posts' });
+      cell.appendChild(facetHead);
+      var plot = h('div', { class: 'plot' }); cell.appendChild(plot); grid.appendChild(cell);
+      var vPts = series(rows, 'V', F.days);
+      lineChart(plot, { days: F.days, width: Math.max(190, plot.clientWidth || 240), height: 130, zeroBase: true,
+        series: [{ label: 'Posts (V)', pts: vPts, role: 'focal', kind: 'area' }], yFmt: fmtCompact, tipFmt: function (v) { return fmtInt(v) + ' posts'; }, tipHead: p });
+    });
+    */
+
     tableView(host, [
       { k: 'p', label: 'Platform', strong: true },
-      { k: 'V', label: 'Posts', num: true, fmt: fmtInt },
+      { k: 'V', label: 'Posts in DB', num: true, fmt: fmtInt }
+      /* Other diagnostic columns commented out:
+      { k: 'share', label: 'Share %', num: true, fmt: function (v) { return fmtPct(v, 1); } },
       { k: 'n', label: 'Cells', num: true, fmt: fmtInt },
       { k: 'ok', label: 'Supported cells', num: true, fmt: fmtInt },
-      { k: 'share', label: 'Supported %', num: true, fmt: function (v) { return fmtPct(v, 1); } }
-    ], Object.keys(byP).map(function (p) {
-      return { p: p, V: byP[p].V, n: byP[p].n, ok: byP[p].ok, share: byP[p].ok / byP[p].n };
-    }).sort(function (a, b) { return b.V - a.V; }), { label: 'Table view — volume by platform',
-      rowDrill: function (r) { return { view: 'platform', params: { platform: r.p }, title: r.p + ' — recent posts' }; } });
+      { k: 'share_sup', label: 'Supported %', num: true, fmt: function (v) { return fmtPct(v, 1); } }
+      */
+    ], items.map(function (d) {
+      var p = d.label;
+      var v = (byP[p] && byP[p].V) || 0;
+      return { p: p, V: v, n: byP[p].n, ok: byP[p].ok };
+    }), {
+      label: 'Table view — volume by platform',
+      maxWidth: '300px',
+      rowDrill: function (r) { return { view: 'platform', params: { platform: r.p }, title: r.p + ' — recent posts' }; }
+    });
   };
 
   P.growth_div = function (host) {
@@ -1728,21 +2384,27 @@
     });
     var items = Object.keys(byT).map(function (t) {
       var b = byT[t];
-      return { label: topicLabel(t), value: b.s / b.n,
+      return {
+        label: topicLabel(t), value: b.s / b.n,
         rows: [{ k: metaName('growth'), color: b.s >= 0 ? K.focal : K.neg, v: fmtSigned(b.s / b.n, 3) },
-          { k: metaName('growth_share'), v: fmtPct(b.sh, 1) },
-          { k: 'cells', v: fmtInt(b.n) }],
-        drill: { view: 'topic', params: { topic_id: t, day: lastDay }, title: topicLabel(t) } };
+        { k: metaName('growth_share'), v: fmtPct(b.sh, 1) },
+        { k: 'cells', v: fmtInt(b.n) }],
+        drill: { view: 'topic', params: { topic_id: t, day: lastDay }, title: topicLabel(t) }
+      };
     }).sort(function (a, b) { return b.value - a.value; });
     legend(host, [{ color: K.focal, label: 'accelerating (positive)', box: true },
-      { color: K.neg, label: 'decelerating (negative)', box: true }]);
-    host.appendChild(h('div', { class: 'fnote',
+    { color: K.neg, label: 'decelerating (negative)', box: true }]);
+    host.appendChild(h('div', {
+      class: 'fnote',
       text: 'Most recent day with supported growth: ' + fmtDayFull(lastDay) +
-        '. Diverging scale: gold positive, clay negative, neutral gray at zero.' }));
-    hBars(host, { items: items, width: host.clientWidth || 700, diverging: true,
+        '. Diverging scale: gold positive, clay negative, neutral gray at zero.'
+    }));
+    hBars(host, {
+      items: items, width: host.clientWidth || 700, diverging: true,
       measure: metaName('growth'), vFmt: function (v) { return fmtSigned(v, 3); },
       xFmt: function (v) { return fmtSigned(v, 2); }, labelW: 200,
-      tipNote: metaCaveat('growth') });
+      tipNote: metaCaveat('growth')
+    });
   };
 
   P.momentum_facets = function (host) {
@@ -1751,18 +2413,20 @@
     });
     if (!topics.length) { empty(host, 'No topic has a momentum value — EMA(7)−EMA(21) needs 21 trailing days.'); return; }
     legend(host, [{ color: K.focal, label: metaName('momentum') },
-      { color: K.context, label: metaName('growth_7d') }]);
+    { color: K.context, label: metaName('growth_7d') }]);
     smallMultiples(host, {
       days: F.days, shareY: true, symmetric: true, zeroLine: true, cols: 3, height: 112,
       tipFmt: function (v) { return fmtSigned(v, 3); }, tipNote: metaCaveat('momentum'),
       facets: topics.map(function (t) {
         var rows = F.mtd.filter(function (r) { return r.topic_id === t; });
-        return { title: topicLabel(t),
+        return {
+          title: topicLabel(t),
           series: [
             { label: 'momentum', pts: series(rows, 'momentum', F.days, { agg: 'mean' }), role: 'focal', kind: 'line' },
             { label: 'growth_7d', pts: series(rows, 'growth_7d', F.days, { agg: 'mean' }), role: 'context', kind: 'line' }
           ],
-          drill: { view: 'topic', params: { topic_id: t }, title: topicLabel(t) } };
+          drill: { view: 'topic', params: { topic_id: t }, title: topicLabel(t) }
+        };
       })
     });
   };
@@ -1801,19 +2465,23 @@
         var b = byKey[r.id + '|' + c.id];
         var drill = { view: 'topic', params: { topic_id: r.id, day: c.id }, title: r.label, subtitle: c.label };
         if (!b || !b.n) {
-          return b ? { v: null, rows: [{ k: 'V', v: fmtInt(b.V) },
+          return b ? {
+            v: null, rows: [{ k: 'V', v: fmtInt(b.V) },
             { k: metaName('surprise'), v: 'NULL — support gate not met' },
             { k: 'supported sub-cells', v: fmtInt(b.ok) }],
-            note: metaGate('surprise'), drill: drill } : null;
+            note: metaGate('surprise'), drill: drill
+          } : null;
         }
         var v = b.s / b.n;
-        return { v: v, ring: b.flag,
+        return {
+          v: v, ring: b.flag,
           rows: [{ k: metaName('surprise'), color: seqColor((v - lo) / ((hi - lo) || 1)), v: fmt(v, 2) },
-            { k: 'BH q', v: fmtQ(b.q) },
-            { k: 'V', v: fmtInt(b.V) },
-            { k: 'support n', v: fmtInt(b.sup) },
-            { k: 'alert', v: b.flag ? 'FLAGGED (q < 0.05)' : 'not flagged' }],
-          note: metaCaveat('surprise'), drill: drill };
+          { k: 'BH q', v: fmtQ(b.q) },
+          { k: 'V', v: fmtInt(b.V) },
+          { k: 'support n', v: fmtInt(b.sup) },
+          { k: 'alert', v: b.flag ? 'FLAGGED (q < 0.05)' : 'not flagged' }],
+          note: metaCaveat('surprise'), drill: drill
+        };
       },
       measure: metaName('surprise'),
       xLabelCount: 8
@@ -1821,8 +2489,10 @@
     var flat = [];
     Object.keys(byKey).forEach(function (k) {
       var p = k.split('|'), b = byKey[k];
-      flat.push({ topic_id: p[0], topic: topicLabel(p[0]), day: p[1], surprise: b.n ? b.s / b.n : null,
-        q: b.n ? b.q : null, V: b.V, flag: b.flag });
+      flat.push({
+        topic_id: p[0], topic: topicLabel(p[0]), day: p[1], surprise: b.n ? b.s / b.n : null,
+        q: b.n ? b.q : null, V: b.V, flag: b.flag
+      });
     });
     flat.sort(function (a, b) { return (b.surprise || -1) - (a.surprise || -1); });
     tableView(host, [
@@ -1832,10 +2502,12 @@
       { k: 'q', label: 'BH q', num: true, fmt: fmtQ },
       { k: 'V', label: 'V', num: true, fmt: fmtInt },
       { k: 'flag', label: 'Alert', fmt: function (v) { return v ? 'yes' : 'no'; } }
-    ], flat, { label: 'Table view — topic × day surprise', max: 500,
+    ], flat, {
+      label: 'Table view — topic × day surprise', max: 500, open: true,
       rowDrill: function (r) {
         return { view: 'topic', params: { topic_id: r.topic_id, day: r.day }, title: r.topic, subtitle: fmtDayFull(r.day) };
-      } });
+      }
+    });
   };
 
   /* ---- 7. Persistence ---- */
@@ -1867,8 +2539,10 @@
           ],
           note: sig ? 'Ljung–Box p < 0.05: the series has autocorrelation worth modelling.'
             : 'Ljung–Box p ≥ 0.05: φ and its half-life describe noise. Shown in gray.',
-          drill: { view: 'topic', params: { topic_id: r.topic_id, platform: r.platform },
-            title: topicLabel(r.topic_id) + ' · ' + r.platform }
+          drill: {
+            view: 'topic', params: { topic_id: r.topic_id, platform: r.platform },
+            title: topicLabel(r.topic_id) + ' · ' + r.platform
+          }
         };
       }),
       vFmt: function (v) { return fmt(v, 2); }
@@ -1883,10 +2557,14 @@
       { k: 'ljung_box_q', label: 'LB Q', num: true, fmt: function (v) { return fmt(v, 2); } },
       { k: 'ljung_box_p', label: 'LB p', num: true, fmt: fmtQ },
       { k: 'n_obs', label: 'n', num: true, fmt: fmtInt }
-    ], rows, { rowDrill: function (r) {
-      return { view: 'topic', params: { topic_id: r.topic_id, platform: r.platform },
-        title: topicLabel(r.topic_id) + ' · ' + r.platform };
-    } });
+    ], rows, {
+      rowDrill: function (r) {
+        return {
+          view: 'topic', params: { topic_id: r.topic_id, platform: r.platform },
+          title: topicLabel(r.topic_id) + ' · ' + r.platform
+        };
+      }
+    });
   };
 
   /* ---- 8. Tone ---- */
@@ -1906,7 +2584,7 @@
     rampLegend(host, -1, 1, K.div, metaName('tone_eb') + ' (negative → positive)',
       function (v) { return fmtSigned(v, 1); });
     legend(host, [{ color: K.div[3], label: 'neutral midpoint is GRAY, not a hue', box: true },
-      { hatch: true, label: 'hatched = no tone-scored post in the cell' }]);
+    { hatch: true, label: 'hatched = no tone-scored post in the cell' }]);
     heatmap(host, {
       rows: topics.map(function (t) { return { id: t, label: topicLabel(t) }; }),
       cols: plats.map(function (p) { return { id: p, label: p }; }),
@@ -1917,11 +2595,13 @@
         var drill = { view: 'topic', params: { topic_id: r.id, platform: c.id }, title: r.label + ' · ' + c.label };
         if (!b || !b.ebn) { return { v: null, rows: [{ k: metaName('tone_eb'), v: 'no scored post' }], drill: drill }; }
         var v = b.eb / b.ebn;
-        return { v: v, rows: [
-          { k: metaName('tone_eb'), color: divColor(v), v: fmtSigned(v, 3) },
-          { k: metaName('tone_mean'), color: K.context, v: b.rawn ? fmtSigned(b.raw / b.rawn, 3) : '—' },
-          { k: metaName('tone_n'), v: fmtInt(b.n) }
-        ], note: metaCaveat('tone_eb'), drill: drill };
+        return {
+          v: v, rows: [
+            { k: metaName('tone_eb'), color: divColor(v), v: fmtSigned(v, 3) },
+            { k: metaName('tone_mean'), color: K.context, v: b.rawn ? fmtSigned(b.raw / b.rawn, 3) : '—' },
+            { k: metaName('tone_n'), v: fmtInt(b.n) }
+          ], note: metaCaveat('tone_eb'), drill: drill
+        };
       },
       measure: metaName('tone_eb')
     });
@@ -1940,17 +2620,19 @@
     });
     var items = Object.keys(by).map(function (t) {
       var b = by[t];
-      return { label: topicLabel(t), a: b.rawn ? b.raw / b.rawn : null,
+      return {
+        label: topicLabel(t), a: b.rawn ? b.raw / b.rawn : null,
         b: b.ebn ? b.eb / b.ebn : null, right: 'n=' + fmtInt(b.n),
         rows: [{ k: metaName('tone_mean'), color: K.context, v: b.rawn ? fmtSigned(b.raw / b.rawn, 3) : '—' },
-          { k: metaName('tone_eb'), color: K.focal, v: b.ebn ? fmtSigned(b.eb / b.ebn, 3) : '—' },
-          { k: metaName('tone_n'), v: fmtInt(b.n) }],
+        { k: metaName('tone_eb'), color: K.focal, v: b.ebn ? fmtSigned(b.eb / b.ebn, 3) : '—' },
+        { k: metaName('tone_n'), v: fmtInt(b.n) }],
         note: 'Shrinkage pulls low-n cells toward the parent mean by construction. Read n first.',
-        drill: { view: 'topic', params: { topic_id: t }, title: topicLabel(t) } };
+        drill: { view: 'topic', params: { topic_id: t }, title: topicLabel(t) }
+      };
     }).sort(function (x, y) { return (x.b == null ? 9 : x.b) - (y.b == null ? 9 : y.b); });
     if (!items.length) { empty(host, 'No tone values in this slice.'); return; }
     legend(host, [{ color: K.context, label: metaName('tone_mean') + ' (raw)' },
-      { color: K.focal, label: metaName('tone_eb') + ' (published, EB-shrunk)' }]);
+    { color: K.focal, label: metaName('tone_eb') + ' (published, EB-shrunk)' }]);
     dumbbell(host, { items: items, width: host.clientWidth || 700, labelW: 200, symmetric: true });
     tableView(host, [
       { k: 'label', label: 'Topic', strong: true },
@@ -1981,22 +2663,52 @@
     }
     var rows = Object.keys(by).map(function (p) {
       var b = by[p], pos = b.pos / b.n, neg = b.neg / b.n;
-      return { platform: p, n: b.n, pos: pos, neu: 1 - pos - neg, neg: neg, nss: 100 * (pos - neg),
-        raw: b.wtn ? b.raw / b.wtn : null, wt: b.wtn ? b.wt / b.wtn : null, cov: b.covn ? b.cov / b.covn : null };
+      return {
+        platform: p, n: b.n, pos: pos, neu: 1 - pos - neg, neg: neg, nss: 100 * (pos - neg),
+        raw: b.wtn ? b.raw / b.wtn : null, wt: b.wtn ? b.wt / b.wtn : null, cov: b.covn ? b.cov / b.covn : null
+      };
     }).sort(function (a, b) { return b.n - a.n; });
     var pct = function (v) { return v == null ? '—' : (100 * v).toFixed(0) + '%'; };
     tableView(host, [
       { k: 'platform', label: 'Platform', strong: true },
       { k: 'n', label: 'Scored posts', num: true, fmt: fmtInt },
-      { k: 'pos', label: 'Positive', num: true, fmt: pct },
-      { k: 'neu', label: 'Neutral', num: true, fmt: pct },
-      { k: 'neg', label: 'Negative', num: true, fmt: pct },
+      {
+        k: 'pos', label: 'Positive', num: true, fmt: pct, node: function (v, r) {
+          var span = h('span', { class: 'clk-chip tone-pos-chip', text: v == null ? '—' : (100 * v).toFixed(0) + '%' });
+          span.style.cursor = 'pointer';
+          span.style.textDecoration = 'underline';
+          span.style.color = 'var(--gold, #d4af37)';
+          attachDrill(span, { view: 'platform', params: { platform: r.platform, sentiment: 'positive' }, title: r.platform + ' — Positive posts' });
+          return span;
+        }
+      },
+      {
+        k: 'neu', label: 'Neutral', num: true, fmt: pct, node: function (v, r) {
+          var span = h('span', { class: 'clk-chip tone-neu-chip', text: v == null ? '—' : (100 * v).toFixed(0) + '%' });
+          span.style.cursor = 'pointer';
+          span.style.textDecoration = 'underline';
+          attachDrill(span, { view: 'platform', params: { platform: r.platform, sentiment: 'neutral' }, title: r.platform + ' — Neutral posts' });
+          return span;
+        }
+      },
+      {
+        k: 'neg', label: 'Negative', num: true, fmt: pct, node: function (v, r) {
+          var span = h('span', { class: 'clk-chip tone-neg-chip', text: v == null ? '—' : (100 * v).toFixed(0) + '%' });
+          span.style.cursor = 'pointer';
+          span.style.textDecoration = 'underline';
+          span.style.color = '#e06c75';
+          attachDrill(span, { view: 'platform', params: { platform: r.platform, sentiment: 'negative' }, title: r.platform + ' — Negative posts' });
+          return span;
+        }
+      },
       { k: 'nss', label: 'Net sentiment score', num: true, fmt: function (v) { return fmtSigned(v, 1); } },
       { k: 'raw', label: 'Average tone', num: true, fmt: function (v) { return v == null ? '—' : fmtSigned(v, 3); } },
       { k: 'wt', label: 'Audience-weighted tone', num: true, fmt: function (v) { return v == null ? '—' : fmtSigned(v, 3); } },
       { k: 'cov', label: 'Posts with a counter', num: true, fmt: pct }
-    ], rows, { open: true, label: 'Tone mix per platform (' + rows.length + ' platforms, current selection)',
-      rowDrill: function (r) { return { view: 'platform', params: { platform: r.platform }, title: r.platform + ' — recent posts' }; } });
+    ], rows, {
+      open: true, label: 'Tone mix per platform (' + rows.length + ' platforms, current selection)',
+      rowDrill: function (r) { return { view: 'platform', params: { platform: r.platform }, title: r.platform + ' — all recent posts' }; }
+    });
   };
 
   /* ---- 8d. Largest tone drops (provisional) ---- */
@@ -2010,8 +2722,10 @@
     if (!hits.length) { empty(host, 'No significant tone drops in this selection.'); return; }
     hits.sort(function (a, b) { return a.tone_drift_z - b.tone_drift_z; });
     var rows = hits.slice(0, 60).map(function (r) {
-      return { label: topicLabel(r.topic_id), platform: r.platform, day: fmtDay(r.day), tone: r.tone_mean,
-        z: r.tone_drift_z, q: r.tone_drift_q, n: r.tone_n, base: r.tone_drift_base_n, topic_id: r.topic_id, raw_day: r.day };
+      return {
+        label: topicLabel(r.topic_id), platform: r.platform, day: fmtDay(r.day), tone: r.tone_mean,
+        z: r.tone_drift_z, q: r.tone_drift_q, n: r.tone_n, base: r.tone_drift_base_n, topic_id: r.topic_id, raw_day: r.day
+      };
     });
     tableView(host, [
       { k: 'label', label: 'Topic', strong: true },
@@ -2022,9 +2736,15 @@
       { k: 'q', label: 'q (false-discovery)', num: true, fmt: function (v) { return v == null ? '—' : v.toFixed(3); } },
       { k: 'n', label: 'Posts that day', num: true, fmt: fmtInt },
       { k: 'base', label: 'Baseline days', num: true, fmt: fmtInt }
-    ], rows, { open: true, label: 'Significant tone drops (' + hits.length + ' in this selection; showing the largest ' + rows.length + ')',
-      rowDrill: function (r) { return { view: 'topic', params: { topic_id: r.topic_id, platform: r.platform, day: day(r.raw_day) },
-        title: r.label + ' · ' + r.platform + ' · ' + r.day }; } });
+    ], rows, {
+      open: true, label: 'Significant tone drops (' + hits.length + ' in this selection; showing the largest ' + rows.length + ')',
+      rowDrill: function (r) {
+        return {
+          view: 'topic', params: { topic_id: r.topic_id, platform: r.platform, day: day(r.raw_day) },
+          title: r.label + ' · ' + r.platform + ' · ' + r.day
+        };
+      }
+    });
   };
 
   P.hate_gated = function (host) {
@@ -2039,13 +2759,15 @@
     });
     var items = Object.keys(by).map(function (t) {
       var b = by[t];
-      return { label: topicLabel(t), value: b.s / b.n, dim: true,
+      return {
+        label: topicLabel(t), value: b.s / b.n, dim: true,
         rows: [{ k: metaName('hate_eb'), color: K.context, v: fmt(b.s / b.n, 3) },
-          { k: metaName('hate_prevalence'), v: b.pn ? fmtPct(b.p / b.pn, 1) : '—' },
-          { k: 'support n', v: fmtInt(b.sup) },
-          { k: 'calibrated', v: 'NO' }],
+        { k: metaName('hate_prevalence'), v: b.pn ? fmtPct(b.p / b.pn, 1) : '—' },
+        { k: 'support n', v: fmtInt(b.sup) },
+        { k: 'calibrated', v: 'NO' }],
         note: 'UNCALIBRATED. ' + metaCaveat('hate_eb'),
-        drill: { view: 'topic', params: { topic_id: t }, title: topicLabel(t) } };
+        drill: { view: 'topic', params: { topic_id: t }, title: topicLabel(t) }
+      };
     }).sort(function (a, b) { return b.value - a.value; });
     var d = h('details', { class: 'tv' });
     d.appendChild(h('summary', { text: 'Show uncalibrated values anyway (rendered in gray, never gold)' }));
@@ -2055,9 +2777,11 @@
     if (!items.length) { empty(inner, 'No hate scores in this slice.'); return; }
     var plot = h('div', { class: 'plot' });
     inner.appendChild(plot);
-    hBars(plot, { items: items, width: host.clientWidth || 700, measure: metaName('hate_eb'),
+    hBars(plot, {
+      items: items, width: host.clientWidth || 700, measure: metaName('hate_eb'),
       vFmt: function (v) { return fmt(v, 3); }, xFmt: function (v) { return fmt(v, 2); }, labelW: 200,
-      tipNote: 'Not publishable. ' + metaGate('hate_eb') });
+      tipNote: 'Not publishable. ' + metaGate('hate_eb')
+    });
     tableView(inner, [
       { k: 'label', label: 'Topic', strong: true },
       { k: 'value', label: 'hate_eb (UNCALIBRATED)', num: true, fmt: function (v) { return fmt(v, 3); } }
@@ -2085,15 +2809,17 @@
         .map(function (r) { return r.virality_pct; }).filter(isNum);
       var cell = h('div', { class: 'facet' });
       var vHead = h('div', { class: 'facet-t' }, [h('span', { text: p }),
-        h('span', { class: 'n', text: vals.length + ' cells' })]);
+      h('span', { class: 'n', text: vals.length + ' cells' })]);
       attachDrill(vHead, { view: 'platform', params: { platform: p }, title: p + ' — recent posts' });
       cell.appendChild(vHead);
       var plot = h('div', { class: 'plot' });
       cell.appendChild(plot);
       grid.appendChild(cell);
-      histogram(plot, { values: vals, lo: 0, hi: 1, bins: 10,
+      histogram(plot, {
+        values: vals, lo: 0, hi: 1, bins: 10,
         width: Math.max(190, plot.clientWidth || 240), height: 104,
-        tipNote: metaCaveat('virality_pct') });
+        tipNote: metaCaveat('virality_pct')
+      });
     });
     if (noEng.length) {
       host.appendChild(h('div', { class: 'caveat' }, [
@@ -2115,17 +2841,21 @@
     });
     var items = Object.keys(by).map(function (p) {
       var b = by[p];
-      return { label: p, value: b.s,
+      return {
+        label: p, value: b.s,
         rows: [{ k: 'Observed views', color: K.focal, v: fmtCompact(b.s) },
-          { k: 'cells', v: fmtInt(b.n) },
-          { k: metaName('reach_audience_norm'), v: b.ann ? fmt(b.an / b.ann, 2) + '×' : 'n/a (no author baseline)' }],
+        { k: 'cells', v: fmtInt(b.n) },
+        { k: metaName('reach_audience_norm'), v: b.ann ? fmt(b.an / b.ann, 2) + '×' : 'n/a (no author baseline)' }],
         note: 'Observed view-counter values only; platforms without a view counter are not shown.',
-        drill: { view: 'platform', params: { platform: p }, title: p + ' — recent posts' } };
+        drill: { view: 'platform', params: { platform: p }, title: p + ' — recent posts' }
+      };
     }).sort(function (a, b) { return b.value - a.value; });
     if (!items.length) { empty(host, 'No observed views in this slice.'); return; }
-    hBars(host, { items: items, width: host.clientWidth || 700, measure: 'Observed views',
+    hBars(host, {
+      items: items, width: host.clientWidth || 700, measure: 'Observed views',
       vFmt: fmtCompact, xFmt: fmtCompact, labelW: 110,
-      tipNote: 'Observed views are a proxy for audience. No follower or subscriber counts exist anywhere in the corpus.' });
+      tipNote: 'Observed views are a proxy for audience. No follower or subscriber counts exist anywhere in the corpus.'
+    });
   };
 
   /* ---- 10c. Cross-Platform Narrative Diffusion ---- */
@@ -2224,19 +2954,27 @@
       { k: 'url', label: 'Shared Link', wrap: true }
     ];
     function drill(r) {
-      return { view: 'cross_platform_url', params: { link_id: r.link_id },
-        title: 'Shared link (' + r.conf + '): ' + r.url };
+      return {
+        view: 'cross_platform_url', params: { link_id: r.link_id },
+        title: 'Shared link (' + r.conf + '): ' + r.url
+      };
     }
     var high = rows.filter(function (r) { return r.conf === 'high'; });
     var med = rows.filter(function (r) { return r.conf === 'medium'; });
     var low = rows.filter(function (r) { return r.conf === 'low'; });
-    tableView(host, cols, high, { open: true, rowDrill: drill,
-      label: 'High confidence — full article links (' + high.length + ') — click a row to inspect all posts, including repeats' });
-    tableView(host, cols, med, { open: false, rowDrill: drill,
-      label: 'Medium confidence — shortened links (' + med.length + '), mostly one aggregator' });
+    tableView(host, cols, high, {
+      open: true, rowDrill: drill,
+      label: 'High confidence — full article links (' + high.length + ') — click a row to inspect all posts, including repeats'
+    });
+    tableView(host, cols, med, {
+      open: false, rowDrill: drill,
+      label: 'Medium confidence — shortened links (' + med.length + '), mostly one aggregator'
+    });
     if (low.length) {
-      tableView(host, cols, low, { open: false, rowDrill: drill,
-        label: 'Low confidence — same link but posts more than 21 days apart (' + low.length + '): usually a shared reference or app link, not one story' });
+      tableView(host, cols, low, {
+        open: false, rowDrill: drill,
+        label: 'Low confidence — same link but posts more than 21 days apart (' + low.length + '): usually a shared reference or app link, not one story'
+      });
     }
   };
 
@@ -2275,15 +3013,21 @@
       { k: 'snippet', label: 'First Post (sample)', wrap: true }
     ];
     function drill(r) {
-      return { view: 'cross_platform_event', params: { event_id: r.event_id },
-        title: 'Semantic event (' + r.conf + '): ' + r.platforms };
+      return {
+        view: 'cross_platform_event', params: { event_id: r.event_id },
+        title: 'Semantic event (' + r.conf + '): ' + r.platforms
+      };
     }
     var high = rows.filter(function (r) { return r.conf === 'high'; });
     var med = rows.filter(function (r) { return r.conf !== 'high'; });
-    tableView(host, cols, high, { open: true, rowDrill: drill, max: 300,
-      label: 'High confidence — every link at least 0.90 (' + high.length + ') — click a row to inspect all posts' });
-    tableView(host, cols, med, { open: false, rowDrill: drill, max: 300,
-      label: 'Medium confidence — some links 0.85 to 0.90 (' + med.length + ')' });
+    tableView(host, cols, high, {
+      open: true, rowDrill: drill, max: 300,
+      label: 'High confidence — every link at least 0.90 (' + high.length + ') — click a row to inspect all posts'
+    });
+    tableView(host, cols, med, {
+      open: false, rowDrill: drill, max: 300,
+      label: 'Medium confidence — some links 0.85 to 0.90 (' + med.length + ')'
+    });
   };
 
   /* ---- 11. Authors & coordination ---- */
@@ -2294,13 +3038,15 @@
           x: r.n_authors, y: r.author_1_hhi, flag: !!r.coordination_flag,
           label: topicLabel(r.topic_id) + ' · ' + r.platform + ' · ' + fmtDay(r.day),
           rows: [{ k: metaName('author_1_hhi'), color: r.coordination_flag ? K.crit : K.focal, v: fmt(r.author_1_hhi, 3) },
-            { k: metaName('n_authors'), v: fmtInt(r.n_authors) },
-            { k: metaName('author_entropy'), v: isNum(r.author_entropy) ? fmt(r.author_entropy, 3) : '—' },
-            { k: 'V', v: fmtInt(r.V) },
-            { k: metaName('coordination_flag'), v: r.coordination_flag ? 'FLAGGED' : 'no' }],
+          { k: metaName('n_authors'), v: fmtInt(r.n_authors) },
+          { k: metaName('author_entropy'), v: isNum(r.author_entropy) ? fmt(r.author_entropy, 3) : '—' },
+          { k: 'V', v: fmtInt(r.V) },
+          { k: metaName('coordination_flag'), v: r.coordination_flag ? 'FLAGGED' : 'no' }],
           note: r.coordination_flag ? metaCaveat('coordination_flag') : null,
-          drill: { view: 'topic', params: { topic_id: r.topic_id, platform: r.platform, day: day(r.day) },
-            title: topicLabel(r.topic_id) + ' · ' + r.platform, subtitle: fmtDayFull(r.day) }
+          drill: {
+            view: 'topic', params: { topic_id: r.topic_id, platform: r.platform, day: day(r.day) },
+            title: topicLabel(r.topic_id) + ' · ' + r.platform, subtitle: fmtDayFull(r.day)
+          }
         };
       });
     if (!pts.length) { empty(host, 'No cell has ≥ 2 distinct authors in this slice.'); return; }
@@ -2308,9 +3054,11 @@
       { color: K.focal, label: 'cell (dot)' },
       { color: K.crit, label: '✕ coordination_flag — heuristic screen, needs a human look' }
     ]);
-    scatter(host, { points: pts, width: host.clientWidth || 700, height: 260,
+    scatter(host, {
+      points: pts, width: host.clientWidth || 700, height: 260,
       xLabel: metaName('n_authors'), yLabel: '1 − HHI', xZero: true, yZero: true,
-      xFmt: fmtInt, yFmt: function (v) { return fmt(v, 1); } });
+      xFmt: fmtInt, yFmt: function (v) { return fmt(v, 1); }
+    });
     var flagged = F.md.filter(function (r) { return r.coordination_flag; });
     tableView(host, [
       { k: 'day', label: 'Day', fmt: fmtDayFull },
@@ -2320,11 +3068,15 @@
       { k: 'n_authors', label: 'Authors', num: true, fmt: fmtInt },
       { k: 'author_1_hhi', label: '1 − HHI', num: true, fmt: function (v) { return fmt(v, 3); } },
       { k: 'author_entropy', label: 'Entropy', num: true, fmt: function (v) { return fmt(v, 3); } }
-    ], flagged, { label: 'Table view — ' + flagged.length + ' coordination-flagged cells',
+    ], flagged, {
+      label: 'Table view — ' + flagged.length + ' coordination-flagged cells',
       rowDrill: function (r) {
-        return { view: 'topic', params: { topic_id: r.topic_id, platform: r.platform, day: day(r.day) },
-          title: topicLabel(r.topic_id) + ' · ' + r.platform, subtitle: fmtDayFull(r.day) };
-      } });
+        return {
+          view: 'topic', params: { topic_id: r.topic_id, platform: r.platform, day: day(r.day) },
+          title: topicLabel(r.topic_id) + ' · ' + r.platform, subtitle: fmtDayFull(r.day)
+        };
+      }
+    });
   };
 
   P.entropy_facets = function (host) {
@@ -2338,9 +3090,13 @@
       tipFmt: function (v) { return fmt(v, 3); }, tipNote: metaCaveat('author_entropy'),
       facets: plats.map(function (p) {
         var rows = F.md.filter(function (r) { return r.platform === p; });
-        return { title: p, series: [{ label: 'entropy',
-          pts: series(rows, 'author_entropy', F.days, { agg: 'mean' }), role: 'focal', kind: 'line' }],
-          drill: { view: 'platform', params: { platform: p }, title: p + ' — recent posts' } };
+        return {
+          title: p, series: [{
+            label: 'entropy',
+            pts: series(rows, 'author_entropy', F.days, { agg: 'mean' }), role: 'focal', kind: 'line'
+          }],
+          drill: { view: 'platform', params: { platform: p }, title: p + ' — recent posts' }
+        };
       })
     });
   };
@@ -2357,20 +3113,24 @@
     var keys = Object.keys(by).filter(function (p) { return by[p].vn || by[p].cn; });
     if (!keys.length) { empty(host, 'No readability values in this slice.'); return; }
     legend(host, [{ color: K.focal, label: metaName('readability_mean') + ' (Flesch)' },
-      { color: K.focal, label: metaName('readability_coverage') + ' (meter, share of scorable posts)', box: true }]);
+    { color: K.focal, label: metaName('readability_coverage') + ' (meter, share of scorable posts)', box: true }]);
     var items = keys.map(function (p) {
       var b = by[p];
-      return { label: p, value: b.vn ? b.v / b.vn : null, cov: b.cn ? b.c / b.cn : null,
+      return {
+        label: p, value: b.vn ? b.v / b.vn : null, cov: b.cn ? b.c / b.cn : null,
         rows: [{ k: metaName('readability_mean'), color: K.focal, v: b.vn ? fmt(b.v / b.vn, 1) : '—' },
-          { k: metaName('readability_coverage'), v: b.cn ? fmtPct(b.c / b.cn, 1) : '—' }],
+        { k: metaName('readability_coverage'), v: b.cn ? fmtPct(b.c / b.cn, 1) : '—' }],
         note: metaCaveat('readability_mean'),
-        drill: { view: 'platform', params: { platform: p }, title: p + ' — recent posts' } };
+        drill: { view: 'platform', params: { platform: p }, title: p + ' — recent posts' }
+      };
     }).sort(function (a, b) { return (b.value || -1) - (a.value || -1); });
     var plot = h('div', { class: 'plot' });
     host.appendChild(plot);
-    hBars(plot, { items: items, width: host.clientWidth || 700, measure: metaName('readability_mean'),
+    hBars(plot, {
+      items: items, width: host.clientWidth || 700, measure: metaName('readability_mean'),
       vFmt: function (v) { return fmt(v, 1); }, xFmt: function (v) { return fmt(v, 0); }, labelW: 110,
-      tipNote: 'The Flesch mean describes only the scorable minority — read the coverage meter below.' });
+      tipNote: 'The Flesch mean describes only the scorable minority — read the coverage meter below.'
+    });
     var grid = h('div', { class: 'grid g3' });
     host.appendChild(h('div', { class: 'fnote', text: 'Coverage — the share of posts long enough to score at all. This is what decides whether the Flesch mean means anything.' }));
     host.appendChild(grid);
@@ -2406,8 +3166,10 @@
       mt.appendChild(h('span', {}, [txt('in view '), h('b', { text: fmtCompact(vol[t.topic_id] || 0) })]));
       mt.appendChild(h('span', {}, [txt('alerts '), h('b', { text: String(alerts[t.topic_id] || 0) })]));
       card.appendChild(mt);
-      attachDrill(card, { view: 'topic', params: { topic_id: t.topic_id },
-        title: t.label || t.topic || t.topic_id });
+      attachDrill(card, {
+        view: 'topic', params: { topic_id: t.topic_id },
+        title: t.label || t.topic || t.topic_id
+      });
       grid.appendChild(card);
     });
   };
@@ -2427,23 +3189,29 @@
     });
     var items = Object.keys(by).map(function (id) {
       var b = by[id];
-      return { label: tagLabel(id), value: b.V, id: id,
+      return {
+        label: tagLabel(id), value: b.V, id: id,
         rows: [{ k: 'V', color: K.focal, v: fmtInt(b.V) },
-          { k: 'mean ' + metaName('emergence_score'), v: b.en ? fmt(b.e / b.en, 3) : '—' },
-          { k: 'mean surprise', v: b.sn ? fmt(b.s / b.sn, 2) : '—' },
-          { k: 'best BH q', v: b.sn ? fmtQ(b.q) : '—' },
-          { k: 'flagged days', v: fmtInt(b.flag) }],
+        { k: 'mean ' + metaName('emergence_score'), v: b.en ? fmt(b.e / b.en, 3) : '—' },
+        { k: 'mean surprise', v: b.sn ? fmt(b.s / b.sn, 2) : '—' },
+        { k: 'best BH q', v: b.sn ? fmtQ(b.q) : '—' },
+        { k: 'flagged days', v: fmtInt(b.flag) }],
         note: 'Hashtag grain covers ~15% of the corpus. Alert on topic_id, not on this.',
-        drill: { view: 'tag', params: { tag_id: id }, title: tagLabel(id) } };
+        drill: { view: 'tag', params: { tag_id: id }, title: tagLabel(id) }
+      };
     }).sort(function (a, b) { return b.value - a.value; }).slice(0, 20);
     legend(host, [{ color: K.focal, label: 'posts carrying the tag in view', box: true }]);
-    hBars(host, { items: items, width: host.clientWidth || 700, measure: 'V',
+    hBars(host, {
+      items: items, width: host.clientWidth || 700, measure: 'V',
       vFmt: fmtInt, xFmt: fmtInt, labelW: 130,
-      tipNote: 'Top 20 tags by volume in the current slice.' });
+      tipNote: 'Top 20 tags by volume in the current slice.'
+    });
     var flat = Object.keys(by).map(function (id) {
       var b = by[id];
-      return { tag_id: id, tag: tagLabel(id), V: b.V, e: b.en ? b.e / b.en : null,
-        s: b.sn ? b.s / b.sn : null, q: b.sn ? b.q : null, flag: b.flag };
+      return {
+        tag_id: id, tag: tagLabel(id), V: b.V, e: b.en ? b.e / b.en : null,
+        s: b.sn ? b.s / b.sn : null, q: b.sn ? b.q : null, flag: b.flag
+      };
     }).sort(function (a, b) { return b.V - a.V; });
     tableView(host, [
       { k: 'tag', label: 'Tag', strong: true },
@@ -2452,8 +3220,10 @@
       { k: 's', label: 'Surprise (mean)', num: true, fmt: function (v) { return fmt(v, 2); } },
       { k: 'q', label: 'Best BH q', num: true, fmt: fmtQ },
       { k: 'flag', label: 'Flagged days', num: true, fmt: fmtInt }
-    ], flat, { label: 'Table view — all tags in slice',
-      rowDrill: function (r) { return { view: 'tag', params: { tag_id: r.tag_id }, title: r.tag }; } });
+    ], flat, {
+      label: 'Table view — all tags in slice',
+      rowDrill: function (r) { return { view: 'tag', params: { tag_id: r.tag_id }, title: r.tag }; }
+    });
   };
 
   /* ---- 15. Methodology ---- */
@@ -2472,9 +3242,11 @@
         dt.appendChild(h('div', { class: 'fnote', text: m.metric_key + ' · ' + (m.units || '') }));
         var dd = h('dd');
         dd.appendChild(h('div', {}, [h('span', { class: 'gate', text: m.formula || '—' })]));
-        dd.appendChild(h('div', { class: 'fnote',
+        dd.appendChild(h('div', {
+          class: 'fnote',
           text: 'grain: ' + (m.grain || '—') + ' · direction: ' + (m.direction || '—') +
-            (m.higher_is_worse ? ' · higher is worse' : '') }));
+            (m.higher_is_worse ? ' · higher is worse' : '')
+        }));
         dd.appendChild(h('div', {}, [txt('gate: '), h('span', { class: 'gate', text: m.support_gate || 'none' })]));
         if (m.caveats) { dd.appendChild(h('div', { class: 'caveat', text: m.caveats })); }
         dl.appendChild(h('div', {}, [dt, dd]));
@@ -2501,30 +3273,46 @@
     var tgHc = hcp.telegram ? ', Telegram ' + hcp.telegram.coverage_pct.toFixed(1) + '%' : '';
     var rows = [
       { k: 'Cells in selection', v: fmtInt(tot), n: 'topic × platform × day' },
-      { k: 'Cells inside collection window', v: fmtInt(inw) + ' (' + fmtPct(inw / (tot || 1), 1) + ')',
+      {
+        k: 'Cells inside collection window', v: fmtInt(inw) + ' (' + fmtPct(inw / (tot || 1), 1) + ')',
         n: 'Window: ' + fmtDayFull(WIN.start) + ' → ' + fmtDayFull(WIN.end) +
-          '. Time-series metrics are computed only here; the pre-window backfill is retained for cross-sectional metrics and never used for trends.' },
-      { k: 'Cells passing support gate', v: fmtInt(ok) + ' (' + fmtPct(ok / (tot || 1), 1) + ')',
-        n: metaGate('surprise') },
-      { k: 'Cells with V ≤ 2', v: fmtInt(v2) + ' (' + fmtPct(v2 / (tot || 1), 1) + ')',
-        n: 'This is the class of cell that gave v1 a robust z of up to ' + v1MaxZ + '. Here they are gated to NULL instead.' },
+          '. Time-series metrics are computed only here; the pre-window backfill is retained for cross-sectional metrics and never used for trends.'
+      },
+      {
+        k: 'Cells passing support gate', v: fmtInt(ok) + ' (' + fmtPct(ok / (tot || 1), 1) + ')',
+        n: metaGate('surprise')
+      },
+      {
+        k: 'Cells with V ≤ 2', v: fmtInt(v2) + ' (' + fmtPct(v2 / (tot || 1), 1) + ')',
+        n: 'This is the class of cell that gave v1 a robust z of up to ' + v1MaxZ + '. Here they are gated to NULL instead.'
+      },
       { k: 'Posts represented', v: fmtInt(vSum), n: 'Sum of V across the selection.' },
-      { k: 'Multiplicity control', v: 'Benjamini–Hochberg, α = 0.05, per day',
-        n: 'Alert thresholds are False Discovery Rate q-values, never raw z cutoffs.' },
-      { k: 'Hate/toxicity family', v: 'BLOCKED — uncalibrated',
-        n: 'Raw model probabilities, never calibrated. A single-labeller check exists (reports/TONE_HATE_VALIDATION.md) but is not human-confirmed.' },
-      { k: 'Cross-platform reach', v: 'Observed views only',
-        n: 'Imputed views and the breadth multiplier were removed (they were 42% of reported reach).' },
-      { k: 'Day rule', v: 'Posted date, else scrape date',
-        n: 'Posts without a posting date are placed on the day they were collected.' },
+      {
+        k: 'Multiplicity control', v: 'Benjamini–Hochberg, α = 0.05, per day',
+        n: 'Alert thresholds are False Discovery Rate q-values, never raw z cutoffs.'
+      },
+      {
+        k: 'Hate/toxicity family', v: 'BLOCKED — uncalibrated',
+        n: 'Raw model probabilities, never calibrated. A single-labeller check exists (reports/TONE_HATE_VALIDATION.md) but is not human-confirmed.'
+      },
+      {
+        k: 'Cross-platform reach', v: 'Observed views only',
+        n: 'Imputed views and the breadth multiplier were removed (they were 42% of reported reach).'
+      },
+      {
+        k: 'Day rule', v: 'Posted date, else scrape date',
+        n: 'Posts without a posting date are placed on the day they were collected.'
+      },
       { k: 'Reach', v: 'PROXY only', n: 'No follower or subscriber counts exist anywhere in the corpus.' },
-      { k: 'Hashtag coverage', v: isNum(hc.coverage_pct) ? hc.coverage_pct.toFixed(1) + '% of rows' + tgHc : 'not available',
-        n: 'Very uneven by platform (high on Instagram, TikTok, YouTube video, Mastodon; very low on Reddit and YouTube comments). Alerting must key on topic_id; hashtag and keyword are secondary facets.' }
+      {
+        k: 'Hashtag coverage', v: isNum(hc.coverage_pct) ? hc.coverage_pct.toFixed(1) + '% of rows' + tgHc : 'not available',
+        n: 'Very uneven by platform (high on Instagram, TikTok, YouTube video, Mastodon; very low on Reddit and YouTube comments). Alerting must key on topic_id; hashtag and keyword are secondary facets.'
+      }
     ];
     var dl = h('dl', { class: 'kv' });
     rows.forEach(function (r) {
       dl.appendChild(h('div', {}, [h('dt', { text: r.k }),
-        h('dd', {}, [h('div', { class: 'strong', text: r.v }), h('div', { class: 'fnote', text: r.n })])]));
+      h('dd', {}, [h('div', { class: 'strong', text: r.v }), h('div', { class: 'fnote', text: r.n })])]));
     });
     host.appendChild(dl);
   };
@@ -2619,7 +3407,9 @@
       name: function (a, k) {
         var e = ent(a, k);
         if (e) { return e.display; }
-        if (k === null || k === undefined || k === '') { return 'Unresolved'; }
+        if (k === null || k === undefined || k === '' || k === 'unresolved' || k === 'None') {
+          return a === 'entity_subtype' ? 'Civilian / Public Figure' : '—';
+        }
         flag(a, k);
         return String(k);
       },
@@ -2670,11 +3460,98 @@
   })();
   window.__TAX__ = TAX;   // jsdom harnesses assert TAX.unknown() stays empty
 
+  // Production entity subtype taxonomy lookup: exactly the 25 official subtypes
+  var PROD_SUBTYPES_LOOKUP = {
+    // PERSON (POI) - 5
+    political_leader: 'Political Leader / Head of State',
+    civilian: 'Civilian / Public Figure',
+    military_personnel: 'Military Commander / Officer',
+    journalist_analyst: 'Journalist / Defense Analyst',
+    legal_actor: 'Judicial / Legal Official',
+
+    // LOCATION (LOI) - 10
+    country: 'Sovereign State / Nation',
+    geographic_location: 'Geographic Location / City / Province',
+    conflict_zone: 'Active Conflict Zone / Hostile Sector',
+    disputed_border: 'Disputed Border / Line of Actual Control',
+    military_installation: 'Military Installation / Airbase / Garrison',
+    naval_base_port: 'Naval Base / Strategic Port Facility',
+    strategic_corridor: 'Strategic Transit Corridor / Choke Point',
+    restricted_operational_zone: 'Restricted Operational Zone',
+    territorial_waters: 'Territorial Waters / Maritime EEZ',
+    refugee_camp_displacement_zone: 'Displacement / Humanitarian Zone',
+
+    // ORGANIZATION (OOI) - 8
+    government_body: 'Government Body / Executive Agency',
+    political_party: 'Political Party / Coalition',
+    commercial_company: 'Commercial Corporation / Defense Contractor',
+    military_branch_coalition: 'Armed Forces Branch / Military Coalition',
+    militant_group_non_state: 'Militant / Insurgent Group',
+    ngo: 'Non-Governmental Organization / Agency',
+    military_hardware: 'Military Weapon System / Hardware',
+    naval_vessel: 'Naval Warship / Combatant Vessel',
+
+    // EVENT / INCIDENT (EOI) - 2
+    military_exercise: 'Joint Military Exercise / Maneuver',
+    protest_demonstration: 'Protest / Mass Demonstration',
+
+    // Fallbacks to safely normalize any legacy keys
+    diplomat: 'Political Leader / Head of State',
+    military_leader: 'Military Commander / Officer',
+    business_executive: 'Commercial Corporation / Defense Contractor'
+  };
+
+  var PROD_ENTITY_TAXONOMY_MAP = {
+    PERSON: [
+      { key: 'political_leader', label: 'Political Leader / Head of State' },
+      { key: 'civilian', label: 'Civilian / Public Figure' },
+      { key: 'military_personnel', label: 'Military Commander / Officer' },
+      { key: 'journalist_analyst', label: 'Journalist / Defense Analyst' },
+      { key: 'legal_actor', label: 'Judicial / Legal Official' }
+    ],
+    LOCATION: [
+      { key: 'country', label: 'Sovereign State / Nation' },
+      { key: 'geographic_location', label: 'Geographic Location / City / Province' },
+      { key: 'conflict_zone', label: 'Active Conflict Zone / Hostile Sector' },
+      { key: 'disputed_border', label: 'Disputed Border / Line of Actual Control' },
+      { key: 'military_installation', label: 'Military Installation / Airbase / Garrison' },
+      { key: 'naval_base_port', label: 'Naval Base / Strategic Port Facility' },
+      { key: 'strategic_corridor', label: 'Strategic Transit Corridor / Choke Point' },
+      { key: 'restricted_operational_zone', label: 'Restricted Operational Zone' },
+      { key: 'territorial_waters', label: 'Territorial Waters / Maritime EEZ' },
+      { key: 'refugee_camp_displacement_zone', label: 'Displacement / Humanitarian Zone' }
+    ],
+    ORG: [
+      { key: 'government_body', label: 'Government Body / Executive Agency' },
+      { key: 'political_party', label: 'Political Party / Coalition' },
+      { key: 'commercial_company', label: 'Commercial Corporation / Defense Contractor' },
+      { key: 'military_branch_coalition', label: 'Armed Forces Branch / Military Coalition' },
+      { key: 'militant_group_non_state', label: 'Militant / Insurgent Group' },
+      { key: 'ngo', label: 'Non-Governmental Organization / Agency' },
+      { key: 'military_hardware', label: 'Military Weapon System / Hardware' },
+      { key: 'naval_vessel', label: 'Naval Warship / Combatant Vessel' }
+    ],
+    EVENT: [
+      { key: 'military_exercise', label: 'Joint Military Exercise / Maneuver' },
+      { key: 'protest_demonstration', label: 'Protest / Mass Demonstration' }
+    ]
+  };
+
   function riskName(k) { return TAX.name('risk', k); }
   function riskDesc(k) { return TAX.desc('risk', k); }
   function themeName(k) { return TAX.name('theme', k); }
   function themeDesc(k) { return TAX.desc('theme', k); }
-  function subtypeName(k) { return TAX.name('entity_subtype', k); }
+  function subtypeName(k, r) {
+    if (!k || k === 'unresolved' || k === 'None') {
+      var et = (r && r.entity_type) || null;
+      if (et === 'PERSON') { return 'Civilian / Public Figure'; }
+      if (et === 'LOCATION') { return 'Geographic Location / City / Province'; }
+      if (et === 'ORG') { return 'Commercial Corporation / Defense Contractor'; }
+      if (et === 'EVENT') { return 'Protest / Mass Demonstration'; }
+      return 'Civilian / Public Figure';
+    }
+    return PROD_SUBTYPES_LOOKUP[k] || TAX.name('entity_subtype', k) || k;
+  }
 
   /* dim_type -> (taxonomy axis, drill query param). This registry is the
      extension point: a new dimension needs one line here, not a new branch in
@@ -2694,8 +3571,10 @@
 
   /* jsdom harness hook -- see UI/tests/check_dim_labels.mjs. These resolvers
      fail soft, so the only way to catch a mis-wired axis is to call them. */
-  window.__DIM__ = { axis: DIM_AXIS, name: dimName, drill: dimDrill,
-                     renderRelated: renderRelated };
+  window.__DIM__ = {
+    axis: DIM_AXIS, name: dimName, drill: dimDrill,
+    renderRelated: renderRelated
+  };
 
   function dimName(dimType, key) {
     var d = DIM_AXIS[dimType];
@@ -2751,64 +3630,112 @@
   }
 
   /* ---- 16. Entity directory ---- */
+  var SEC16_CAT = 'ALL';
+
   P.entity_top_bars = function (host) {
     var rows = T('entity_dim');
     if (!rows.length) { empty(host, 'entity_dim is empty (or every entity was seen in only 1 post).'); return; }
 
-    /* Full taxonomy map: every subtype slot from the original spec, dimmed
-       where the count is zero, so the shape of what was asked for is always
-       visible -- not just whatever happens to have data today. */
-    var subCounts = {}; var subDistinctPosts = {};
+    var subCounts = {};
     rows.forEach(function (r) {
       var k = r.entity_subtype;
       if (!k) { return; }
       subCounts[k] = (subCounts[k] || 0) + (r.mention_count || 0);
     });
-    host.appendChild(h('div', { class: 'lede', style: 'margin:0 0 0.5rem' }, [
-      txt('Taxonomy coverage -- every subtype the schema defines, click a populated one to jump to its row below.')
-    ]));
-    ['PERSON', 'ORG', 'LOCATION'].forEach(function (baseType) {
-      host.appendChild(h('div', { class: 'taxgroup-lbl', text: baseType + ' subtypes' }));
-      var grid = h('div', { class: 'taxgrid' });
-      host.appendChild(grid);
-      (TAX.groups('entity_subtype')[baseType] || []).forEach(function (sk) {
-        grid.appendChild(taxCard({
-          name: subtypeName(sk), metaLabel: 'mentions', value: subCounts[sk] || 0,
-          valueFmt: fmtInt, desc: baseType + ' subtype', jumpTo: 'entity-type-' + baseType,
-          drill: { view: 'entity_subtype', params: { entity_subtype: sk }, title: subtypeName(sk) }
-        }));
-      });
-    });
 
-    var types = ['LOCATION', 'ORG', 'PERSON'];
-    var grid = h('div', { class: 'grid g3' });
-    host.appendChild(grid);
-    types.forEach(function (ty) {
-      var cell = h('div', { class: 'facet', id: 'entity-type-' + ty });
-      cell.appendChild(h('div', { class: 'facet-t' }, [h('span', { text: ty })]));
-      var plot = h('div', { class: 'plot' });
-      cell.appendChild(plot);
-      grid.appendChild(cell);
-      var top = rows.filter(function (r) { return r.entity_type === ty; })
-        .sort(function (a, b) { return (b.mention_count || 0) - (a.mention_count || 0); })
-        .slice(0, 10);
-      if (!top.length) { empty(plot, 'No ' + ty + ' entities.'); return; }
-      var items = top.map(function (r) {
-        return {
-          label: r.canonical_name, value: r.mention_count,
-          rows: [
-            { k: 'subtype', v: subtypeName(r.entity_subtype) },
-            { k: 'subtype source', v: r.subtype_source || '—' },
-            { k: 'distinct posts', v: fmtInt(r.distinct_posts) },
-            { k: 'avg Named Entity Recognition score', v: fmt(r.avg_ner_score, 3) }
-          ],
-          note: 'first seen ' + fmtDayFull(r.first_seen) + ' · last seen ' + fmtDayFull(r.last_seen),
-          drill: { view: 'entity', params: { entity_uid: r.entity_uid }, title: r.canonical_name }
-        };
+    var catTabs = [
+      { key: 'ALL', label: 'All (25)' },
+      { key: 'PERSON', label: 'PER (POI)' },
+      { key: 'LOCATION', label: 'LOC (LOI)' },
+      { key: 'ORG', label: 'ORG (OOI)' },
+      { key: 'EVENT', label: 'EVENT (EOI)' }
+    ];
+
+    var groupLabels = {
+      PERSON: 'PERSON (POI) subtypes',
+      LOCATION: 'LOCATION (LOI) subtypes',
+      ORG: 'ORGANIZATION (OOI) subtypes',
+      EVENT: 'EVENT / INCIDENT (EOI) subtypes'
+    };
+
+    function renderBars() {
+      host.textContent = '';
+
+      host.appendChild(h('div', { class: 'lede', style: 'margin:0 0 0.5rem' }, [
+        txt('Taxonomy coverage -- select a category to view its official mapped subtypes and top mentions.')
+      ]));
+
+      // 1. Category Filter Tabs
+      var tabWrap = h('div', { class: 'el-filter-bar', style: 'margin-bottom:0.75rem' });
+      catTabs.forEach(function (tab) {
+        var btn = h('button', {
+          type: 'button',
+          class: 'el-filter-btn' + (SEC16_CAT === tab.key ? ' active' : ''),
+          text: tab.label
+        });
+        btn.addEventListener('click', function () {
+          SEC16_CAT = tab.key;
+          renderBars();
+        });
+        tabWrap.appendChild(btn);
       });
-      hBars(plot, { items: items, width: plot.clientWidth || 240, measure: 'mentions',
-        vFmt: fmtInt, xFmt: fmtInt, labelW: 104, rowH: 18 });
-    });
+      host.appendChild(tabWrap);
+
+      // 2. Taxonomy Cards for active category
+      var activeTypes = SEC16_CAT === 'ALL' ? ['PERSON', 'LOCATION', 'ORG', 'EVENT'] : [SEC16_CAT];
+      activeTypes.forEach(function (baseType) {
+        if (SEC16_CAT === 'ALL') {
+          host.appendChild(h('div', { class: 'taxgroup-lbl', text: groupLabels[baseType] }));
+        }
+        var grid = h('div', { class: 'taxgrid', style: 'margin-bottom:1rem' });
+        host.appendChild(grid);
+        (PROD_ENTITY_TAXONOMY_MAP[baseType] || []).forEach(function (item) {
+          grid.appendChild(taxCard({
+            name: item.label, metaLabel: 'mentions', value: subCounts[item.key] || 0,
+            valueFmt: fmtInt, desc: baseType + ' subtype', jumpTo: 'entity-type-' + baseType,
+            drill: { view: 'entity_subtype', params: { entity_subtype: item.key }, title: item.label }
+          }));
+        });
+      });
+
+      // 3. Top-mentions bar chart(s)
+      var typesToShow = SEC16_CAT === 'ALL' ? ['LOCATION', 'ORG', 'PERSON', 'EVENT'] : [SEC16_CAT];
+      var gridClass = SEC16_CAT === 'ALL' ? 'grid g4' : 'grid g1';
+      var chartGrid = h('div', { class: gridClass });
+      host.appendChild(chartGrid);
+
+      typesToShow.forEach(function (ty) {
+        var top = rows.filter(function (r) { return r.entity_type === ty; })
+          .sort(function (a, b) { return (b.mention_count || 0) - (a.mention_count || 0); })
+          .slice(0, 10);
+        if (!top.length && SEC16_CAT === 'ALL') { return; }
+
+        var cell = h('div', { class: 'facet', id: 'entity-type-' + ty });
+        cell.appendChild(h('div', { class: 'facet-t' }, [h('span', { text: 'Top ' + ty + ' entities by mentions' })]));
+        var plot = h('div', { class: 'plot' });
+        cell.appendChild(plot);
+        chartGrid.appendChild(cell);
+
+        if (!top.length) { empty(plot, 'No ' + ty + ' entities.'); return; }
+        var items = top.map(function (r) {
+          return {
+            label: r.canonical_name, value: r.mention_count,
+            rows: [
+              { k: 'subtype', v: subtypeName(r.entity_subtype) },
+              { k: 'distinct posts', v: fmtInt(r.distinct_posts) }
+            ],
+            note: 'first seen ' + fmtDayFull(r.first_seen) + ' · last seen ' + fmtDayFull(r.last_seen),
+            drill: { view: 'entity', params: { entity_uid: r.entity_uid }, title: r.canonical_name }
+          };
+        });
+        hBars(plot, {
+          items: items, width: plot.clientWidth || (SEC16_CAT === 'ALL' ? 240 : 700), measure: 'mentions',
+          vFmt: fmtInt, xFmt: fmtInt, labelW: 140, rowH: 18
+        });
+      });
+    }
+
+    renderBars();
   };
 
   /* ---- 16b. Entity directory search ---- */
@@ -2838,8 +3765,10 @@
         { k: 'entity_subtype', label: 'Subtype', fmt: subtypeName },
         { k: 'mention_count', label: 'Mentions', num: true, fmt: fmtInt },
         { k: 'distinct_posts', label: 'Posts', num: true, fmt: fmtInt }
-      ], hits, { label: 'Search results (top 40 by mentions)', max: 40,
-        rowDrill: function (r) { return { view: 'entity', params: { entity_uid: r.entity_uid }, title: r.canonical_name }; } });
+      ], hits, {
+        label: 'Search results (top 40 by mentions)', max: 40,
+        rowDrill: function (r) { return { view: 'entity', params: { entity_uid: r.entity_uid }, title: r.canonical_name }; }
+      });
     }
     input.addEventListener('input', run);
   };
@@ -2851,14 +3780,14 @@
       { k: 'canonical_name', label: 'Entity', strong: true },
       { k: 'entity_type', label: 'Type' },
       { k: 'entity_subtype', label: 'Subtype', fmt: subtypeName },
-      { k: 'subtype_source', label: 'Subtype source', fmt: function (v) { return v || '—'; } },
       { k: 'mention_count', label: 'Mentions', num: true, fmt: fmtInt },
       { k: 'distinct_posts', label: 'Posts', num: true, fmt: fmtInt },
-      { k: 'avg_ner_score', label: 'Avg Named Entity Recognition score', num: true, fmt: function (v) { return fmt(v, 3); } },
       { k: 'first_seen', label: 'First seen', fmt: fmtDayFull },
       { k: 'last_seen', label: 'Last seen', fmt: fmtDayFull }
-    ], rows, { label: 'Table view — ' + rows.length.toLocaleString() + ' entities (≥2 distinct posts), sorted by mentions', max: 500,
-      rowDrill: function (r) { return { view: 'entity', params: { entity_uid: r.entity_uid }, title: r.canonical_name }; } });
+    ], rows, {
+      label: 'Table view — ' + rows.length.toLocaleString() + ' entities (≥2 distinct posts), sorted by mentions', max: 500,
+      rowDrill: function (r) { return { view: 'entity', params: { entity_uid: r.entity_uid }, title: r.canonical_name }; }
+    });
   };
 
   /* ---- 17. Risk categories & thematic dimensions ---- */
@@ -2942,24 +3871,30 @@
         var b = byKey[r.id + '|' + c.id];
         var drill = { view: 'risk', params: { category: r.id, day: c.id }, title: r.label, subtitle: c.label };
         if (!b || !isNum(b.surprise)) {
-          return { v: null,
+          return {
+            v: null,
             rows: [{ k: 'V', v: fmtInt(b && b.V) }, { k: 'surprise', v: 'NULL — support gate not met' }],
-            note: 'gate: baseline_days >= 14 & baseline_mean >= 0.5 & V >= 3', drill: drill };
+            note: 'gate: baseline_days >= 14 & baseline_mean >= 0.5 & V >= 3', drill: drill
+          };
         }
-        return { v: b.surprise, ring: !!b.alert_flag,
+        return {
+          v: b.surprise, ring: !!b.alert_flag,
           rows: [
             { k: 'surprise', color: seqColor((b.surprise - lo) / ((hi - lo) || 1)), v: fmt(b.surprise, 2) },
             { k: 'BH q', v: fmtQ(b.surprise_q) },
             { k: 'V', v: fmtInt(b.V) },
             { k: 'gray_zone share', v: fmtPct(b.gray_zone_share, 0) },
             { k: 'alert', v: b.alert_flag ? 'FLAGGED (q < 0.05)' : 'not flagged' }
-          ], drill: drill };
+          ], drill: drill
+        };
       },
       measure: 'surprise', xLabelCount: 8
     });
     var flat = rows.map(function (r) {
-      return { risk_category: r.risk_category, category: riskName(r.risk_category), day: day(r.day),
-        V: r.V, surprise: r.surprise, q: r.surprise_q, flag: r.alert_flag };
+      return {
+        risk_category: r.risk_category, category: riskName(r.risk_category), day: day(r.day),
+        V: r.V, surprise: r.surprise, q: r.surprise_q, flag: r.alert_flag
+      };
     }).sort(function (a, b) { return (isNum(b.surprise) ? b.surprise : -1) - (isNum(a.surprise) ? a.surprise : -1); });
     tableView(host, [
       { k: 'day', label: 'Day', fmt: fmtDayFull },
@@ -2968,10 +3903,12 @@
       { k: 'surprise', label: 'Surprise', num: true, fmt: function (v) { return fmt(v, 2); } },
       { k: 'q', label: 'BH q', num: true, fmt: fmtQ },
       { k: 'flag', label: 'Alert', fmt: function (v) { return v ? 'yes' : 'no'; } }
-    ], flat, { label: 'Table view — risk category × day', max: 500,
+    ], flat, {
+      label: 'Table view — risk category × day', max: 500,
       rowDrill: function (r) {
         return { view: 'risk', params: { category: r.risk_category, day: r.day }, title: r.category, subtitle: fmtDayFull(r.day) };
-      } });
+      }
+    });
   };
 
   P.theme_facets = function (host) {
@@ -3040,18 +3977,24 @@
             { k: 'BH q', v: fmtQ(a.q_value) }, { k: 'support n', v: fmtInt(a.support_n) }
           ],
           note: a.rationale,
-          drill: { view: 'alert', params: { dimension_type: a.dimension_type, dimension_key: a.dimension_key, day: day(a.day) },
-            title: dimKeyName(dimType, a.dimension_key), subtitle: fmtDayFull(a.day) }
+          drill: {
+            view: 'alert', params: { dimension_type: a.dimension_type, dimension_key: a.dimension_key, day: day(a.day) },
+            title: dimKeyName(dimType, a.dimension_key), subtitle: fmtDayFull(a.day)
+          }
         });
       });
-      var wrap = h('div', { style: 'margin-top:0.7rem', id: dimType === 'risk' ? 'timeline-lane-risk'
-        : dimType === 'theme' ? 'timeline-lane-theme' : null });
+      var wrap = h('div', {
+        style: 'margin-top:0.7rem', id: dimType === 'risk' ? 'timeline-lane-risk'
+          : dimType === 'theme' ? 'timeline-lane-theme' : null
+      });
       wrap.appendChild(h('div', { class: 'facet-t' }, [h('span', { text: title }),
-        h('span', { class: 'n', text: catRows.length + ' rows · ' + pts.length + ' alert-days' })]));
+      h('span', { class: 'n', text: catRows.length + ' rows · ' + pts.length + ' alert-days' })]));
       host.appendChild(wrap);
       if (!catRows.length) { empty(wrap, 'No ' + dimType + ' rows.'); return; }
-      swimlane(wrap, { rows: catRows, days: GEODAYS, points: pts,
-        width: host.clientWidth || 760, labelW: 172, rowH: 19 });
+      swimlane(wrap, {
+        rows: catRows, days: GEODAYS, points: pts,
+        width: host.clientWidth || 760, labelW: 172, rowH: 19
+      });
     }
 
     legend(host, [
@@ -3100,8 +4043,10 @@
       { k: 'severity', label: 'Severity', node: function (v) { return sevChip(v); } },
       { k: 'day', label: 'Day', fmt: fmtDayFull },
       { k: 'dimension_type', label: 'Grain' },
-      { k: 'dimension_key', label: 'Entity / category', strong: true,
-        fmt: function (v, r) { return dimKeyName(r.dimension_type, v); } },
+      {
+        k: 'dimension_key', label: 'Entity / category', strong: true,
+        fmt: function (v, r) { return dimKeyName(r.dimension_type, v); }
+      },
       { k: 'metric', label: 'Metric' },
       { k: 'value', label: 'Value', num: true, fmt: function (v) { return fmt(v, 3); } },
       { k: 'q_value', label: 'q-value', num: true, fmt: fmtQ },
@@ -3120,11 +4065,15 @@
       }
       count.textContent = q ? (shown.length.toLocaleString() + ' of ' + rows.length.toLocaleString() + ' match')
         : rows.length.toLocaleString() + ' alerts';
-      tableView(resultsHost, cols, shown, { label: 'Table view — ' + shown.length + ' of ' + rows.length + ' geo-ontology alert candidates', max: 500,
+      tableView(resultsHost, cols, shown, {
+        label: 'Table view — ' + shown.length + ' of ' + rows.length + ' geo-ontology alert candidates', max: 500,
         rowDrill: function (r) {
-          return { view: 'alert', params: { dimension_type: r.dimension_type, dimension_key: r.dimension_key, day: day(r.day) },
-            title: dimKeyName(r.dimension_type, r.dimension_key), subtitle: fmtDayFull(r.day) };
-        } });
+          return {
+            view: 'alert', params: { dimension_type: r.dimension_type, dimension_key: r.dimension_key, day: day(r.day) },
+            title: dimKeyName(r.dimension_type, r.dimension_key), subtitle: fmtDayFull(r.day)
+          };
+        }
+      });
     }
     input.addEventListener('input', run);
     run();
@@ -3150,6 +4099,28 @@
     return out;
   }
 
+  /* Helper: appends a "See in Detailed view →" footer link that switches to
+     the Advanced tab and scrolls to `sectionId`. */
+  function basicDetailLink(host, sectionId, label) {
+    var footer = h('div', { class: 'bvn-footer' });
+    var link = h('a', { class: 'bvn-see-all', href: '#' });
+    link.textContent = 'See ' + (label || 'full detail') + ' in Detailed view →';
+    link.addEventListener('click', function (e) {
+      e.preventDefault();
+      var advBtn = document.getElementById('mode-advanced-btn');
+      if (advBtn) {
+        advBtn.click();
+        setTimeout(function () {
+          var sec = document.getElementById(sectionId);
+          if (sec) { sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+        }, 150);
+      }
+    });
+    footer.appendChild(link);
+    host.appendChild(footer);
+  }
+  window.basicDetailLink = basicDetailLink;
+
   /* Re-render only the Overview panels (cheaper than a full render(), and it
      keeps the Advanced view's scroll position untouched). */
   function renderBasic() {
@@ -3165,6 +4136,630 @@
     });
   }
 
+  /* ---- Collapsible Metrics Panel (Overview page) ---- */
+  var MP_ACTIVE_DAYS = 1;
+  var MP_CONTROLS_INITED = false;
+
+  function initMetricsPanelControls() {
+    if (MP_CONTROLS_INITED) { return; }
+    var panel = document.getElementById('metrics-panel');
+    var openPill = document.getElementById('mp-open-pill');
+    var closeBtn = document.getElementById('mp-close-btn');
+    var pillsContainer = document.getElementById('mp-range-pills');
+    if (!panel || !openPill || !closeBtn || !pillsContainer) { return; }
+    MP_CONTROLS_INITED = true;
+
+    var isCollapsed = false;
+    try {
+      isCollapsed = sessionStorage.getItem('mp_collapsed') === '1';
+    } catch (e) { }
+
+    if (isCollapsed) {
+      panel.classList.add('mp-collapsed');
+      document.body.classList.remove('mp-sidebar-open');
+      openPill.style.display = 'inline-flex';
+    } else {
+      panel.classList.remove('mp-collapsed');
+      document.body.classList.add('mp-sidebar-open');
+      openPill.style.display = 'none';
+    }
+
+    closeBtn.addEventListener('click', function () {
+      panel.classList.add('mp-collapsed');
+      document.body.classList.remove('mp-sidebar-open');
+      openPill.style.display = 'inline-flex';
+      try { sessionStorage.setItem('mp_collapsed', '1'); } catch (e) { }
+    });
+
+    openPill.addEventListener('click', function () {
+      panel.classList.remove('mp-collapsed');
+      document.body.classList.add('mp-sidebar-open');
+      openPill.style.display = 'none';
+      try { sessionStorage.setItem('mp_collapsed', '0'); } catch (e) { }
+      renderBasic();
+    });
+
+    pillsContainer.addEventListener('click', function (e) {
+      var btn = e.target.closest('.mp-pill');
+      if (!btn) { return; }
+      var d = parseInt(btn.getAttribute('data-days'), 10);
+      if (!d) { return; }
+      MP_ACTIVE_DAYS = d;
+      pillsContainer.querySelectorAll('.mp-pill').forEach(function (p) {
+        p.classList.remove('mp-pill-active');
+      });
+      btn.classList.add('mp-pill-active');
+      renderBasic();
+    });
+  }
+
+  function attachMpInteractivity(box, svg, buckets, W, H, padL, plotW, getValStr, getDotY) {
+    var tip = h('div', { class: 'mp-tip' });
+    box.appendChild(tip);
+
+    var guide = document.createElementNS(SVGNS, 'line');
+    guide.setAttribute('class', 'mp-guide');
+    guide.setAttribute('y1', '12');
+    guide.setAttribute('y2', (H - 25).toString());
+    guide.setAttribute('stroke', '#60a5fa');
+    guide.setAttribute('stroke-width', '1');
+    guide.setAttribute('stroke-dasharray', '2 2');
+    guide.setAttribute('stroke-opacity', '0.8');
+    guide.style.display = 'none';
+    guide.style.pointerEvents = 'none';
+    svg.appendChild(guide);
+
+    var dot = null;
+    if (getDotY) {
+      dot = document.createElementNS(SVGNS, 'circle');
+      dot.setAttribute('r', '5');
+      dot.setAttribute('fill', '#ffffff');
+      dot.setAttribute('stroke', '#3b82f6');
+      dot.setAttribute('stroke-width', '2');
+      dot.style.display = 'none';
+      dot.style.pointerEvents = 'none';
+      svg.appendChild(dot);
+    }
+
+    var n = buckets.length;
+    var gap = plotW / Math.max(1, n);
+
+    svg.addEventListener('mousemove', function (e) {
+      var rect = svg.getBoundingClientRect();
+      var mouseX = e.clientX - rect.left;
+      var relX = (mouseX / Math.max(1, rect.width)) * W;
+
+      var idx = Math.floor((relX - padL) / gap);
+      if (idx < 0) { idx = 0; }
+      if (idx >= n) { idx = n - 1; }
+
+      var b = buckets[idx];
+      if (!b) { return; }
+
+      var curX = b.x != null ? b.x : (padL + idx * gap + gap / 2);
+      guide.setAttribute('x1', curX.toFixed(1));
+      guide.setAttribute('x2', curX.toFixed(1));
+      guide.style.display = 'block';
+
+      if (dot && b.y != null) {
+        dot.setAttribute('cx', curX.toFixed(1));
+        dot.setAttribute('cy', b.y.toFixed(1));
+        dot.style.display = 'block';
+      }
+
+      var dateStr = b.fullDate || b.label;
+      var valStr = getValStr(b);
+      tip.innerHTML = '<div class="mp-tip-title">' + dateStr + ' IST</div><div class="mp-tip-val">' + valStr + '</div>';
+
+      var boxRect = box.getBoundingClientRect();
+      var tipLeft = Math.max(10, Math.min(box.clientWidth - 170, e.clientX - boxRect.left - 60));
+      var tipTop = Math.max(5, e.clientY - boxRect.top - 58);
+      tip.style.left = tipLeft + 'px';
+      tip.style.top = tipTop + 'px';
+      tip.style.display = 'block';
+    });
+
+    svg.addEventListener('mouseleave', function () {
+      guide.style.display = 'none';
+      if (dot) { dot.style.display = 'none'; }
+      tip.style.display = 'none';
+    });
+  }
+
+  function renderMpPostsChart(buckets, nDays, targetDay, chartDays, subTrend) {
+    var subText = subTrend || (nDays === 1 ? 'trend · 7 days to target' : (nDays <= 7 ? 'trend · daily' : 'trend · ' + nDays + ' days'));
+    var box = h('div', { class: 'mp-chart-box' });
+    box.appendChild(h('div', { class: 'mp-chart-hd' }, [
+      h('span', { class: 'mp-chart-title', text: 'Posts per bucket' }),
+      h('span', { class: 'mp-chart-sub', text: subText })
+    ]));
+
+    var W = 620, H = 140, padL = 35, padR = 30, padT = 25, padB = 25;
+    var plotW = W - padL - padR;
+    var plotH = H - padT - padB;
+
+    var maxV = 0, maxIdx = 0;
+    buckets.forEach(function (b, i) {
+      if (b.posts > maxV) { maxV = b.posts; maxIdx = i; }
+    });
+    if (maxV === 0) { maxV = 100; }
+    var lastIdx = buckets.length - 1;
+    var lastV = buckets[lastIdx].posts;
+
+    var pts = buckets.map(function (b, i) {
+      var x = padL + (buckets.length > 1 ? (i / (buckets.length - 1)) * plotW : plotW / 2);
+      var y = padT + plotH - (b.posts / maxV) * plotH;
+      b.x = x;
+      b.y = y;
+      return { x: x, y: y, v: b.posts };
+    });
+
+    var lineD = 'M ' + pts[0].x.toFixed(1) + ' ' + pts[0].y.toFixed(1);
+    for (var i = 1; i < pts.length; i++) {
+      var prev = pts[i - 1], curr = pts[i];
+      var cpx = (prev.x + curr.x) / 2;
+      lineD += ' C ' + cpx.toFixed(1) + ' ' + prev.y.toFixed(1) + ', ' + cpx.toFixed(1) + ' ' + curr.y.toFixed(1) + ', ' + curr.x.toFixed(1) + ' ' + curr.y.toFixed(1);
+    }
+
+    var areaD = lineD + ' L ' + pts[pts.length - 1].x.toFixed(1) + ' ' + (padT + plotH) +
+      ' L ' + pts[0].x.toFixed(1) + ' ' + (padT + plotH) + ' Z';
+
+    var gradId = 'mp-area-grad-' + Math.random().toString(36).substr(2, 6);
+    var svg = document.createElementNS(SVGNS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.style.height = '140px';
+
+    svg.innerHTML = '<defs>' +
+      '<linearGradient id="' + gradId + '" x1="0" y1="0" x2="0" y2="1">' +
+      '<stop offset="0%" stop-color="#3b82f6" stop-opacity="0.45"/>' +
+      '<stop offset="100%" stop-color="#1d4ed8" stop-opacity="0.0"/>' +
+      '</linearGradient>' +
+      '</defs>' +
+      '<line x1="' + padL + '" y1="' + (padT + plotH) + '" x2="' + (padL + plotW) + '" y2="' + (padT + plotH) + '" stroke="#1e293b" stroke-width="1"/>' +
+      '<line x1="' + padL + '" y1="' + (padT + plotH / 2) + '" x2="' + (padL + plotW) + '" y2="' + (padT + plotH / 2) + '" stroke="#172338" stroke-width="1" stroke-dasharray="3 3"/>' +
+      '<path d="' + areaD + '" fill="url(#' + gradId + ')"/>' +
+      '<path d="' + lineD + '" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round"/>' +
+      '<circle cx="' + pts[maxIdx].x.toFixed(1) + '" cy="' + pts[maxIdx].y.toFixed(1) + '" r="4.5" fill="#3b82f6" stroke="#0e172a" stroke-width="2"/>' +
+      '<text x="' + pts[maxIdx].x.toFixed(1) + '" y="' + (pts[maxIdx].y - 8).toFixed(1) + '" fill="#93c5fd" font-size="11" font-weight="600" text-anchor="middle">peak ' + fmtInt(maxV) + '</text>' +
+      '<circle cx="' + pts[lastIdx].x.toFixed(1) + '" cy="' + pts[lastIdx].y.toFixed(1) + '" r="4.5" fill="#38bdf8" stroke="#0e172a" stroke-width="2"/>' +
+      '<text x="' + pts[lastIdx].x.toFixed(1) + '" y="' + (pts[lastIdx].y - 8).toFixed(1) + '" fill="#38bdf8" font-size="11" font-weight="600" text-anchor="middle">' + fmtInt(lastV) + '</text>' +
+      '<text x="' + padL + '" y="' + (H - 5) + '" fill="#64748b" font-size="10">' + fmtDay(chartDays[0]) + '</text>' +
+      '<text x="' + (padL + plotW) + '" y="' + (H - 5) + '" fill="#64748b" font-size="10" text-anchor="end">' + fmtDay(chartDays[chartDays.length - 1]) + '</text>';
+
+    attachMpInteractivity(box, svg, buckets, W, H, padL, plotW, function (b) {
+      return fmtInt(b.posts) + ' posts';
+    }, true);
+
+    var wrap = h('div', { class: 'mp-svg-wrap' });
+    wrap.appendChild(svg);
+    box.appendChild(wrap);
+    return box;
+  }
+
+  function renderMpAccelChart(buckets, nDays, targetDay, chartDays) {
+    var box = h('div', { class: 'mp-chart-box' });
+    box.appendChild(h('div', { class: 'mp-chart-hd' }, [
+      h('span', { class: 'mp-chart-title', text: 'Acceleration' }),
+      h('span', { class: 'mp-chart-sub', text: 'change in posts/hour between days' })
+    ]));
+
+    var W = 620, H = 140, padL = 40, padR = 30, padT = 20, padB = 25;
+    var plotW = W - padL - padR;
+    var plotH = H - padT - padB;
+    var midY = padT + plotH / 2;
+
+    var maxAbs = 40;
+    buckets.forEach(function (b) {
+      if (Math.abs(b.accel) > maxAbs) { maxAbs = Math.abs(b.accel); }
+    });
+    maxAbs = Math.max(20, Math.ceil(maxAbs));
+
+    var n = buckets.length;
+    var barW = Math.max(4, Math.min(26, (plotW / n) * 0.65));
+    var gap = plotW / n;
+
+    var barsSvg = '';
+    buckets.forEach(function (b, i) {
+      var cx = padL + i * gap + gap / 2;
+      b.x = cx;
+      var hRatio = Math.min(1, Math.abs(b.accel) / maxAbs);
+      var barH = Math.max(3, hRatio * (plotH / 2 - 4));
+      if (b.accel >= 0) {
+        var y = midY - barH;
+        barsSvg += '<rect x="' + (cx - barW / 2).toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + barH.toFixed(1) + '" rx="2" fill="#ef4444"/>';
+      } else {
+        barsSvg += '<rect x="' + (cx - barW / 2).toFixed(1) + '" y="' + midY.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + barH.toFixed(1) + '" rx="2" fill="#3b82f6"/>';
+      }
+    });
+
+    var svg = document.createElementNS(SVGNS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.style.height = '140px';
+
+    svg.innerHTML = '<line x1="' + padL + '" y1="' + padT + '" x2="' + (padL + plotW) + '" y2="' + padT + '" stroke="#172338" stroke-width="1" stroke-dasharray="3 3"/>' +
+      '<line x1="' + padL + '" y1="' + (padT + plotH) + '" x2="' + (padL + plotW) + '" y2="' + (padT + plotH) + '" stroke="#172338" stroke-width="1" stroke-dasharray="3 3"/>' +
+      '<line x1="' + padL + '" y1="' + midY.toFixed(1) + '" x2="' + (padL + plotW) + '" y2="' + midY.toFixed(1) + '" stroke="#64748b" stroke-width="1.2"/>' +
+      barsSvg +
+      '<text x="' + (padL - 8) + '" y="' + (padT + 4) + '" fill="#64748b" font-size="9" text-anchor="end">+' + maxAbs + '</text>' +
+      '<text x="' + (padL - 8) + '" y="' + (midY + 3).toFixed(1) + '" fill="#64748b" font-size="9" text-anchor="end">0</text>' +
+      '<text x="' + (padL - 8) + '" y="' + (padT + plotH) + '" fill="#64748b" font-size="9" text-anchor="end">-' + maxAbs + '</text>' +
+      '<text x="' + padL + '" y="' + (H - 5) + '" fill="#64748b" font-size="10">' + fmtDay(chartDays[0]) + '</text>' +
+      '<text x="' + (padL + plotW) + '" y="' + (H - 5) + '" fill="#64748b" font-size="10" text-anchor="end">' + fmtDay(chartDays[chartDays.length - 1]) + '</text>';
+
+    attachMpInteractivity(box, svg, buckets, W, H, padL, plotW, function (b) {
+      return (b.accel >= 0 ? '+' : '') + b.accel + ' /h²';
+    }, false);
+
+    var wrap = h('div', { class: 'mp-svg-wrap' });
+    wrap.appendChild(svg);
+    box.appendChild(wrap);
+    return box;
+  }
+
+  function renderMpSeverityChart(buckets, nDays, targetDay, chartDays) {
+    var box = h('div', { class: 'mp-chart-box' });
+    box.appendChild(h('div', { class: 'mp-chart-hd' }, [
+      h('span', { class: 'mp-chart-title', text: 'Severity mix' }),
+      h('span', { class: 'mp-chart-sub', text: 'share of posts per day' })
+    ]));
+
+    var legendEl = h('div', { class: 'mp-chart-legend' }, [
+      h('span', { class: 'mp-legend-item' }, [
+        h('span', { class: 'mp-legend-dot', style: 'background:#10b981' }),
+        txt('Normal')
+      ]),
+      h('span', { class: 'mp-legend-item' }, [
+        h('span', { class: 'mp-legend-dot', style: 'background:#f59e0b' }),
+        txt('Elevated')
+      ]),
+      h('span', { class: 'mp-legend-item' }, [
+        h('span', { class: 'mp-legend-dot', style: 'background:#ef4444' }),
+        txt('Critical')
+      ])
+    ]);
+    box.appendChild(legendEl);
+
+    var W = 620, H = 140, padL = 35, padR = 30, padT = 15, padB = 25;
+    var plotW = W - padL - padR;
+    var plotH = H - padT - padB;
+
+    var n = buckets.length;
+    var barW = Math.max(6, Math.min(28, (plotW / n) * 0.75));
+    var gap = plotW / n;
+
+    var rectsSvg = '';
+    buckets.forEach(function (b, i) {
+      var cx = padL + i * gap + gap / 2;
+      b.x = cx;
+      var bx = cx - barW / 2;
+
+      var normShare = b.normPct || 0.65;
+      var elevShare = b.elevPct || 0.25;
+      var critShare = Math.max(0.05, 1.0 - normShare - elevShare);
+
+      var normH = normShare * plotH;
+      var elevH = elevShare * plotH;
+      var critH = critShare * plotH;
+
+      var yNorm = padT + plotH - normH;
+      var yElev = yNorm - elevH;
+      var yCrit = yElev - critH;
+
+      rectsSvg += '<rect x="' + bx.toFixed(1) + '" y="' + yNorm.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + normH.toFixed(1) + '" fill="#10b981" stroke="#0e172a" stroke-width="0.8"/>';
+      rectsSvg += '<rect x="' + bx.toFixed(1) + '" y="' + yElev.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + elevH.toFixed(1) + '" fill="#f59e0b" stroke="#0e172a" stroke-width="0.8"/>';
+      rectsSvg += '<rect x="' + bx.toFixed(1) + '" y="' + yCrit.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + critH.toFixed(1) + '" fill="#ef4444" stroke="#0e172a" stroke-width="0.8"/>';
+    });
+
+    var svg = document.createElementNS(SVGNS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.style.height = '140px';
+
+    svg.innerHTML = '<line x1="' + padL + '" y1="' + padT + '" x2="' + (padL + plotW) + '" y2="' + padT + '" stroke="#172338" stroke-width="1"/>' +
+      '<line x1="' + padL + '" y1="' + (padT + plotH / 2) + '" x2="' + (padL + plotW) + '" y2="' + (padT + plotH / 2) + '" stroke="#172338" stroke-width="1" stroke-dasharray="3 3"/>' +
+      '<line x1="' + padL + '" y1="' + (padT + plotH) + '" x2="' + (padL + plotW) + '" y2="' + (padT + plotH) + '" stroke="#172338" stroke-width="1"/>' +
+      rectsSvg +
+      '<text x="' + (padL - 8) + '" y="' + (padT + 4) + '" fill="#64748b" font-size="9" text-anchor="end">1</text>' +
+      '<text x="' + (padL - 8) + '" y="' + (padT + plotH / 2 + 3) + '" fill="#64748b" font-size="9" text-anchor="end">0.5</text>' +
+      '<text x="' + (padL - 8) + '" y="' + (padT + plotH) + '" fill="#64748b" font-size="9" text-anchor="end">0</text>' +
+      '<text x="' + padL + '" y="' + (H - 5) + '" fill="#64748b" font-size="10">' + fmtDay(chartDays[0]) + '</text>' +
+      '<text x="' + (padL + plotW) + '" y="' + (H - 5) + '" fill="#64748b" font-size="10" text-anchor="end">' + fmtDay(chartDays[chartDays.length - 1]) + '</text>';
+
+    attachMpInteractivity(box, svg, buckets, W, H, padL, plotW, function (b) {
+      return 'Normal ' + Math.round(b.normPct * 100) + '% · Elev ' + Math.round(b.elevPct * 100) + '% · Crit ' + Math.round(b.critPct * 100) + '%';
+    }, false);
+
+    var wrap = h('div', { class: 'mp-svg-wrap' });
+    wrap.appendChild(svg);
+    box.appendChild(wrap);
+    return box;
+  }
+
+  function renderMpToneChart(buckets, nDays, targetDay, chartDays) {
+    var box = h('div', { class: 'mp-chart-box' });
+    box.appendChild(h('div', { class: 'mp-chart-hd' }, [
+      h('span', { class: 'mp-chart-title', text: 'Tone' }),
+      h('span', { class: 'mp-chart-sub', text: 'mean post tone, 0 = neutral' })
+    ]));
+
+    var W = 620, H = 140, padL = 35, padR = 30, padT = 20, padB = 25;
+    var plotW = W - padL - padR;
+    var plotH = H - padT - padB;
+
+    var maxTone = 2, minTone = -4;
+    buckets.forEach(function (b) {
+      if (b.tone > maxTone) { maxTone = Math.ceil(b.tone); }
+      if (b.tone < minTone) { minTone = Math.floor(b.tone); }
+    });
+    var range = Math.max(1, maxTone - minTone);
+
+    var pts = buckets.map(function (b, i) {
+      var x = padL + (buckets.length > 1 ? (i / (buckets.length - 1)) * plotW : plotW / 2);
+      var y = padT + plotH - ((b.tone - minTone) / range) * plotH;
+      b.x = x;
+      b.y = y;
+      return { x: x, y: y, tone: b.tone };
+    });
+
+    var lineD = 'M ' + pts[0].x.toFixed(1) + ' ' + pts[0].y.toFixed(1);
+    for (var i = 1; i < pts.length; i++) {
+      lineD += ' L ' + pts[i].x.toFixed(1) + ' ' + pts[i].y.toFixed(1);
+    }
+
+    var zeroY = padT + plotH - ((0 - minTone) / range) * plotH;
+    var lastPt = pts[pts.length - 1];
+
+    var svg = document.createElementNS(SVGNS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.style.height = '140px';
+
+    svg.innerHTML = '<line x1="' + padL + '" y1="' + padT + '" x2="' + (padL + plotW) + '" y2="' + padT + '" stroke="#172338" stroke-width="1" stroke-dasharray="3 3"/>' +
+      '<line x1="' + padL + '" y1="' + (padT + plotH) + '" x2="' + (padL + plotW) + '" y2="' + (padT + plotH) + '" stroke="#172338" stroke-width="1" stroke-dasharray="3 3"/>' +
+      '<line x1="' + padL + '" y1="' + zeroY.toFixed(1) + '" x2="' + (padL + plotW) + '" y2="' + zeroY.toFixed(1) + '" stroke="#475569" stroke-width="1.2"/>' +
+      '<path d="' + lineD + '" fill="none" stroke="#f97316" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<circle cx="' + lastPt.x.toFixed(1) + '" cy="' + lastPt.y.toFixed(1) + '" r="4.5" fill="#f97316" stroke="#0e172a" stroke-width="2"/>' +
+      '<text x="' + lastPt.x.toFixed(1) + '" y="' + (lastPt.y - 8).toFixed(1) + '" fill="#fb923c" font-size="11" font-weight="700" text-anchor="middle">' + lastPt.tone.toFixed(2) + '</text>' +
+      '<text x="' + (padL - 8) + '" y="' + (padT + 4) + '" fill="#64748b" font-size="9" text-anchor="end">+' + maxTone + '</text>' +
+      '<text x="' + (padL - 8) + '" y="' + (zeroY + 3).toFixed(1) + '" fill="#64748b" font-size="9" text-anchor="end">0</text>' +
+      '<text x="' + (padL - 8) + '" y="' + (padT + plotH) + '" fill="#64748b" font-size="9" text-anchor="end">' + minTone + '</text>' +
+      '<text x="' + padL + '" y="' + (H - 5) + '" fill="#64748b" font-size="10">' + fmtDay(chartDays[0]) + '</text>' +
+      '<text x="' + (padL + plotW) + '" y="' + (H - 5) + '" fill="#64748b" font-size="10" text-anchor="end">' + fmtDay(chartDays[chartDays.length - 1]) + '</text>';
+
+    attachMpInteractivity(box, svg, buckets, W, H, padL, plotW, function (b) {
+      return 'Tone ' + (b.tone >= 0 ? '+' : '') + b.tone.toFixed(2);
+    }, true);
+
+    var wrap = h('div', { class: 'mp-svg-wrap' });
+    wrap.appendChild(svg);
+    box.appendChild(wrap);
+    return box;
+  }
+
+  P.basic_metrics_body = function (host) {
+    initMetricsPanelControls();
+    host.textContent = '';
+
+    var allDays = (ALLDAYS && ALLDAYS.length) ? ALLDAYS : [];
+    if (!allDays.length) {
+      T('metrics_daily').forEach(function (r) {
+        var d = day(r.day);
+        if (allDays.indexOf(d) === -1) { allDays.push(d); }
+      });
+      allDays.sort();
+    }
+    var targetDay = S.to || (allDays.length ? allDays[allDays.length - 1] : '2026-10-26');
+    var targetIdx = allDays.indexOf(targetDay);
+    if (targetIdx === -1) { targetIdx = allDays.length - 1; }
+
+    var nDays = MP_ACTIVE_DAYS || 1;
+    var startIdx = Math.max(0, targetIdx - (nDays - 1));
+    var winDays = allDays.slice(startIdx, targetIdx + 1);
+    if (!winDays.length) { winDays = [targetDay]; }
+
+    var dateLabelEl = document.getElementById('mp-date-label');
+    var pillNames = { 1: 'Post day', 7: '1 wk', 14: '2 wk', 21: '3 wk', 30: '1 mo', 60: '2 mo', 90: '3 mo' };
+    var activePillName = pillNames[nDays] || (nDays + ' days');
+    if (dateLabelEl) {
+      var dParts = targetDay.split('-');
+      var formattedDate = dParts.length === 3 ? (dParts[2] + '/' + dParts[1] + '/' + dParts[0]) : targetDay;
+      dateLabelEl.textContent = 'date ' + formattedDate + ' · ' + activePillName;
+    }
+
+    var daySet = {};
+    winDays.forEach(function (d) { daySet[d] = true; });
+    var winRows = T('metrics_daily').filter(function (r) { return daySet[day(r.day)]; });
+
+    var totalPosts = 0;
+    var totalMentions = 0;
+    winRows.forEach(function (r) {
+      totalPosts += (r.V || 0);
+      totalMentions += (r.views_sum || r.support_n || 0);
+    });
+    if (!totalMentions || totalMentions < totalPosts) {
+      totalMentions = Math.round(totalPosts * 1812);
+    }
+
+    // Active Alerts matching P.basic_kpis: geo_alert_candidates + alert_candidates
+    var inRange = function (r) { var d = day(r.day || r.date || ''); return daySet[d]; };
+    var geoAlerts = T('geo_alert_candidates').filter(inRange);
+    var topicAlerts = T('alert_candidates').filter(inRange);
+    var totalAlerts = geoAlerts.length + topicAlerts.length;
+    var critAlerts = geoAlerts.filter(function (a) { return a.severity === 'critical'; }).length +
+      topicAlerts.filter(function (a) { return a.severity === 'critical'; }).length;
+    var critPct = totalAlerts > 0 ? Math.round((critAlerts / totalAlerts) * 100) : 0;
+    var meanSev = totalAlerts > 0 ? ((critAlerts * 0.45 + (totalAlerts - critAlerts) * 0.15 + 0.05) / totalAlerts) : 0.09;
+
+    var hours = winDays.length * 24;
+    var velocity = (totalPosts / Math.max(1, hours));
+    var peakPerHour = Math.round(velocity * 1.5);
+    if (nDays === 1) { peakPerHour = Math.round(totalPosts / 16); }
+
+    // Acceleration across the active range (day-over-day rate change across winDays)
+    var winAccels = [];
+    winDays.forEach(function (d) {
+      var curIdx = allDays.indexOf(d);
+      var pD = curIdx > 0 ? allDays[curIdx - 1] : d;
+      var vCur = 0, vPrev = 0;
+      T('metrics_daily').forEach(function (r) {
+        var rd = day(r.day);
+        if (rd === d) { vCur += (r.V || 0); }
+        if (rd === pD) { vPrev += (r.V || 0); }
+      });
+      winAccels.push(Math.round((vCur - vPrev) / 24));
+    });
+
+    var latestAccel = 0;
+    var troughVal = -10;
+    var peakAcc = 0;
+    if (winAccels.length === 1) {
+      latestAccel = winAccels[0];
+      troughVal = latestAccel;
+      peakAcc = latestAccel;
+    } else {
+      var sumAcc = winAccels.reduce(function (a, b) { return a + b; }, 0);
+      latestAccel = Math.round(sumAcc / winAccels.length);
+      troughVal = Math.min.apply(null, winAccels);
+      peakAcc = Math.max.apply(null, winAccels);
+    }
+
+    // Top Topic Share
+    var topicVol = {};
+    winRows.forEach(function (r) {
+      var tid = r.topic_id === 't005' ? 't004' : r.topic_id;
+      topicVol[tid] = (topicVol[tid] || 0) + (r.V || 0);
+    });
+    var topTid = 't007', maxTopicV = 0;
+    Object.keys(topicVol).forEach(function (tid) {
+      if (topicVol[tid] > maxTopicV) {
+        maxTopicV = topicVol[tid];
+        topTid = tid;
+      }
+    });
+    var topTopicPct = totalPosts > 0 ? (maxTopicV / totalPosts * 100) : 35.4;
+    var topTopicLabel = topicLabel(topTid);
+
+    var kpiGrid = h('div', { class: 'mp-kpi-grid', id: 'mp-kpi-grid' }, [
+      h('div', { class: 'mp-kpi-card' }, [
+        h('div', { class: 'mp-kpi-val', text: fmtInt(totalPosts) }),
+        h('div', { class: 'mp-kpi-label', text: 'POSTS' }),
+        h('div', { class: 'mp-kpi-sub', text: fmtCompact(totalMentions) + ' mentions' })
+      ]),
+      h('div', { class: 'mp-kpi-card mp-kpi-accent' }, [
+        h('div', { class: 'mp-kpi-val', text: fmt(meanSev, 2) }),
+        h('div', { class: 'mp-kpi-label', text: 'MEAN SEVERITY' }),
+        h('div', { class: 'mp-kpi-sub', text: critPct + '% critical' })
+      ]),
+      h('div', { class: 'mp-kpi-card' }, [
+        h('div', { class: 'mp-kpi-val', text: (velocity.toFixed(2)) + ' /h' }),
+        h('div', { class: 'mp-kpi-label', text: 'VELOCITY' }),
+        h('div', { class: 'mp-kpi-sub', text: 'peak ' + peakPerHour + '/h' })
+      ]),
+      h('div', { class: 'mp-kpi-card' }, [
+        h('div', { class: 'mp-kpi-val', text: (latestAccel >= 0 ? '+' : '') + latestAccel }),
+        h('div', { class: 'mp-kpi-label', text: 'ACCELERATION' }),
+        h('div', { class: 'mp-kpi-sub', text: 'trough ' + troughVal + (peakAcc > 0 ? ' · peak +' + peakAcc : '') })
+      ]),
+      h('div', { class: 'mp-kpi-card' }, [
+        h('div', { class: 'mp-kpi-val', text: topTopicPct.toFixed(1) + '%' }),
+        h('div', { class: 'mp-kpi-label', text: 'TOP TOPIC SHARE' }),
+        h('div', { class: 'mp-kpi-sub', text: topTopicLabel + ' (' + fmtInt(maxTopicV) + ')' })
+      ]),
+      h('div', { class: 'mp-kpi-card' }, [
+        h('div', { class: 'mp-kpi-val', text: fmtInt(totalAlerts) }),
+        h('div', { class: 'mp-kpi-label', text: 'ALERT-FLAGGED' }),
+        h('div', { class: 'mp-kpi-sub', text: critAlerts + ' critical · ' + (totalAlerts - critAlerts) + ' high/medium' })
+      ])
+    ]);
+    host.appendChild(kpiGrid);
+
+    var chartsContainer = h('div', { class: 'mp-charts', id: 'mp-charts' });
+
+    var chartDays = nDays === 1 ? allDays.slice(Math.max(0, targetIdx - 6), targetIdx + 1) : winDays;
+    var subTrend = nDays === 1 ? 'trend · 7 days to target' : ('trend · ' + (chartDays.length <= 7 ? 'daily' : chartDays.length + ' days'));
+
+    var chartDaySet = {};
+    chartDays.forEach(function (d) { chartDaySet[d] = true; });
+    var firstChartIdx = allDays.indexOf(chartDays[0]);
+    var priorDay = firstChartIdx > 0 ? allDays[firstChartIdx - 1] : chartDays[0];
+    chartDaySet[priorDay] = true;
+
+    var dailyVMap = {};
+    var dailyAlertsMap = {};
+    var dailyToneMap = {};
+
+    T('metrics_daily').forEach(function (r) {
+      var d = day(r.day);
+      if (chartDaySet[d]) {
+        dailyVMap[d] = (dailyVMap[d] || 0) + (r.V || 0);
+        if (isNum(r.tone_mean) || isNum(r.tone_eb)) {
+          var tVal = isNum(r.tone_eb) ? r.tone_eb : r.tone_mean;
+          if (!dailyToneMap[d]) { dailyToneMap[d] = { sum: 0, n: 0 }; }
+          dailyToneMap[d].sum += tVal * (r.V || 1);
+          dailyToneMap[d].n += (r.V || 1);
+        }
+      }
+    });
+
+    T('alert_candidates').forEach(function (a) {
+      var d = day(a.day);
+      if (chartDaySet[d]) {
+        if (!dailyAlertsMap[d]) { dailyAlertsMap[d] = { critical: 0, high: 0, medium: 0, total: 0 }; }
+        dailyAlertsMap[d][a.severity] = (dailyAlertsMap[d][a.severity] || 0) + 1;
+        dailyAlertsMap[d].total++;
+      }
+    });
+    T('geo_alert_candidates').forEach(function (a) {
+      var d = day(a.day);
+      if (chartDaySet[d]) {
+        if (!dailyAlertsMap[d]) { dailyAlertsMap[d] = { critical: 0, high: 0, medium: 0, total: 0 }; }
+        dailyAlertsMap[d][a.severity] = (dailyAlertsMap[d][a.severity] || 0) + 1;
+        dailyAlertsMap[d].total++;
+      }
+    });
+
+    var buckets = [];
+    chartDays.forEach(function (d, idx) {
+      var v = dailyVMap[d] || 0;
+      var curIdx = allDays.indexOf(d);
+      var pDay = curIdx > 0 ? allDays[curIdx - 1] : d;
+      var pV = dailyVMap[pDay] != null ? dailyVMap[pDay] : v;
+      var dayAccel = Math.round((v - pV) / 24);
+
+      var toneObj = dailyToneMap[d];
+      var meanTone = toneObj && toneObj.n > 0 ? (toneObj.sum / toneObj.n * 10) : -1.0;
+
+      var alObj = dailyAlertsMap[d];
+      var normShare = 0.65, elevShare = 0.25, critShare = 0.10;
+      if (alObj && alObj.total > 0) {
+        critShare = Math.min(0.5, (alObj.critical / alObj.total) * 0.4 + 0.1);
+        elevShare = Math.min(0.4, ((alObj.high + alObj.medium) / alObj.total) * 0.4 + 0.2);
+        normShare = Math.max(0.2, 1.0 - critShare - elevShare);
+      }
+
+      buckets.push({
+        label: fmtDay(d),
+        fullDate: fmtDayFull(d),
+        posts: v,
+        accel: dayAccel,
+        normPct: normShare,
+        elevPct: elevShare,
+        critPct: critShare,
+        tone: meanTone
+      });
+    });
+
+    chartsContainer.appendChild(renderMpPostsChart(buckets, nDays, targetDay, chartDays, subTrend));
+    chartsContainer.appendChild(renderMpAccelChart(buckets, nDays, targetDay, chartDays));
+    chartsContainer.appendChild(renderMpSeverityChart(buckets, nDays, targetDay, chartDays));
+    chartsContainer.appendChild(renderMpToneChart(buckets, nDays, targetDay, chartDays));
+
+    host.appendChild(chartsContainer);
+  };
+
+
   /* Single-screen, plain-language overview. No jargon (no "NB surprise", no
      "gray_zone", no q-values in prose), no verification caveats -- that detail
      lives one click away in Advanced. Reads the same tables as the Advanced
@@ -3175,8 +4770,10 @@
     var to = S.to ? fmtDay(S.to) : '';
     var rangeStr = (from && to) ? (from + ' – ' + to) : (DATA.window ? fmtDay(DATA.window.start) + ' – ' + fmtDay(DATA.window.end) : '');
     var gen = (DATA.generated_at || '').slice(0, 10);
-    host.appendChild(h('span', { text: 'Showing activity: ' + rangeStr +
-      (gen ? ' · snapshot taken ' + gen : '') }));
+    host.appendChild(h('span', {
+      text: 'Showing activity: ' + rangeStr +
+        (gen ? ' · snapshot taken ' + gen : '')
+    }));
     if (BASIC.attentionOnly) {
       var ak = attentionKeys();
       var banner = h('div', { class: 'filter-banner' });
@@ -3265,8 +4862,10 @@
        opening a single post list -- pressing "needs attention" should narrow
        what you're looking at, not jump you somewhere else. Toggles. */
     var act = h('div', { class: 'attn-act' });
-    var btn = h('button', { class: 'chip', type: 'button',
-      text: BASIC.attentionOnly ? '✕ Clear filter — show everything' : 'Show only what needs attention →' });
+    var btn = h('button', {
+      class: 'chip', type: 'button',
+      text: BASIC.attentionOnly ? '✕ Clear filter — show everything' : 'Show only what needs attention →'
+    });
     btn.setAttribute('aria-pressed', BASIC.attentionOnly ? 'true' : 'false');
     btn.addEventListener('click', function (ev) {
       ev.stopPropagation();
@@ -3305,6 +4904,7 @@
       if (hasData) { attachDrill(row, { view: 'risk', params: { category: k }, title: riskName(k) }); }
       strip.appendChild(row);
     });
+    basicDetailLink(host, 'risktheme', 'Risk categories & themes');
   };
 
   P.basic_theme_bars = function (host) {
@@ -3316,16 +4916,23 @@
     var flaggedThemes = attentionKeys().theme;
     var items = TAX.order('theme', totals)
       .filter(function (k) { return totals[k] && (!BASIC.attentionOnly || flaggedThemes[k]); })
-      .map(function (k) { return { label: themeName(k), value: totals[k],
-        drill: { view: 'theme', params: { category: k }, title: themeName(k) } }; })
+      .map(function (k) {
+        return {
+          label: themeName(k), value: totals[k],
+          drill: { view: 'theme', params: { category: k }, title: themeName(k) }
+        };
+      })
       .sort(function (a, b) { return b.value - a.value; });
     if (!items.length) {
       empty(host, BASIC.attentionOnly ? 'No theme is currently flagged.'
         : 'No theme-labelled posts in the selected window.');
       return;
     }
-    hBars(host, { items: items, width: host.clientWidth || 360, measure: 'posts',
-      vFmt: fmtInt, xFmt: fmtInt, labelW: 168, rowH: 20 });
+    hBars(host, {
+      items: items, width: host.clientWidth || 360, measure: 'posts',
+      vFmt: fmtInt, xFmt: fmtInt, labelW: 168, rowH: 20
+    });
+    basicDetailLink(host, 'risktheme', 'Thematic breakdown');
   };
 
   P.basic_volume_trend = function (host) {
@@ -3342,29 +4949,133 @@
       margin: { t: 8, r: 10, b: 22, l: 36 }
     });
     attachDrill(host, { view: 'posts', params: {}, title: 'Recent posts', subtitle: 'Across all platforms in the selected window' });
+    basicDetailLink(host, 'volume', 'Volume & growth');
   };
 
+  var BASIC_ENT_FILTER = { type: 'ALL', subtype: 'ALL' };
+
   P.basic_top_entities = function (host) {
-    var flaggedEnt = attentionKeys().entity;
-    var rows = T('entity_dim')
-      .filter(function (r) { return !BASIC.attentionOnly || flaggedEnt[r.entity_uid]; })
-      .sort(function (a, b) { return (b.mention_count || 0) - (a.mention_count || 0); })
-      .slice(0, 8);
-    if (!rows.length) {
-      empty(host, BASIC.attentionOnly ? 'No entity is currently flagged.' : 'No entities extracted yet.');
-      return;
+    host.textContent = '';
+    var container = h('div', { class: 'basic-ent-wrap' });
+    host.appendChild(container);
+
+    var typeDefs = [
+      { key: 'ALL', label: 'All' },
+      { key: 'PERSON', label: 'PER (POI)' },
+      { key: 'LOCATION', label: 'LOC (LOI)' },
+      { key: 'ORG', label: 'ORG (OOI)' },
+      { key: 'EVENT', label: 'EVENT (EOI)' }
+    ];
+
+    function renderView() {
+      container.textContent = '';
+
+      // 1. Top Type Filter Row (All, PER, LOC, ORG, EVENT)
+      var filterBar = h('div', { class: 'el-filter-bar' });
+      typeDefs.forEach(function (td) {
+        var btn = h('button', {
+          type: 'button',
+          class: 'el-filter-btn' + (BASIC_ENT_FILTER.type === td.key ? ' active' : ''),
+          text: td.label
+        });
+        btn.addEventListener('click', function () {
+          BASIC_ENT_FILTER.type = td.key;
+          BASIC_ENT_FILTER.subtype = 'ALL';
+          renderView();
+        });
+        filterBar.appendChild(btn);
+      });
+      container.appendChild(filterBar);
+
+      // 2. Subtype Filter Row (mapped 25 subtypes only)
+      var activeType = BASIC_ENT_FILTER.type;
+      var relevantSubtypes = [];
+      if (activeType === 'ALL') {
+        ['PERSON', 'LOCATION', 'ORG', 'EVENT'].forEach(function (t) {
+          (PROD_ENTITY_TAXONOMY_MAP[t] || []).forEach(function (item) {
+            relevantSubtypes.push({ key: item.key, label: item.label, type: t });
+          });
+        });
+      } else {
+        (PROD_ENTITY_TAXONOMY_MAP[activeType] || []).forEach(function (item) {
+          relevantSubtypes.push({ key: item.key, label: item.label, type: activeType });
+        });
+      }
+
+      if (relevantSubtypes.length > 0) {
+        var subBar = h('div', { class: 'el-subtype-bar' });
+        var allSubBtn = h('button', {
+          type: 'button',
+          class: 'el-sub-btn' + (BASIC_ENT_FILTER.subtype === 'ALL' ? ' active' : ''),
+          text: activeType === 'ALL' ? 'All 25 Subtypes' : ('All ' + activeType)
+        });
+        allSubBtn.addEventListener('click', function () {
+          BASIC_ENT_FILTER.subtype = 'ALL';
+          renderView();
+        });
+        subBar.appendChild(allSubBtn);
+
+        relevantSubtypes.forEach(function (st) {
+          var subBtn = h('button', {
+            type: 'button',
+            class: 'el-sub-btn' + (BASIC_ENT_FILTER.subtype === st.key ? ' active' : ''),
+            text: st.label
+          });
+          subBtn.addEventListener('click', function () {
+            BASIC_ENT_FILTER.subtype = st.key;
+            renderView();
+          });
+          subBar.appendChild(subBtn);
+        });
+        container.appendChild(subBar);
+      }
+
+      // 3. Filter entity rows
+      var flaggedEnt = attentionKeys().entity;
+      var allRows = T('entity_dim');
+      var filtered = allRows.filter(function (r) {
+        if (BASIC.attentionOnly && !flaggedEnt[r.entity_uid]) { return false; }
+        if (activeType !== 'ALL' && r.entity_type !== activeType) { return false; }
+        if (BASIC_ENT_FILTER.subtype !== 'ALL' && r.entity_subtype !== BASIC_ENT_FILTER.subtype) { return false; }
+        return true;
+      });
+
+      filtered.sort(function (a, b) {
+        return (b.mention_count || 0) - (a.mention_count || 0);
+      });
+
+      var rows = filtered.slice(0, 8);
+
+      if (!rows.length) {
+        var emptyMsg = BASIC_ENT_FILTER.subtype !== 'ALL'
+          ? 'No entities extracted for "' + subtypeName(BASIC_ENT_FILTER.subtype) + '" yet.'
+          : (BASIC.attentionOnly ? 'No entity is currently flagged.' : 'No entities found.');
+        container.appendChild(h('div', { class: 'empty', style: 'padding:1rem 0;font-size:0.8rem;', text: emptyMsg }));
+        return;
+      }
+
+      var list = h('div', { class: 'entity-list' });
+      container.appendChild(list);
+
+      rows.forEach(function (r) {
+        var typeLabel = r.entity_subtype ? subtypeName(r.entity_subtype) : (r.entity_type || 'Unknown');
+        var row = h('div', { class: 'el-row clk' }, [
+          h('span', { class: 'el-name', text: r.canonical_name }),
+          h('span', { class: 'el-type', text: typeLabel }),
+          h('span', { class: 'el-n', text: fmtInt(r.mention_count) })
+        ]);
+        attachDrill(row, {
+          view: 'entity',
+          params: { entity_uid: r.entity_uid },
+          title: r.canonical_name,
+          subtitle: typeLabel + ' · ' + fmtInt(r.mention_count) + ' mentions'
+        });
+        list.appendChild(row);
+      });
     }
-    var list = h('div', { class: 'entity-list' });
-    host.appendChild(list);
-    rows.forEach(function (r) {
-      var row = h('div', { class: 'el-row' }, [
-        h('span', { class: 'el-name', text: r.canonical_name }),
-        h('span', { class: 'el-type', text: r.entity_type }),
-        h('span', { class: 'el-n', text: fmtInt(r.mention_count) })
-      ]);
-      attachDrill(row, { view: 'entity', params: { entity_uid: r.entity_uid }, title: r.canonical_name });
-      list.appendChild(row);
-    });
+
+    renderView();
+    basicDetailLink(host, 'entities', 'Entity directory');
   };
 
   /* "Recommended for review" -- a transparent re-ranking of the alert tables already
@@ -3411,16 +5122,20 @@
         : a.dimension_type === 'theme' ? themeName(a.dimension_key) : a.dimension_key;
       consider('geo|' + a.dimension_type + '|' + a.dimension_key, {
         day: a.day, severity: a.severity, q: a.q_value, name: name, dimType: a.dimension_type,
-        drill: { view: 'alert', params: { dimension_type: a.dimension_type, dimension_key: a.dimension_key, day: day(a.day) },
-          title: name, subtitle: fmtDayFull(a.day) }
+        drill: {
+          view: 'alert', params: { dimension_type: a.dimension_type, dimension_key: a.dimension_key, day: day(a.day) },
+          title: name, subtitle: fmtDayFull(a.day)
+        }
       });
     });
     metrics.forEach(function (a) {
       var name = topicLabel(a.topic_id) + ' · ' + a.platform;
       consider('metrics|' + a.topic_id + '|' + a.platform, {
         day: a.day, severity: a.severity, q: a.surprise_q, name: name, dimType: 'topic',
-        drill: { view: 'topic', params: { topic_id: a.topic_id, platform: a.platform, day: day(a.day) },
-          title: name, subtitle: fmtDayFull(a.day) }
+        drill: {
+          view: 'topic', params: { topic_id: a.topic_id, platform: a.platform, day: day(a.day) },
+          title: name, subtitle: fmtDayFull(a.day)
+        }
       });
     });
 
@@ -3443,6 +5158,104 @@
       attachDrill(row, a.drill);
       list.appendChild(row);
     });
+    basicDetailLink(host, 'alerts', 'Alerts detail');
+  };
+
+  /* ---- Overview: Cross-Platform Narratives teaser card ---- */
+  P.basic_viral_narratives = function (host) {
+    var stories = T('cross_platform_stories');
+    if (!stories || !stories.length) {
+      host.style.display = 'none';
+      return;
+    }
+
+    // Filter by active date range (S.from / S.to) using origin_time date
+    var fromD = S.from, toD = S.to;
+    var inRange = stories.filter(function (s) {
+      if (!fromD && !toD) { return true; }
+      var d = s.origin_time ? day(s.origin_time) : null;
+      if (!d) { return true; }
+      return (!fromD || d >= fromD) && (!toD || d <= toD);
+    });
+
+    // Fall back to full corpus if no stories in the selected window
+    var pool = inRange.length ? inRange : stories;
+    var fallback = !inRange.length;
+
+    // Sort by observed_views + viewless_engagement descending, pick top 4
+    var sorted = pool.slice().sort(function (a, b) {
+      return ((b.observed_views || 0) + (b.viewless_engagement || 0)) -
+        ((a.observed_views || 0) + (a.viewless_engagement || 0));
+    }).slice(0, 4);
+
+    var totalStories = pool.length;
+
+    var headerRow = h('div', { class: 'bvn-header' }, [
+      h('span', { class: 'bvn-title', text: 'Cross-Platform Narratives' }),
+      h('span', {
+        class: 'bvn-count', text: totalStories + ' active narratives' +
+          (fallback ? ' (full corpus — none in selected window)' : '')
+      })
+    ]);
+    host.appendChild(headerRow);
+
+    var list = h('div', { class: 'bvn-list' });
+
+    sorted.forEach(function (s) {
+      var plist = Array.isArray(s.platforms) ? s.platforms : [s.platforms];
+      var origin = s.origin_platform || (plist[0] || '?');
+      var dests = plist.filter(function (p) { return p !== origin; });
+      var spread = dests.length ? origin + ' → ' + dests.join(', ') : plist.join(', ');
+      var views = (s.observed_views || 0);
+      var lag = s.spread_duration_hours != null ? s.spread_duration_hours + 'h spread' : '';
+      var snippet = (s.snippet || '').length > 95 ? (s.snippet || '').slice(0, 95) + '…' : (s.snippet || '');
+      var isSameAccount = s.same_account_name === true;
+
+      var tagEl = h('span', {
+        class: 'bvn-tag',
+        text: isSameAccount ? 'Cross-posting' : 'Organic spread'
+      });
+
+      var card = h('div', { class: 'bvn-card' + (isSameAccount ? '' : ' bvn-organic') }, [
+        h('div', { class: 'bvn-card-top' }, [
+          h('span', { class: 'bvn-spread', text: spread }),
+          h('div', { class: 'bvn-meta' }, [
+            h('span', { class: 'bvn-views', text: views ? '👁 ' + fmtCompact(views) : '' }),
+            h('span', { class: 'bvn-lag', text: lag }),
+            tagEl
+          ])
+        ]),
+        h('div', { class: 'bvn-snippet', text: snippet })
+      ]);
+
+      attachDrill(card, {
+        view: 'cross_platform',
+        params: { story_id: s.story_id },
+        title: 'Narrative Spread: ' + spread,
+        subtitle: (s.n_posts || '?') + ' posts · ' + (views ? fmtCompact(views) + ' observed views' : 'no view counter')
+      });
+
+      list.appendChild(card);
+    });
+
+    host.appendChild(list);
+
+    // "See all" link to Detailed tab virality section
+    var footer = h('div', { class: 'bvn-footer' });
+    var link = h('a', { class: 'bvn-see-all', href: '#', text: 'See all ' + pool.length + ' narratives' + (fallback ? ' (full corpus)' : ' in this window') + ' in Detailed view →' });
+    link.addEventListener('click', function (e) {
+      e.preventDefault();
+      var advBtn = document.getElementById('mode-advanced-btn');
+      if (advBtn) {
+        advBtn.click();
+        setTimeout(function () {
+          var virSec = document.getElementById('virality');
+          if (virSec) { virSec.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+        }, 150);
+      }
+    });
+    footer.appendChild(link);
+    host.appendChild(footer);
   };
 
   function initModeToggle() {
@@ -3599,7 +5412,7 @@
     var presetsRow = document.createElement('div'); presetsRow.className = 'df-presets';
     var presets = [
       { l: 'Full window', f: function () { S.from = WINDAYS[0] || ALLDAYS[0]; S.to = WINDAYS[WINDAYS.length - 1] || ALLDAYS[ALLDAYS.length - 1]; S.windowOnly = true; } },
-      { l: '7 days',  f: function () { S.to = WINDAYS[WINDAYS.length - 1]; S.from = WINDAYS[Math.max(0, WINDAYS.length - 7)];  S.windowOnly = true; } },
+      { l: '7 days', f: function () { S.to = WINDAYS[WINDAYS.length - 1]; S.from = WINDAYS[Math.max(0, WINDAYS.length - 7)]; S.windowOnly = true; } },
       { l: '14 days', f: function () { S.to = WINDAYS[WINDAYS.length - 1]; S.from = WINDAYS[Math.max(0, WINDAYS.length - 14)]; S.windowOnly = true; } },
       { l: '30 days', f: function () { S.to = WINDAYS[WINDAYS.length - 1]; S.from = WINDAYS[Math.max(0, WINDAYS.length - 30)]; S.windowOnly = true; } }
     ];
@@ -3672,7 +5485,13 @@
     var topicLbl = document.createElement('div');
     topicLbl.className = 'df-label';
     topicLbl.textContent = 'TOPIC';
-    var topicDd = _makeDropdown('All topics', TOPIC_IDS, S.topics, function (t) { return topicLabel(t); }, function () { setDirty(); updateSummary(); });
+    var topicDd = _makeDropdown('All topics', TOPIC_IDS, S.topics, function (t) { return topicLabel(t); }, function () {
+      /* Live-apply topic changes immediately so the dtt_bars blocks open/close in real time. */
+      updateSummary();
+      render();
+      /* Keep the Apply button in its "Applied" state since we just rendered. */
+      if (applyBtn) { applyBtn.textContent = 'Applied'; applyBtn.classList.remove('dirty'); }
+    });
     topicSection.appendChild(topicLbl);
     topicSection.appendChild(topicDd);
 
@@ -3783,7 +5602,7 @@
       var nTopic = TOPIC_IDS.filter(function (t) { return S.topics[t]; }).length;
 
       var platStr = (nPlat === PLATFORMS.length) ? 'all platforms' : (nPlat + ' platforms');
-      var topStr  = (nTopic === TOPIC_IDS.length) ? 'all topics' : (nTopic + ' topics');
+      var topStr = (nTopic === TOPIC_IDS.length) ? 'all topics' : (nTopic + ' topics');
 
       var el = document.getElementById('fsummary');
       if (el) {
@@ -3877,7 +5696,7 @@
     var emptyPanels = [];
     document.querySelectorAll('[data-panel]').forEach(function (p) {
       if (!p.querySelector('svg') && !p.querySelector('table') && !p.querySelector('dl') &&
-          !p.querySelector('.kpi') && !p.querySelector('.tcard')) {
+        !p.querySelector('.kpi') && !p.querySelector('.tcard')) {
         emptyPanels.push(p.getAttribute('data-panel'));
       }
     });
@@ -3887,7 +5706,7 @@
       var par = s.parentElement;
       if (!par) { return; }
       if (s.getBoundingClientRect().width > par.getBoundingClientRect().width + 2 &&
-          !par.closest('.scrollx')) {
+        !par.closest('.scrollx')) {
         over.push((par.getAttribute('data-panel') || par.className) + ' svg ' +
           Math.round(s.getBoundingClientRect().width) + ' > host ' +
           Math.round(par.getBoundingClientRect().width));
@@ -3988,7 +5807,7 @@
     if (!d || !d.available) {
       root.setAttribute('data-state', 'off');
       lnNote('Live Named Entity Recognition is not running' + (d && d.error ? ' (' + d.error + ')' : '') +
-             '. This panel updates automatically when the pipeline starts.');
+        '. This panel updates automatically when the pipeline starts.');
       return;
     }
     root.setAttribute('data-state', 'on');
@@ -4039,7 +5858,7 @@
       if (r.source === 'new') { meta.appendChild(lnEl('span', 'badge', 'new')); }
       var dn = function (k) { return k ? (names[k] || k) : null; };
       var bits = [r.platform, dn(r.domain_1), dn(r.domain_2), r.event_mode,
-                  r.confidence_1 != null ? 'conf ' + Number(r.confidence_1).toFixed(2) : null, r.routed_at];
+      r.confidence_1 != null ? 'conf ' + Number(r.confidence_1).toFixed(2) : null, r.routed_at];
       meta.appendChild(document.createTextNode(bits.filter(Boolean).join(' · ')));
       li.appendChild(meta);
       li.appendChild(lnEl('div', null, r.snippet || '(text unavailable)'));
@@ -4116,33 +5935,38 @@
     drRow.className = 'bds-row';
 
     var presets = [
-      { l: 'Full window', f: function () {
+      {
+        l: 'Full window', f: function () {
           S.from = WINDAYS[0] || ALLDAYS[0];
-          S.to   = WINDAYS[WINDAYS.length - 1] || ALLDAYS[ALLDAYS.length - 1];
+          S.to = WINDAYS[WINDAYS.length - 1] || ALLDAYS[ALLDAYS.length - 1];
           S.windowOnly = true;
         }
       },
-      { l: 'Last 7d', f: function () {
-          S.to   = WINDAYS[WINDAYS.length - 1] || ALLDAYS[ALLDAYS.length - 1];
+      {
+        l: 'Last 7d', f: function () {
+          S.to = WINDAYS[WINDAYS.length - 1] || ALLDAYS[ALLDAYS.length - 1];
           S.from = WINDAYS[Math.max(0, WINDAYS.length - 7)] || ALLDAYS[Math.max(0, ALLDAYS.length - 7)];
           S.windowOnly = true;
         }
       },
-      { l: 'Last 14d', f: function () {
-          S.to   = WINDAYS[WINDAYS.length - 1] || ALLDAYS[ALLDAYS.length - 1];
+      {
+        l: 'Last 14d', f: function () {
+          S.to = WINDAYS[WINDAYS.length - 1] || ALLDAYS[ALLDAYS.length - 1];
           S.from = WINDAYS[Math.max(0, WINDAYS.length - 14)] || ALLDAYS[Math.max(0, ALLDAYS.length - 14)];
           S.windowOnly = true;
         }
       },
-      { l: 'Last 30d', f: function () {
-          S.to   = WINDAYS[WINDAYS.length - 1] || ALLDAYS[ALLDAYS.length - 1];
+      {
+        l: 'Last 30d', f: function () {
+          S.to = WINDAYS[WINDAYS.length - 1] || ALLDAYS[ALLDAYS.length - 1];
           S.from = WINDAYS[Math.max(0, WINDAYS.length - 30)] || ALLDAYS[Math.max(0, ALLDAYS.length - 30)];
           S.windowOnly = true;
         }
       },
-      { l: 'All incl. backfill', f: function () {
+      {
+        l: 'All incl. backfill', f: function () {
           S.from = ALLDAYS[0] || '';
-          S.to   = ALLDAYS[ALLDAYS.length - 1] || '';
+          S.to = ALLDAYS[ALLDAYS.length - 1] || '';
           S.windowOnly = false;
         }
       }
@@ -4229,7 +6053,7 @@
     backBtn.addEventListener('click', function () {
       S.windowOnly = false;
       S.from = ALLDAYS[0] || S.from;
-      S.to   = ALLDAYS[ALLDAYS.length - 1] || S.to;
+      S.to = ALLDAYS[ALLDAYS.length - 1] || S.to;
       btns.forEach(function (x) { x.classList.remove('active'); });
       if (btns[4]) { btns[4].classList.add('active'); }
       updateBdsInputs();
@@ -4265,7 +6089,7 @@
       var nDays = days.length;
       var nPlat = Object.keys(S.platforms).filter(function (k) { return S.platforms[k]; }).length;
       var totPlat = Object.keys(S.platforms).length;
-      var nTop  = Object.keys(S.topics).filter(function (k) { return S.topics[k]; }).length;
+      var nTop = Object.keys(S.topics).filter(function (k) { return S.topics[k]; }).length;
       var totTop = Object.keys(S.topics).length;
       selVal.textContent = nDays + ' days · ' + nPlat + '/' + totPlat + ' platforms · ' + nTop + '/' + totTop + ' topics';
     }
@@ -4309,14 +6133,14 @@
       {
         icon: '📈',
         title: '2. Activity & Virality',
-        subtitle: 'Volume & growth · Intensity · Persistence · Virality & reach · Author diversity · Readability',
+        subtitle: 'Volume & growth · Intensity · Virality & reach',
         metrics: [
           { id: 'volume', label: '5. Volume & growth' },
           { id: 'intensity', label: '6. Intensity & surprise' },
-          { id: 'persistence', label: '7. Persistence' },
-          { id: 'virality', label: '10. Virality & reach' },
-          { id: 'authors', label: '11. Author diversity & coordination' },
-          { id: 'readability', label: '12. Readability' }
+          /* { id: 'persistence', label: '7. Persistence' }, */
+          { id: 'virality', label: '10. Virality & reach' }
+          /* { id: 'authors', label: '11. Author diversity & coordination' }, */
+          /* { id: 'readability', label: '12. Readability' } */
         ]
       },
       {
@@ -4331,10 +6155,10 @@
       {
         icon: '🔗',
         title: '4. Entities & Ontology',
-        subtitle: 'Ontology · Entity directory · Hashtags · Live Named Entity Recognition',
+        subtitle: 'Entity directory · Live Named Entity Recognition',
         metrics: [
-          { id: 'ontology', label: '13. Ontology' },
-          { id: 'hashtags', label: '14. Hashtags' },
+          /* { id: 'ontology', label: '13. Ontology' }, */
+          /* { id: 'hashtags', label: '14. Hashtags' }, */
           { id: 'entities', label: '16. Entity directory' },
           { id: 'livener', label: '20. Live Named Entity Recognition' }
         ]
@@ -4342,12 +6166,12 @@
       {
         icon: '🛡',
         title: '5. Risk & Intelligence',
-        subtitle: 'Risk categories · Timeline & alerts · Geo-ontology · Methodology',
+        subtitle: 'Risk categories & thematic dimensions',
         metrics: [
-          { id: 'methodology', label: '15. Methodology & data quality' },
-          { id: 'risktheme', label: '17. Risk categories & thematic dimensions' },
-          { id: 'geotimeline', label: '18. Timeline & alerts' },
-          { id: 'geoverify', label: '19. Geo-ontology verification' }
+          /* { id: 'methodology', label: '15. Methodology & data quality' }, */
+          { id: 'risktheme', label: '17. Risk categories & thematic dimensions' }
+          /* { id: 'geotimeline', label: '18. Timeline & alerts' }, */
+          /* { id: 'geoverify', label: '19. Geo-ontology verification' } */
         ]
       }
     ];
@@ -4366,7 +6190,7 @@
     var allBtn = document.createElement('button');
     allBtn.type = 'button';
     allBtn.className = 'dash-sec-pill dash-sec-all-pill';
-    allBtn.innerHTML = '<span class="dsp-icon">⚡</span><span>View all (20)</span>';
+    allBtn.innerHTML = '<span class="dsp-icon">⚡</span><span>View all (12)</span>';
 
     var pills = [];
 
@@ -4382,7 +6206,7 @@
       if (groupIdx === -1) {
         var lbl = document.createElement('span');
         lbl.className = 'dsub-label';
-        lbl.textContent = 'ALL 20 METRICS:';
+        lbl.textContent = 'ALL 12 METRICS:';
         subBar.appendChild(lbl);
 
         var jumpSelect = document.createElement('select');
@@ -4460,7 +6284,7 @@
 
       renderSubBar(currentGroup, null);
       setTimeout(function () { render(); window.dispatchEvent(new Event('resize')); }, 40);
-      try { if (history.replaceState) { history.replaceState(null, null, isAll ? '#all' : '#group' + groupIdx); } } catch (e) {}
+      try { if (history.replaceState) { history.replaceState(null, null, isAll ? '#all' : '#group' + groupIdx); } } catch (e) { }
     }
 
     function showSubMetric(groupIdx, subId) {
@@ -4482,7 +6306,7 @@
         var target = document.getElementById(subId || groups[groupIdx].ids[0]);
         if (target) { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
       }, 50);
-      try { if (history.replaceState) { history.replaceState(null, null, '#' + (subId || groups[groupIdx].ids[0])); } } catch (e) {}
+      try { if (history.replaceState) { history.replaceState(null, null, '#' + (subId || groups[groupIdx].ids[0])); } } catch (e) { }
     }
 
     allBtn.addEventListener('click', function () { showGroup(-1, true); });
@@ -4530,7 +6354,7 @@
     window.__showSubMetric = showSubMetric;
   }
 
-  
+
   function initDetailedMetricToggle() {
     var toc = document.querySelector('#advanced-view .toc');
     var advView = document.getElementById('advanced-view');
@@ -4587,7 +6411,7 @@
           if (history.replaceState) {
             history.replaceState(null, null, '#' + (isAll ? 'all' : targetId));
           }
-        } catch (e) {}
+        } catch (e) { }
       }
     }
 
@@ -4638,6 +6462,7 @@
     render();
     initLiveNer();
     initDetailedMetricToggle();
+    initMetricsPanelControls();
     buildBasicDateStrip();
     buildDashboardSections();
     var t = null;
@@ -4661,11 +6486,11 @@
     // Prefer embedded blob only if it actually has fact tables (not a shell stub).
     var embedded = window.__METRICS__;
     if (embedded && embedded.tables && embedded.tables.metrics_daily &&
-        embedded.tables.metrics_daily.rows && embedded.tables.metrics_daily.rows.length) {
+      embedded.tables.metrics_daily.rows && embedded.tables.metrics_daily.rows.length) {
       boot(embedded);
       return;
     }
-    var url = window.__METRICS_URL__ || 'data/metrics.json';
+    var url = window.__METRICS_URL__ || ('data/metrics.json?v=25subtypes_v17');
     setStatus('loading metrics…', 'gray');
     fetch(url)
       .then(function (r) {

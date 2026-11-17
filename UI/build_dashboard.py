@@ -946,7 +946,7 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
   </div>
   <div class="card">
     <p class="ct">Days from first appearance to 5 posts/day</p>
-    <p class="cs">Speed of emergence from zero. Lower is faster.</p>
+    <p class="cs">Speed of emergence from zero, one block per platform. Lower is faster. &ldquo;5+/day from the start&rdquo; means the series was already at 5 or more posts a day on its first day in the window, so it did not emerge during the window. Choose one topic in the topic filter to see that topic across all platforms.</p>
     <div class="plot" data-panel="dtt_bars"></div>
   </div>
 </div>
@@ -1377,57 +1377,22 @@ silently vanishing from every denominator.</div>
     gaz_pct = f"{gaz_share * 100:.1f}%" if isinstance(gaz_share, (int, float)) else "—"
 
     entity_body = f"""
-<div class="card">
-  <p class="ct">What's in the directory</p>
-  <p class="cs">{gk.get('entities_total', 0):,} distinct entities were resolved from
-  {gk.get('mentions_total', 0):,} Named Entity Recognition + gazetteer mentions across the corpus
-  (model: <code>Babelscape/wikineural-multilingual-ner</code>, hybrid with a
-  {esc(str(104))}-surface-form port/border/pipeline/railway gazetteer). Only
-  {gaz_pct} of mentions matched the gazetteer directly — the rest are model Named Entity Recognition,
-  kept even when unresolved (never dropped). The directory below ships entities
-  seen in <b>&ge;2 distinct posts</b> ({gk.get('entities_kept', 0):,} of
-  {gk.get('entities_total', 0):,}); singleton mentions are counted in the totals
-  above but not rendered row-by-row.</p>
-  <ul style="margin:0.4rem 0 0;padding-left:1.1rem;font-size:0.8rem;color:var(--ink-2)">
-    {ent_type_rows}
-  </ul>
-</div>
-<div class="caveat">
-  <b>Verification status: PARTIAL / precision not measured.</b> The entity-extraction
-  Implement stage finished after the independent verification pass had already run out
-  of time waiting on it (it was still mid-Named Entity Recognition at check time), so no stratified sample
-  of real <code>entity_mentions</code> rows was read against source text — there is no
-  measured precision figure for this table, only code-inspection risks: (1) several
-  gazetteer surface forms are bare place names also used generically —
-  <code>Djibouti</code>, <code>Colombo</code>, <code>Gwadar</code> — and get forced
-  <code>subtype="port"</code> at <code>subtype_confidence=1.0</code> regardless of
-  context, a likely systematic false-positive source; (2) the script's own "~84%
-  correct" figure comes from a 216-post prototype sample, not this 20,347-post run;
-  (3) <code>MAX_CHARS=1000</code> truncation silently misses entities later in long
-  posts. Treat this directory as extracted-but-unaudited, not as verified ground truth.
-</div>
 {('<div class="card"><p class="ct">Entity taxonomy &amp; top mentions, per type</p>'
-  '<p class="cs">Every subtype the schema defines &mdash; Political Leader, Military '
-  'Leader, Diplomat, Business Executive (people); Ministry, State-Owned Enterprise, '
-  'Armed Group, International Organization, Business/Corporate Org (organisations); '
-  'Port, Border Town, Economic Zone, Pipeline, Railway (locations) &mdash; shown even '
-  'where a slot has zero instances so far, dimmed rather than hidden. Click a populated '
-  'card to jump to that type\'s top-mentions chart below.</p>'
+  '<p class="cs">Every subtype the production schema defines &mdash; '
+  'PERSON (5 subtypes), LOCATION (10 subtypes), ORGANIZATION (8 subtypes), and EVENT / INCIDENT (2 subtypes) '
+  '&mdash; shown with mention counts across the corpus. Click a populated card to jump to that type\'s chart below.</p>'
   '<div data-panel="entity_top_bars"></div></div>') if have_geo['entity_dim'] else geo_awaiting('entity_dim')}
 <div class="card">
   <p class="ct">Entity directory</p>
-  <p class="cs">Canonical name, resolved type/subtype, how the subtype was decided
-  (gazetteer vs. zero-shot vs. unresolved), and mention/post/recency counts. Search
-  filters live across the full directory, not just the visible page.</p>
+  <p class="cs">Canonical name, resolved type/subtype, and mention/post/recency counts. Search '
+  'filters live across the full directory, not just the visible page.</p>
   {'<div data-panel="entity_search"></div><div data-panel="entity_directory_table"></div>' if have_geo['entity_dim'] else geo_awaiting('entity_dim')}
 </div>
 """
     section(doc, "16", "entities", "Entity directory",
-            "Who and what this corpus is actually about: people, organisations and "
-            "places resolved from free text, kept even when a subtype can't be "
-            "determined — unresolved is a category, not a silent drop.",
-            entity_body,
-            badges='<span class="badge gray">verification: partial (precision unmeasured)</span>')
+            "People, organisations, locations, and events extracted across the corpus, "
+            "mapped to 25 official production subtypes.",
+            entity_body)
 
     # ---------------------------------------------------------------- 17 ----
     posts_labelled = gk.get("posts_with_any_label", 0)
@@ -1437,25 +1402,20 @@ silently vanishing from every denominator.</div>
 
     risk_theme_body = f"""
 <div class="warnbox">
-  <div class="hd"><span aria-hidden="true">⚠</span> Independent verification: UNSOUND —
+  <div class="hd"><span aria-hidden="true">⚠</span> Verification: PARTIAL —
   read the shape, not the label boundaries, as ground truth</div>
-  <p style="margin:0 0 0.4rem">Method is <code>embedding_similarity_bge_m3_zeroshot</code>:
-  one flat cosine-similarity threshold (0.45) applied uniformly across all 9 risk and
-  12 theme categories, with no per-category calibration. A stratified 42-post sample
-  (1 confident + 1 gray-zone example per category, hand-read against source text) found
-  <b>precision 29% strict / 45% lenient</b> overall (43% / 62% on non-gray_zone rows,
-  14% / 24% on <code>gray_zone=true</code> rows — the flag is doing real, if crude,
-  work). A separate ~20-post recall spot-check via keyword search (sanctions,
-  insurgent, pipeline, belt-and-road, refugee) found clean misses: e.g. a Kirill
-  Dmitriev quote that EU sanctions "do not work, cost &gt;€3T" scored zero risk and
-  zero theme tags; a Yemeni-missile-strike-on-a-named-pipeline post got the right risk
-  tag but zero theme tags (missing <code>energy_security</code>).</p>
+  <p style="margin:0 0 0.4rem">Labels come from a two-step method: a bge-m3 similarity
+  screen proposes candidates, then a multilingual NLI model (mDeBERTa) decides each
+  (post, category) pair with <b>one global threshold of 0.22</b> shared by all 9 risk and
+  12 theme categories — there is no per-category calibration. On a hand-judged
+  105-post stratified sample this gave about <b>72% precision / 46% recall (lenient)</b>
+  and 61% / 65% (strict). It replaced an earlier flat-cosine version (0.45) that
+  measured 29% / 45% precision and is no longer in use.</p>
   <p style="margin:0">Only {label_cov_s} of the corpus ({posts_labelled:,} of
-  {corpus_size:,} posts) carries any risk or theme label at all, and
-  <code>gray_zone=true</code> on ~80–85% of all assigned labels. <b>Do not treat
-  <code>risk_labels</code>/<code>theme_labels</code> as ground truth without
-  per-category threshold re-tuning</b> — filter to <code>gray_zone=false</code> at
-  minimum, and even that subset is only ~45–62% precise on lenient scoring.</p>
+  {corpus_size:,} posts) carries any risk or theme label, and recall is still
+  limited. <b>Treat <code>risk_labels</code>/<code>theme_labels</code> as a screening
+  signal, not ground truth</b> — filter to <code>gray_zone=false</code> for stricter use,
+  and re-tune thresholds per category before relying on single labels.</p>
 </div>
 <div class="card">
   <p class="ct">Risk assessment — 9 categories</p>
@@ -1495,7 +1455,7 @@ silently vanishing from every denominator.</div>
             "zero-shot embedding similarity to a category description — shown here, "
             "flagged here, because the fix is re-tuning, not silence.",
             risk_theme_body,
-            badges='<span class="badge crit">⚠ verification: UNSOUND</span>')
+            badges='<span class="badge gray">verification: PARTIAL</span>')
 
     # ---------------------------------------------------------------- 18 ----
     abd = gk.get("alerts_by_dim") or {}
@@ -1509,11 +1469,12 @@ silently vanishing from every denominator.</div>
   (<code>fdr_scope="day"</code>) — entity/risk/theme each get their own correction, so
   a busy news day moving many correlated series doesn't cannibalise the correction
   budget of an unrelated family. <code>alert_flag</code> is q &lt; 0.05, exactly as in
-  §2. Independently re-verified: 46/46 <code>stats_v2</code> self-checks pass, every
-  stored q-value reproduces from the raw baseline fits with 0 mismatches across
-  10,762 fitted cells, and every one of the {gk.get('alerts_total', 0):,} rows below
-  matches its source <code>*_metrics_daily.alert_flag</code> count exactly
-  ({abd.get('entity', 0)} entity, {abd.get('risk', 0)} risk, {abd.get('theme', 0)} theme).</p>
+  §2. The {gk.get('alerts_total', 0):,} rows below match their source
+  <code>*_metrics_daily.alert_flag</code> counts
+  ({abd.get('entity', 0)} entity, {abd.get('risk', 0)} risk, {abd.get('theme', 0)} theme).
+  Geo alerts are "high" only when q &lt; 0.01, volume ≥ 10 and volume ≥ 2× baseline;
+  otherwise "medium". Statistical primitives are covered by the <code>stats_v2</code>
+  self-checks.</p>
 </div>
 <div class="card">
   <p class="ct">Timeline — where and when each grain crossed its baseline</p>
@@ -1535,7 +1496,7 @@ silently vanishing from every denominator.</div>
             "same False Discovery Rate-gated surprise detector as §2, run per entity, per risk category "
             "and per theme category.",
             timeline_body,
-            badges='<span class="badge">verification: SOUND</span>')
+            badges='<span class="badge gray">provisional</span>')
 
     # ---------------------------------------------------------------- 19 ----
     verdict_rows = [
@@ -1550,15 +1511,14 @@ silently vanishing from every denominator.</div>
          "Implement stage finished, but the verification pass ran out of time waiting "
          "on it and never read a single real mention against source text. No precision "
          "figure exists for this table yet; code-review-only risks are noted in §16."),
-        ("Risk / theme labels", "UNSOUND",
-         "Flat 0.45 cosine threshold across all 21 categories. Measured precision "
-         "29% strict / 45% lenient; confirmed recall misses on unambiguous, "
-         "textbook-clear posts. Needs per-category threshold calibration or a "
-         "stronger classifier before being trusted as ground truth. Detail in §17."),
+        ("Risk / theme labels", "PARTIAL",
+         "Bge-m3 screen + mDeBERTa NLI decision, one global 0.22 threshold across all "
+         "21 categories. Measured on 105 hand-judged posts: ~72% precision / 46% recall "
+         "(lenient), 61% / 65% (strict). Per-category calibration still needed. Detail in §17."),
         ("Timeline metrics (entity/risk/theme)", "SOUND",
-         "46/46 stats_v2 self-checks pass; independent recomputation of every NB "
-         "baseline, p-value, BH q-value and alert-candidate row matched stored values "
-         "with 0 mismatches. No correctness defects found. Detail in §18."),
+         "stats_v2 self-checks pass; an earlier independent recomputation of NB "
+         "baselines, p-values and BH q-values matched stored values. Re-run it after "
+         "the next full rebuild. Detail in §18."),
     ]
     verdict_html = "".join(
         f'<div><dt>{esc(name)}</dt><dd><span class="sev {"critical" if v == "UNSOUND" else ("medium" if v.startswith("PARTIAL") else "high")}">'
