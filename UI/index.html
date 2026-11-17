@@ -24,7 +24,7 @@
     <div class="brand">
       <h1>Social Media Analytics Dashboard</h1>
       <div class="sub">2026-06-14 → 2026-10-26
-        · updated 2026-11-17 06:58 UTC</div>
+        · updated 2026-11-17 09:16 UTC</div>
     </div>
     <div class="mode-toggle" role="tablist" aria-label="Dashboard mode">
       <button type="button" id="mode-basic-btn" aria-pressed="true">Overview</button>
@@ -107,7 +107,7 @@
 </div>
 <div class="wrap" id="advanced-view" style="display:none">
   
-  <nav class="toc" aria-label="Sections"><a href="#kpi">1. Header &amp; Key Performance Indicator (KPI) row</a><a href="#alerts">2. Alerts (False Discovery Rate-gated)</a><a href="#accel">3. Acceleration &amp; emergence</a><a href="#bursts">4. Burst episodes</a><a href="#volume">5. Volume &amp; growth</a><a href="#intensity">6. Intensity &amp; surprise</a><!-- <a href="#persistence">7. Persistence</a> --><a href="#tone">8. Tone</a><a href="#hate">9. Hate / toxicity</a><a href="#virality">10. Virality &amp; reach</a><!-- <a href="#authors">11. Author diversity &amp; coordination</a> --><!-- <a href="#readability">12. Readability</a> --><!-- <a href="#ontology">13. Ontology</a> --><!-- <a href="#hashtags">14. Hashtags</a> --><!-- <a href="#methodology">15. Methodology &amp; data quality</a> --><a href="#entities">16. Entity directory</a><a href="#risktheme">17. Risk categories &amp; thematic dimensions</a><!-- <a href="#geotimeline">18. Timeline &amp; alerts — entity / risk / theme</a> --><!-- <a href="#geoverify">19. Geo-ontology — verification summary</a> --><a href="#livener">20. Live Named Entity Recognition</a></nav>
+  <nav class="toc" aria-label="Sections"><a href="#kpi">1. Header &amp; Key Performance Indicator (KPI) row</a><a href="#alerts">2. Alerts (False Discovery Rate-gated)</a><a href="#accel">3. Acceleration &amp; emergence</a><a href="#bursts">4. Burst episodes</a><a href="#volume">5. Volume &amp; growth</a><a href="#intensity">6. Intensity &amp; surprise</a><!-- <a href="#persistence">7. Persistence</a> --><a href="#tone">8. Tone</a><!-- <a href="#hate">9. Hate / toxicity</a> --><a href="#virality">10. Virality &amp; reach</a><!-- <a href="#authors">11. Author diversity &amp; coordination</a> --><!-- <a href="#readability">12. Readability</a> --><!-- <a href="#ontology">13. Ontology</a> --><!-- <a href="#hashtags">14. Hashtags</a> --><!-- <a href="#methodology">15. Methodology &amp; data quality</a> --><a href="#entities">16. Entity directory</a><a href="#risktheme">17. Risk categories &amp; thematic dimensions</a><!-- <a href="#geotimeline">18. Timeline &amp; alerts — entity / risk / theme</a> --><!-- <a href="#geoverify">19. Geo-ontology — verification summary</a> --><a href="#livener">20. Live Named Entity Recognition</a></nav>
   
 <section class="sec" id="kpi">
   <h2><span class="num">1</span>Header &amp; Key Performance Indicator (KPI) row</h2>
@@ -319,7 +319,7 @@
 
 </section>
 
-<section class="sec" id="hate">
+<!-- <section class="sec" id="hate">
   <h2><span class="num">9</span>Hate / toxicity<span class="badge crit">⚠ gated</span></h2>
   <p class="lede">Present in the schema, deliberately <b>not</b> presented as a finding.</p>
   
@@ -341,7 +341,7 @@
 </div>
 <details class="specs-dropdown" style="margin-top:0.85rem;border:1px solid var(--gold-hair, #8c6f1f);border-radius:4px;padding:0.4rem 0.75rem;background:var(--surface, #131313);"><summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--gold, #d4af37);padding:0.2rem 0;user-select:none;display:flex;align-items:center;gap:0.5rem;"><span style="font-size:0.9rem;">📐</span> View Metric Formulas &amp; Statistical Logic <span style="color:var(--ink-2, #a8a8a8);font-size:0.75rem;font-weight:normal;">(4 metrics — click to expand)</span></summary><ul style="margin:0.75rem 0 0.25rem;padding-left:1.2rem;font-size:0.8rem;color:var(--ink-2, #a8a8a8);border-top:1px solid var(--gold-hair, #8c6f1f);padding-top:0.6rem;"><li><b>Hate score (raw mean)</b> <span class="gate">mean hate_score over posts with hate_valid</span> <span class="fnote">units: [0,1]</span><div class="caveat">UNCALIBRATED — see hate_calibrated</div><div class="fnote">gate: <span class="gate">hate_n&gt;0</span></div></li><li><b>Hate score (EB-shrunk)</b> <span class="gate">empirical-Bayes shrunk hate mean</span> <span class="fnote">units: [0,1]</span><div class="caveat">UNCALIBRATED AND NOT PUBLISHABLE. A war/terror corpus over-fires toxicity models; reports/calibration_sample.csv is not yet hand-labelled. The dashboard must render every hate_* field visibly gated.</div><div class="fnote">gate: <span class="gate">non-null only where its own support count &gt; 0</span></div></li><li><b>Hate prevalence</b> <span class="gate">share of valid-scored posts with hate_score &gt;= 0.5</span> <span class="fnote">units: fraction</span><div class="caveat">UNCALIBRATED; the 0.5 cutoff is the model's, not a validated threshold</div><div class="fnote">gate: <span class="gate">hate_n&gt;0</span></div></li><li><b>Hate calibration status</b> <span class="gate">constant false until calibration_sample.csv is labelled</span> <span class="fnote">units: boolean</span><div class="caveat">non-negotiable #3 of the spec</div><div class="fnote">gate: <span class="gate">none</span></div></li></ul></details>
 
-</section>
+</section> -->
 
 <section class="sec" id="virality">
   <h2><span class="num">10</span>Virality &amp; reach</h2>

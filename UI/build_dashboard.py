@@ -1120,7 +1120,8 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
 </div>
 {metric_bullets(meta, ['hate_mean', 'hate_eb', 'hate_prevalence', 'hate_calibrated'], md_cols | {'hate_calibrated'})}
 """,
-            badges='<span class="badge crit">⚠ gated</span>')
+            badges='<span class="badge crit">⚠ gated</span>',
+            commented=True)
 
     # --------------------------------------------------------------- 10 ----
     section(doc, "10", "virality", "Virality & reach",
