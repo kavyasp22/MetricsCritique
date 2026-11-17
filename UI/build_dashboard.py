@@ -704,9 +704,18 @@ def metric_bullets(meta: dict, keys, present) -> str:
 
 
 def section(doc: Doc, num: str, sid: str, title: str, lede: str, body: str,
-            badges: str = "") -> None:
-    doc.toc.append((sid, f"{num}. {title}"))
-    doc.raw(f"""
+            badges: str = "", commented: bool = False) -> None:
+    if commented:
+        doc.toc.append((sid, f"<!-- {num}. {title} -->"))
+        doc.raw(f"""
+<!-- <section class="sec" id="{sid}">
+  <h2><span class="num">{num}</span>{esc(title)}{badges}</h2>
+  <p class="lede">{lede}</p>
+  {body}
+</section> -->""")
+    else:
+        doc.toc.append((sid, f"{num}. {title}"))
+        doc.raw(f"""
 <section class="sec" id="{sid}">
   <h2><span class="num">{num}</span>{esc(title)}{badges}</h2>
   <p class="lede">{lede}</p>
@@ -1038,7 +1047,8 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
   {'<div class="plot" data-panel="persistence"></div>' if have['persistence'] else awaiting('persistence')}
 </div>
 {metric_bullets(meta, ['ar1_phi', 'phi_se', 'half_life_days', 'volatility', 'ljung_box_q', 'ljung_box_p'], set(meta))}
-""")
+""",
+            commented=True)
 
     # ---------------------------------------------------------------- 8 ----
     section(doc, "8", "tone", "Tone",
@@ -1190,7 +1200,8 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
   <div class="plot" data-panel="entropy_facets"></div>
 </div>
 {metric_bullets(meta, ['author_entropy', 'author_1_hhi', 'n_authors', 'coordination_flag'], md_cols)}
-""")
+""",
+            commented=True)
 
     # --------------------------------------------------------------- 12 ----
     section(doc, "12", "readability", "Readability",
@@ -1207,7 +1218,8 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
   <div data-panel="readability"></div>
 </div>
 {metric_bullets(meta, ['readability_mean', 'readability_coverage'], md_cols)}
-""")
+""",
+            commented=True)
 
     # --------------------------------------------------------------- 13 ----
     section(doc, "13", "ontology", "Ontology",
@@ -1220,7 +1232,8 @@ def build_html(payload: dict, tables: dict, mode: str, source_label: str,
 <div class="caveat"><b>Unassigned is shown, not hidden.</b> Posts the clustering pass
 could not place are kept as an explicit topic so coverage gaps stay visible instead of
 silently vanishing from every denominator.</div>
-""")
+""",
+            commented=True)
 
     # --------------------------------------------------------------- 14 ----
     tag_cov = ""
@@ -1265,7 +1278,8 @@ silently vanishing from every denominator.</div>
   {'<div class="plot" data-panel="tags"></div>' if have['tag_metrics_daily'] else awaiting('tag_metrics_daily')}
 </div>
 """,
-            badges='<span class="badge crit">⚠ uneven coverage</span>')
+            badges='<span class="badge crit">⚠ uneven coverage</span>',
+            commented=True)
 
     # --------------------------------------------------------------- 15 ----
     cr = contract_report
@@ -1359,7 +1373,8 @@ silently vanishing from every denominator.</div>
   section changes with it.</p>
   <div data-panel="meta_table"></div>
 </div>
-""")
+""",
+            commented=True)
 
     # ================================================================ geo ==
     # Geo-ontology layer: entity/risk/theme/timeline, built in
@@ -1496,7 +1511,8 @@ silently vanishing from every denominator.</div>
             "same False Discovery Rate-gated surprise detector as §2, run per entity, per risk category "
             "and per theme category.",
             timeline_body,
-            badges='<span class="badge gray">provisional</span>')
+            badges='<span class="badge gray">provisional</span>',
+            commented=True)
 
     # ---------------------------------------------------------------- 19 ----
     verdict_rows = [
@@ -1530,7 +1546,8 @@ silently vanishing from every denominator.</div>
             "Every subsystem built for this layer, and what an independent verification "
             "pass found — including the parts that are not fully sound. Full record: "
             f"<code>{esc(GEO_SPEC)}</code>.",
-            f'<div class="card"><dl class="kv">{verdict_html}</dl></div>')
+            f'<div class="card"><dl class="kv">{verdict_html}</dl></div>',
+            commented=True)
 
     section(doc, "20", "livener", "Live Named Entity Recognition",
             "Gemma domain routing and entity extraction over incoming posts, polled from the "
@@ -1550,7 +1567,14 @@ silently vanishing from every denominator.</div>
   </div>
 </div>''')
 
-    toc = "".join(f'<a href="#{sid}">{esc(label)}</a>' for sid, label in doc.toc)
+    toc_items = []
+    for sid, label in doc.toc:
+        if label.startswith("<!--"):
+            clean_label = label.replace("<!--", "").replace("-->", "").strip()
+            toc_items.append(f'<!-- <a href="#{sid}">{esc(clean_label)}</a> -->')
+        else:
+            toc_items.append(f'<a href="#{sid}">{esc(label)}</a>')
+    toc = "".join(toc_items)
     mode_badge = ('<span class="badge">real data</span>' if mode.startswith("real")
                   else '<span class="badge crit">⚠ fixture data — not real</span>')
     partial = ('<span class="badge gray">partial</span>' if "partial" in mode else "")
@@ -1569,6 +1593,33 @@ silently vanishing from every denominator.</div>
 </div>"""
 
     basic_view_html = f"""
+<button type="button" class="mp-open-pill-sidebar" id="mp-open-pill" style="display:none;" title="Open Metrics Panel">
+  <span>Metrics</span>
+  <span class="mp-pill-chevron">◀</span>
+</button>
+
+<aside class="metrics-panel-sidebar" id="metrics-panel">
+  <div class="mp-sidebar-inner">
+    <div class="mp-header">
+      <div>
+        <div class="mp-title">Metrics</div>
+        <span class="mp-date-label" id="mp-date-label"></span>
+      </div>
+      <button type="button" class="mp-close-btn" id="mp-close-btn" aria-label="Close metrics panel" title="Close metrics panel">✕</button>
+    </div>
+    <div class="mp-range-pills" id="mp-range-pills">
+      <button type="button" class="mp-pill mp-pill-active" data-days="1">Post day</button>
+      <button type="button" class="mp-pill" data-days="7">1 wk</button>
+      <button type="button" class="mp-pill" data-days="14">2 wk</button>
+      <button type="button" class="mp-pill" data-days="21">3 wk</button>
+      <button type="button" class="mp-pill" data-days="30">1 mo</button>
+      <button type="button" class="mp-pill" data-days="60">2 mo</button>
+      <button type="button" class="mp-pill" data-days="90">3 mo</button>
+    </div>
+    <div data-panel="basic_metrics_body"></div>
+  </div>
+</aside>
+
 <div class="basic-wrap">
   <div class="basic-updated" data-panel="basic_updated"></div>
   <div class="kpi-row" data-panel="basic_kpis"></div>
@@ -1593,6 +1644,7 @@ silently vanishing from every denominator.</div>
       <div data-panel="basic_top_entities"></div>
     </div>
   </div>
+  <div class="basic-panel bvn-panel" data-panel="basic_viral_narratives"></div>
   <div class="basic-panel">
     <p class="bp-t">Recommended for review</p>
     <div data-panel="basic_alerts_list"></div>

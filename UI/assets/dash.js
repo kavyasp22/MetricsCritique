@@ -4589,13 +4589,25 @@
     var totalAlerts = geoAlerts.length + topicAlerts.length;
     var critAlerts = geoAlerts.filter(function (a) { return a.severity === 'critical'; }).length +
       topicAlerts.filter(function (a) { return a.severity === 'critical'; }).length;
+    var highAlerts = geoAlerts.filter(function (a) { return a.severity === 'high'; }).length +
+      topicAlerts.filter(function (a) { return a.severity === 'high'; }).length;
+    var medAlerts = Math.max(0, totalAlerts - critAlerts - highAlerts);
     var critPct = totalAlerts > 0 ? Math.round((critAlerts / totalAlerts) * 100) : 0;
-    var meanSev = totalAlerts > 0 ? ((critAlerts * 0.45 + (totalAlerts - critAlerts) * 0.15 + 0.05) / totalAlerts) : 0.09;
+    var highPct = totalAlerts > 0 ? Math.round((highAlerts / totalAlerts) * 100) : 0;
+    var meanSev = totalAlerts > 0 ? ((critAlerts * 1.0 + highAlerts * 0.6 + medAlerts * 0.25) / totalAlerts) : 0.0;
+    var sevSub = totalAlerts > 0
+      ? (critAlerts > 0 ? (critPct + '% critical') : (highPct + '% high severity'))
+      : 'no alerts in window';
 
     var hours = winDays.length * 24;
     var velocity = (totalPosts / Math.max(1, hours));
-    var peakPerHour = Math.round(velocity * 1.5);
-    if (nDays === 1) { peakPerHour = Math.round(totalPosts / 16); }
+    var peakDayV = 0;
+    winDays.forEach(function (d) {
+      var dV = 0;
+      winRows.forEach(function (r) { if (day(r.day) === d) { dV += (r.V || 0); } });
+      if (dV > peakDayV) { peakDayV = dV; }
+    });
+    var peakPerHour = Math.max(Math.round(velocity), Math.round(peakDayV / 24));
 
     // Acceleration across the active range (day-over-day rate change across winDays)
     var winAccels = [];
@@ -4638,8 +4650,9 @@
         topTid = tid;
       }
     });
-    var topTopicPct = totalPosts > 0 ? (maxTopicV / totalPosts * 100) : 35.4;
+    var topTopicPct = totalPosts > 0 ? (maxTopicV / totalPosts * 100) : 0;
     var topTopicLabel = topicLabel(topTid);
+    var topTopicSub = totalPosts > 0 ? (topTopicLabel + ' (' + fmtInt(maxTopicV) + ')') : 'no posts in window';
 
     var kpiGrid = h('div', { class: 'mp-kpi-grid', id: 'mp-kpi-grid' }, [
       h('div', { class: 'mp-kpi-card' }, [
@@ -4648,9 +4661,9 @@
         h('div', { class: 'mp-kpi-sub', text: fmtCompact(totalMentions) + ' mentions' })
       ]),
       h('div', { class: 'mp-kpi-card mp-kpi-accent' }, [
-        h('div', { class: 'mp-kpi-val', text: fmt(meanSev, 2) }),
+        h('div', { class: 'mp-kpi-val', text: totalAlerts > 0 ? fmt(meanSev, 2) : '—' }),
         h('div', { class: 'mp-kpi-label', text: 'MEAN SEVERITY' }),
-        h('div', { class: 'mp-kpi-sub', text: critPct + '% critical' })
+        h('div', { class: 'mp-kpi-sub', text: sevSub })
       ]),
       h('div', { class: 'mp-kpi-card' }, [
         h('div', { class: 'mp-kpi-val', text: (velocity.toFixed(2)) + ' /h' }),
@@ -4663,14 +4676,14 @@
         h('div', { class: 'mp-kpi-sub', text: 'trough ' + troughVal + (peakAcc > 0 ? ' · peak +' + peakAcc : '') })
       ]),
       h('div', { class: 'mp-kpi-card' }, [
-        h('div', { class: 'mp-kpi-val', text: topTopicPct.toFixed(1) + '%' }),
+        h('div', { class: 'mp-kpi-val', text: totalPosts > 0 ? topTopicPct.toFixed(1) + '%' : '—' }),
         h('div', { class: 'mp-kpi-label', text: 'TOP TOPIC SHARE' }),
-        h('div', { class: 'mp-kpi-sub', text: topTopicLabel + ' (' + fmtInt(maxTopicV) + ')' })
+        h('div', { class: 'mp-kpi-sub', text: topTopicSub })
       ]),
       h('div', { class: 'mp-kpi-card' }, [
         h('div', { class: 'mp-kpi-val', text: fmtInt(totalAlerts) }),
         h('div', { class: 'mp-kpi-label', text: 'ALERT-FLAGGED' }),
-        h('div', { class: 'mp-kpi-sub', text: critAlerts + ' critical · ' + (totalAlerts - critAlerts) + ' high/medium' })
+        h('div', { class: 'mp-kpi-sub', text: (critAlerts > 0 ? critAlerts + ' critical · ' : '') + highAlerts + ' high · ' + medAlerts + ' medium' })
       ])
     ]);
     host.appendChild(kpiGrid);
@@ -4732,11 +4745,11 @@
       var meanTone = toneObj && toneObj.n > 0 ? (toneObj.sum / toneObj.n * 10) : -1.0;
 
       var alObj = dailyAlertsMap[d];
-      var normShare = 0.65, elevShare = 0.25, critShare = 0.10;
+      var normShare = 1.0, elevShare = 0.0, critShare = 0.0;
       if (alObj && alObj.total > 0) {
-        critShare = Math.min(0.5, (alObj.critical / alObj.total) * 0.4 + 0.1);
-        elevShare = Math.min(0.4, ((alObj.high + alObj.medium) / alObj.total) * 0.4 + 0.2);
-        normShare = Math.max(0.2, 1.0 - critShare - elevShare);
+        critShare = (alObj.critical || 0) / alObj.total;
+        elevShare = ((alObj.high || 0) + (alObj.medium || 0)) / alObj.total;
+        normShare = Math.max(0.0, 1.0 - critShare - elevShare);
       }
 
       buckets.push({

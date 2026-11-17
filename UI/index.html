@@ -24,7 +24,7 @@
     <div class="brand">
       <h1>Social Media Analytics Dashboard</h1>
       <div class="sub">2026-06-14 → 2026-10-26
-        · updated 2026-11-13 07:13 UTC</div>
+        · updated 2026-11-17 06:39 UTC</div>
     </div>
     <div class="mode-toggle" role="tablist" aria-label="Dashboard mode">
       <button type="button" id="mode-basic-btn" aria-pressed="true">Overview</button>
@@ -43,6 +43,33 @@
   <div class="filters-in" id="filters-in"></div>
 </div>
 <div id="basic-view">
+<button type="button" class="mp-open-pill-sidebar" id="mp-open-pill" style="display:none;" title="Open Metrics Panel">
+  <span>Metrics</span>
+  <span class="mp-pill-chevron">◀</span>
+</button>
+
+<aside class="metrics-panel-sidebar" id="metrics-panel">
+  <div class="mp-sidebar-inner">
+    <div class="mp-header">
+      <div>
+        <div class="mp-title">Metrics</div>
+        <span class="mp-date-label" id="mp-date-label"></span>
+      </div>
+      <button type="button" class="mp-close-btn" id="mp-close-btn" aria-label="Close metrics panel" title="Close metrics panel">✕</button>
+    </div>
+    <div class="mp-range-pills" id="mp-range-pills">
+      <button type="button" class="mp-pill mp-pill-active" data-days="1">Post day</button>
+      <button type="button" class="mp-pill" data-days="7">1 wk</button>
+      <button type="button" class="mp-pill" data-days="14">2 wk</button>
+      <button type="button" class="mp-pill" data-days="21">3 wk</button>
+      <button type="button" class="mp-pill" data-days="30">1 mo</button>
+      <button type="button" class="mp-pill" data-days="60">2 mo</button>
+      <button type="button" class="mp-pill" data-days="90">3 mo</button>
+    </div>
+    <div data-panel="basic_metrics_body"></div>
+  </div>
+</aside>
+
 <div class="basic-wrap">
   <div class="basic-updated" data-panel="basic_updated"></div>
   <div class="kpi-row" data-panel="basic_kpis"></div>
@@ -67,6 +94,7 @@
       <div data-panel="basic_top_entities"></div>
     </div>
   </div>
+  <div class="basic-panel bvn-panel" data-panel="basic_viral_narratives"></div>
   <div class="basic-panel">
     <p class="bp-t">Recommended for review</p>
     <div data-panel="basic_alerts_list"></div>
@@ -79,7 +107,7 @@
 </div>
 <div class="wrap" id="advanced-view" style="display:none">
   
-  <nav class="toc" aria-label="Sections"><a href="#kpi">1. Header &amp; Key Performance Indicator (KPI) row</a><a href="#alerts">2. Alerts (False Discovery Rate-gated)</a><a href="#accel">3. Acceleration &amp; emergence</a><a href="#bursts">4. Burst episodes</a><a href="#volume">5. Volume &amp; growth</a><a href="#intensity">6. Intensity &amp; surprise</a><a href="#persistence">7. Persistence</a><a href="#tone">8. Tone</a><a href="#hate">9. Hate / toxicity</a><a href="#virality">10. Virality &amp; reach</a><a href="#authors">11. Author diversity &amp; coordination</a><a href="#readability">12. Readability</a><a href="#ontology">13. Ontology</a><a href="#hashtags">14. Hashtags</a><a href="#methodology">15. Methodology &amp; data quality</a><a href="#entities">16. Entity directory</a><a href="#risktheme">17. Risk categories &amp; thematic dimensions</a><a href="#geotimeline">18. Timeline &amp; alerts — entity / risk / theme</a><a href="#geoverify">19. Geo-ontology — verification summary</a><a href="#livener">20. Live Named Entity Recognition</a></nav>
+  <nav class="toc" aria-label="Sections"><a href="#kpi">1. Header &amp; Key Performance Indicator (KPI) row</a><a href="#alerts">2. Alerts (False Discovery Rate-gated)</a><a href="#accel">3. Acceleration &amp; emergence</a><a href="#bursts">4. Burst episodes</a><a href="#volume">5. Volume &amp; growth</a><a href="#intensity">6. Intensity &amp; surprise</a><!-- <a href="#persistence">7. Persistence</a> --><a href="#tone">8. Tone</a><a href="#hate">9. Hate / toxicity</a><a href="#virality">10. Virality &amp; reach</a><!-- <a href="#authors">11. Author diversity &amp; coordination</a> --><!-- <a href="#readability">12. Readability</a> --><!-- <a href="#ontology">13. Ontology</a> --><!-- <a href="#hashtags">14. Hashtags</a> --><!-- <a href="#methodology">15. Methodology &amp; data quality</a> --><a href="#entities">16. Entity directory</a><a href="#risktheme">17. Risk categories &amp; thematic dimensions</a><!-- <a href="#geotimeline">18. Timeline &amp; alerts — entity / risk / theme</a> --><!-- <a href="#geoverify">19. Geo-ontology — verification summary</a> --><a href="#livener">20. Live Named Entity Recognition</a></nav>
   
 <section class="sec" id="kpi">
   <h2><span class="num">1</span>Header &amp; Key Performance Indicator (KPI) row</h2>
@@ -92,8 +120,16 @@
   <p class="lede">The highest-value section: which cells are behaving unusually enough to act on, and the exact evidence behind each one.</p>
   
 <div class="card">
-  <p class="ct">How a candidate becomes an alert</p>
-  <p class="cs">This is the logic the notification service will consume, so it is
+  <p class="ct">Alert severity</p>
+  <div class="fnote">Two severity levels are produced: <span class="sev high"><span class="ic">▲</span>high</span>
+  and <span class="sev medium"><span class="ic">●</span>medium</span>. <b>Topic alerts</b>: high if q &lt; 0.01, otherwise
+  medium. <b>Entity, risk and theme alerts</b>: high only if q &lt; 0.01 <em>and</em> at least 10 posts that day
+  <em>and</em> at least 2&times; the baseline; otherwise medium. All alerts have q &lt; 0.05. No alert is ever given a
+  &ldquo;critical&rdquo; level, and there is no &ldquo;low&rdquo; level.
+  </div>
+  <details class="explain">
+    <summary>How a candidate becomes an alert <span class="hint">click to expand</span></summary>
+    <p class="cs">This is the logic the notification service will consume, so it is
   spelled out rather than buried. Each cell's volume is tested against a
   Negative-Binomial baseline fitted on its own trailing window, giving an
   exceedance probability. Those p-values are corrected across every supported
@@ -101,12 +137,10 @@
   <code>alert_flag</code> is <code>q &lt; 0.05</code> — a calibrated
   false-discovery rate, not an arbitrary z threshold. Cells that fail the support
   gate are never tested at all, so they cannot be flagged.</p>
-  <div class="fnote">Severity bands: <span class="sev critical"><span class="ic">◆</span>critical</span>
-  q &lt; 0.001 &nbsp;·&nbsp; <span class="sev high"><span class="ic">▲</span>high</span> q &lt; 0.01
-  &nbsp;·&nbsp; <span class="sev medium"><span class="ic">●</span>medium</span> q &lt; 0.05.
-  Severity is <b>evidence strength, not impact</b> — a critical q-value on a four-post
+    <div class="fnote">Severity is <b>evidence strength, not impact</b> — a very small q-value on a four-post
   cell is strong evidence of a small thing. Colour never carries the severity alone:
   every chip pairs an icon with the word.</div>
+  </details>
 </div>
 <div class="card">
   <p class="ct">Alert candidates per day</p>
@@ -120,7 +154,7 @@
   verbatim.</p>
   <div data-panel="alerts_table"></div>
 </div>
-<details class="specs-dropdown" style="margin-top:0.85rem;border:1px solid var(--gold-hair, #8c6f1f);border-radius:4px;padding:0.4rem 0.75rem;background:var(--surface, #131313);"><summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--gold, #d4af37);padding:0.2rem 0;user-select:none;display:flex;align-items:center;gap:0.5rem;"><span style="font-size:0.9rem;">📐</span> View Metric Formulas &amp; Statistical Logic <span style="color:var(--ink-2, #a8a8a8);font-size:0.75rem;font-weight:normal;">(5 metrics — click to expand)</span></summary><ul style="margin:0.75rem 0 0.25rem;padding-left:1.2rem;font-size:0.8rem;color:var(--ink-2, #a8a8a8);border-top:1px solid var(--gold-hair, #8c6f1f);padding-top:0.6rem;"><li><b>Volume Surprise (Negative Binomial Deviance)</b> <span class="gate">-log10 P(X &gt;= V | NegBinom(mu_baseline × (effort_t / effort_baseline), theta))</span> <span class="fnote">units: Shannon information (-log10 p; 2.0 = p &lt; 0.01, 3.0 = p &lt; 0.001)</span><div class="caveat">Negative Binomial MLE baseline fitted on trailing 28 days with effort offset (F2). Captures overdispersion honestly.</div><div class="fnote">gate: <span class="gate">support_ok (baseline_days &gt;= 14 &amp; baseline_mean &gt;= 0.5 &amp; V &gt;= 3)</span></div></li><li><b>Exceedance p-value</b> <span class="gate">P(X &gt;= V | fitted count baseline), exact discrete upper tail</span> <span class="fnote">units: probability</span><div class="caveat">one-sided; only upward excursions are tested</div><div class="fnote">gate: <span class="gate">support_ok (baseline_days&gt;=14 &amp; baseline_mean&gt;=0.5 &amp; V&gt;=3)</span></div></li><li><b>False Discovery Rate q-value (Benjamini–Hochberg)</b> <span class="gate">Benjamini–Hochberg false discovery rate correction across all supported cells of the same day (mid-p test)</span> <span class="fnote">units: calibrated q-value</span><div class="caveat">Controls family-wise false discovery rate at alpha=0.05, eliminating random noise alarms from large hypothesis spaces.</div><div class="fnote">gate: <span class="gate">support_ok</span></div></li><li><b>Intensity Alert Flag</b> <span class="gate">surprise_q &lt; 0.05 AND support_ok == True</span> <span class="fnote">units: boolean</span><div class="caveat">Statistically rigorous alert trigger consumable by downstream notification systems.</div><div class="fnote">gate: <span class="gate">support_ok</span></div></li><li><b>Alert Severity Band</b> <span class="gate">critical (q &lt; 0.001) | high (q &lt; 0.01) | medium (q &lt; 0.05)</span> <span class="fnote">units: evidence strength category</span><div class="caveat">Calibrated False Discovery Rate evidence strength (Benjamini–Hochberg), not arbitrary z threshold.</div><div class="fnote">gate: <span class="gate">surprise_q &lt; 0.05 &amp; support_ok</span></div></li></ul></details>
+<details class="specs-dropdown" style="margin-top:0.85rem;border:1px solid var(--gold-hair, #8c6f1f);border-radius:4px;padding:0.4rem 0.75rem;background:var(--surface, #131313);"><summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--gold, #d4af37);padding:0.2rem 0;user-select:none;display:flex;align-items:center;gap:0.5rem;"><span style="font-size:0.9rem;">📐</span> View Metric Formulas &amp; Statistical Logic <span style="color:var(--ink-2, #a8a8a8);font-size:0.75rem;font-weight:normal;">(5 metrics — click to expand)</span></summary><ul style="margin:0.75rem 0 0.25rem;padding-left:1.2rem;font-size:0.8rem;color:var(--ink-2, #a8a8a8);border-top:1px solid var(--gold-hair, #8c6f1f);padding-top:0.6rem;"><li><b>Volume Surprise (Negative Binomial Deviance)</b> <span class="gate">-log10 P(X &gt;= V | NegBinom(mu_baseline × (effort_t / effort_baseline), theta))</span> <span class="fnote">units: Shannon information (-log10 p; 2.0 = p &lt; 0.01, 3.0 = p &lt; 0.001)</span><div class="caveat">Negative Binomial MLE baseline fitted on trailing 28 days with effort offset (F2). Captures overdispersion honestly.</div><div class="fnote">gate: <span class="gate">support_ok (baseline_days &gt;= 14 &amp; baseline_mean &gt;= 0.5 &amp; V &gt;= 3)</span></div></li><li><b>Exceedance p-value</b> <span class="gate">P(X &gt;= V | fitted count baseline), exact discrete upper tail</span> <span class="fnote">units: probability</span><div class="caveat">one-sided; only upward excursions are tested</div><div class="fnote">gate: <span class="gate">support_ok (baseline_days&gt;=14 &amp; baseline_mean&gt;=0.5 &amp; V&gt;=3)</span></div></li><li><b>False Discovery Rate q-value (Benjamini–Hochberg)</b> <span class="gate">Benjamini–Hochberg false discovery rate correction across all supported cells of the same day (mid-p test)</span> <span class="fnote">units: calibrated q-value</span><div class="caveat">Controls family-wise false discovery rate at alpha=0.05, eliminating random noise alarms from large hypothesis spaces.</div><div class="fnote">gate: <span class="gate">support_ok</span></div></li><li><b>Intensity Alert Flag</b> <span class="gate">surprise_q &lt; 0.05 AND support_ok == True</span> <span class="fnote">units: boolean</span><div class="caveat">Statistically rigorous alert trigger consumable by downstream notification systems.</div><div class="fnote">gate: <span class="gate">support_ok</span></div></li><li><b>Alert Severity Band</b> <span class="gate">high | medium. Topic alerts: high if q &lt; 0.01. Entity, risk and theme alerts: high if q &lt; 0.01 and &gt;= 10 posts and &gt;= 2x baseline. Otherwise medium. (No critical level is produced.)</span> <span class="fnote">units: evidence strength category</span><div class="caveat">Calibrated False Discovery Rate evidence strength (Benjamini–Hochberg), not arbitrary z threshold.</div><div class="fnote">gate: <span class="gate">surprise_q &lt; 0.05 &amp; support_ok</span></div></li></ul></details>
 
 </section>
 
@@ -130,19 +164,19 @@
   
 <div class="card">
   <p class="ct">Why each cell flagged — the components, not just the composite</p>
-  <p class="cs">The composite <code>emergence_score</code> is a rank-combination, so
+  <details class="explain"><summary>About this panel <span class="hint">click to expand</span></summary><p class="cs">The composite <code>emergence_score</code> is a rank-combination, so
   a high score can come from very different evidence. Each panel below breaks a
   top-ranked cell into its four inputs, and shows explicitly which of them were
   <b>NULL</b> — a score built from two components is weaker evidence than one built
-  from four, and the composite alone will not tell you which you have.</p>
+  from four, and the composite alone will not tell you which you have.</p></details>
   <div class="plot" data-panel="emg_components"></div>
 </div>
 <div class="card">
   <p class="ct">Smoothed acceleration by topic</p>
-  <p class="cs">One panel per topic: nine topics cannot be separated by hue in a
+  <details class="explain"><summary>About this panel <span class="hint">click to expand</span></summary><p class="cs">One panel per topic: nine topics cannot be separated by hue in a
   black/white/gray/gold palette, so identity is carried by position instead. The
   gold ribbon under each axis marks days where the burst detector was in its burst
-  state — an ordered state channel, not a fourth series.</p>
+  state — an ordered state channel, not a fourth series.</p></details>
   <div class="plot" data-panel="accel_facets"></div>
 </div>
 <div class="grid g2">
@@ -154,7 +188,7 @@
   </div>
   <div class="card">
     <p class="ct">Days from first appearance to 5 posts/day</p>
-    <p class="cs">Speed of emergence from zero. Lower is faster.</p>
+    <details class="explain"><summary>About this panel <span class="hint">click to expand</span></summary><p class="cs">Speed of emergence from zero, one block per platform. Lower is faster. &ldquo;5+/day from the start&rdquo; means the series was already at 5 or more posts a day on its first day in the window, so it did not emerge during the window. Choose one topic in the topic filter to see that topic across all platforms.</p></details>
     <div class="plot" data-panel="dtt_bars"></div>
   </div>
 </div>
@@ -168,10 +202,10 @@
   
 <div class="card">
   <p class="ct">Episode timeline</p>
-  <p class="cs">Bar = episode extent, dot = peak day. Hover any bar for onset slope,
+  <details class="explain"><summary>About this panel <span class="hint">click to expand</span></summary><p class="cs">Bar = episode extent, dot = peak day. Hover any bar for onset slope,
   inflection day, decay λ, half-life and the decay fit's r². Post-peak exponential
   decay is scoped to <em>detected episodes</em> rather than whole series, which is why
-  it fits here where the v1 whole-series version accepted only 6 of 39 cells.</p>
+  it fits here where the v1 whole-series version accepted only 6 of 39 cells.</p></details>
   <div class="plot" data-panel="bursts"></div>
 </div>
 <details class="specs-dropdown" style="margin-top:0.85rem;border:1px solid var(--gold-hair, #8c6f1f);border-radius:4px;padding:0.4rem 0.75rem;background:var(--surface, #131313);"><summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--gold, #d4af37);padding:0.2rem 0;user-select:none;display:flex;align-items:center;gap:0.5rem;"><span style="font-size:0.9rem;">📐</span> View Metric Formulas &amp; Statistical Logic <span style="color:var(--ink-2, #a8a8a8);font-size:0.75rem;font-weight:normal;">(3 metrics — click to expand)</span></summary><ul style="margin:0.75rem 0 0.25rem;padding-left:1.2rem;font-size:0.8rem;color:var(--ink-2, #a8a8a8);border-top:1px solid var(--gold-hair, #8c6f1f);padding-top:0.6rem;"><li><b>Onset steepness</b> <span class="gate">logistic fit to the cumulative rising limb -&gt; max slope K*r/4; falls back to the OLS slope of log1p(V) on the limb when &lt;4 points or R2&lt;0.5</span> <span class="fnote">units: posts/day (logistic) or log-posts/day (fallback)</span><div class="caveat">in a 45-day window most rising limbs are 1-3 days, so 36/49 episodes use the log-linear fallback — check onset_method before comparing values</div><div class="fnote">gate: <span class="gate">episode must exist</span></div></li><li><b>Burst State (Kleinberg HMM / Poisson CUSUM)</b> <span class="gate">Kleinberg 2-state Poisson HMM (Viterbi decoding, q=0.5, gamma=1.0) where n_days &gt;= 21; fallback to one-sided Poisson CUSUM</span> <span class="fnote">units: 0 (baseline) or 1 (bursting)</span><div class="caveat">Identifies discrete regime shifts from baseline activity to viral burst state.</div><div class="fnote">gate: <span class="gate">burst_support_ok (series n_days &gt;= 14 &amp; mean(V) &gt;= 0.5)</span></div></li><li><b>Burst intensity</b> <span class="gate">Kleinberg: log p(x|lambda1) - log p(x|lambda0) clipped at 0. CUSUM: S_t / h (1.0 at the alarm boundary)</span> <span class="fnote">units: nats (Kleinberg) or CUSUM units</span><div class="caveat">units differ between the two detectors — compare within burst_method only</div><div class="fnote">gate: <span class="gate">burst_support_ok (series n_days&gt;=14 &amp; mean(V)&gt;=0.5)</span></div></li></ul></details>
@@ -204,7 +238,7 @@
     <div class="plot" data-panel="momentum_facets"></div>
   </div>
 </div>
-<details class="specs-dropdown" style="margin-top:0.85rem;border:1px solid var(--gold-hair, #8c6f1f);border-radius:4px;padding:0.4rem 0.75rem;background:var(--surface, #131313);"><summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--gold, #d4af37);padding:0.2rem 0;user-select:none;display:flex;align-items:center;gap:0.5rem;"><span style="font-size:0.9rem;">📐</span> View Metric Formulas &amp; Statistical Logic <span style="color:var(--ink-2, #a8a8a8);font-size:0.75rem;font-weight:normal;">(7 metrics — click to expand)</span></summary><ul style="margin:0.75rem 0 0.25rem;padding-left:1.2rem;font-size:0.8rem;color:var(--ink-2, #a8a8a8);border-top:1px solid var(--gold-hair, #8c6f1f);padding-top:0.6rem;"><li><b>Volume (Post Count)</b> <span class="gate">count(distinct post_uid) in cell [topic × platform × day]</span> <span class="fnote">units: posts</span><div class="caveat">Raw activity volume. Confounded by crawler collection effort — always interpret alongside V_rate and growth.</div><div class="fnote">gate: <span class="gate">none (V is its own support)</span></div></li><li><b>Effort-Normalized Volume (Velocity)</b> <span class="gate">V / effort (posts per active channel)</span> <span class="fnote">units: posts per active channel</span><div class="caveat">Velocity metric stripping scraper intensity. Foundation for growth derivatives and Negative Binomial baseline fitting.</div><div class="fnote">gate: <span class="gate">none</span></div></li><li><b>Collection Effort (Exposure Offset)</b> <span class="gate">count(distinct active channels / authors) observed on that platform-day</span> <span class="fnote">units: active channels</span><div class="caveat">Decouples crawler ramp-up from true narrative surge. Floored at 1.0.</div><div class="fnote">gate: <span class="gate">floored at 1</span></div></li><li><b>Growth (Log-Rate First Difference)</b> <span class="gate">d/dt log((V + 1) / effort) = log_rate_t - log_rate_{t-1}</span> <span class="fnote">units: log rate per day</span><div class="caveat">Effort-normalized daily growth rate. Strips scraper collection artifacts.</div><div class="fnote">gate: <span class="gate">support_ok (baseline_days &gt;= 14 &amp; baseline_mean &gt;= 0.5 &amp; V &gt;= 3)</span></div></li><li><b>Growth of volume share</b> <span class="gate">log(share_t+1e-6) - log(share_{t-1}+1e-6)</span> <span class="fnote">units: log share per day</span><div class="caveat">strips any platform-wide effort change</div><div class="fnote">gate: <span class="gate">support_ok (baseline_days&gt;=14 &amp; baseline_mean&gt;=0.5 &amp; V&gt;=3)</span></div></li><li><b>7-day growth</b> <span class="gate">log(sum7(V)+1 / sum7(effort)) - same lagged 7 days</span> <span class="fnote">units: log rate per week</span><div class="caveat">smoother, lags by up to a week</div><div class="fnote">gate: <span class="gate">support_ok (baseline_days&gt;=14 &amp; baseline_mean&gt;=0.5 &amp; V&gt;=3)</span></div></li><li><b>Momentum</b> <span class="gate">EMA_7(growth) - EMA_21(growth)</span> <span class="fnote">units: log rate per day</span><div class="caveat">sensitive to span choice (corr 0.98 across 5/14 and 10/28 variants)</div><div class="fnote">gate: <span class="gate">support_ok (baseline_days&gt;=14 &amp; baseline_mean&gt;=0.5 &amp; V&gt;=3)</span></div></li></ul></details>
+<details class="specs-dropdown" style="margin-top:0.85rem;border:1px solid var(--gold-hair, #8c6f1f);border-radius:4px;padding:0.4rem 0.75rem;background:var(--surface, #131313);"><summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--gold, #d4af37);padding:0.2rem 0;user-select:none;display:flex;align-items:center;gap:0.5rem;"><span style="font-size:0.9rem;">📐</span> View Metric Formulas &amp; Statistical Logic <span style="color:var(--ink-2, #a8a8a8);font-size:0.75rem;font-weight:normal;">(7 metrics — click to expand)</span></summary><ul style="margin:0.75rem 0 0.25rem;padding-left:1.2rem;font-size:0.8rem;color:var(--ink-2, #a8a8a8);border-top:1px solid var(--gold-hair, #8c6f1f);padding-top:0.6rem;"><li><b>Volume (Post Count)</b> <span class="gate">count(distinct post_uid) in cell [topic × platform × day]</span> <span class="fnote">units: posts</span><div class="caveat">Raw activity volume. Confounded by crawler collection effort — always interpret alongside V_rate and growth.</div><div class="fnote">gate: <span class="gate">none (V is its own support)</span></div></li><li><b>Effort-Normalized Volume (Velocity)</b> <span class="gate">V / effort (posts per active channel)</span> <span class="fnote">units: posts per active channel</span><div class="caveat">Velocity metric stripping scraper intensity. Foundation for growth derivatives and Negative Binomial baseline fitting.</div><div class="fnote">gate: <span class="gate">none</span></div></li><li><b>Collection Effort (Exposure Offset)</b> <span class="gate">count(distinct active channels / authors) observed on that platform-day</span> <span class="fnote">units: active channels</span><div class="caveat">Decouples crawler ramp-up from true narrative surge. Floored at 1.0.</div><div class="fnote">gate: <span class="gate">floored at 1</span></div></li><li><b>Growth (Log-Rate First Difference)</b> <span class="gate">d/dt log((V + 1) / effort) = log_rate_t - log_rate_{t-1}</span> <span class="fnote">units: log rate per day</span><div class="caveat">Effort-normalized daily growth rate. Strips scraper collection artifacts.</div><div class="fnote">gate: <span class="gate">support_ok (baseline_days &gt;= 14 &amp; baseline_mean &gt;= 0.5 &amp; V &gt;= 3)</span></div></li><li><b>Growth of volume share</b> <span class="gate">log(share_t+1e-6) - log(share_{t-1}+1e-6)</span> <span class="fnote">units: log share per day</span><div class="caveat">strips any platform-wide effort change</div><div class="fnote">gate: <span class="gate">support_ok (baseline_days&gt;=14 &amp; baseline_mean&gt;=0.5 &amp; V&gt;=3)</span></div></li><li><b>7-day growth</b> <span class="gate">log(sum7(V)+1 / sum7(effort)) - same lagged 7 days</span> <span class="fnote">units: log rate per week</span><div class="caveat">smoother, lags by up to a week</div><div class="fnote">gate: <span class="gate">support_ok (baseline_days&gt;=14 &amp; baseline_mean&gt;=0.5 &amp; V&gt;=3)</span></div></li><li><b>Momentum</b> <span class="gate">EMA_7(growth) - EMA_21(growth)</span> <span class="fnote">units: log rate per day</span><div class="caveat">describes the recent direction of volume; it is NOT a forecast. Measured on the 26 Oct snapshot: corr +0.72 with same-day growth but -0.35 with the next 7 days (daily growth reverses). Project-defined moving-average formula, no paper. Insensitive to span choice (corr 0.98 across 5/14 and 10/28 variants); see reports/CORE_SIGNAL_CHECKS.md</div><div class="fnote">gate: <span class="gate">support_ok (baseline_days&gt;=14 &amp; baseline_mean&gt;=0.5 &amp; V&gt;=3)</span></div></li></ul></details>
 
 </section>
 
@@ -214,31 +248,31 @@
   
 <div class="card">
   <p class="ct">Topic × day surprise</p>
-  <p class="cs">A single gold ramp, light→dark: one hue, so the reader sees magnitude
+  <details class="explain"><summary>About this panel <span class="hint">click to expand</span></summary><p class="cs">A single gold ramp, light→dark: one hue, so the reader sees magnitude
   and nothing else. Hatched cells are <b>not zero</b> — they are cells whose support
   gate was not met, where the metric was emitted as NULL rather than as a guess. A
-  white outline marks cells that cleared BH q &lt; 0.05.</p>
+  white outline marks cells that cleared BH q &lt; 0.05.</p></details>
   <div data-panel="intensity_heat"></div>
 </div>
 <details class="specs-dropdown" style="margin-top:0.85rem;border:1px solid var(--gold-hair, #8c6f1f);border-radius:4px;padding:0.4rem 0.75rem;background:var(--surface, #131313);"><summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--gold, #d4af37);padding:0.2rem 0;user-select:none;display:flex;align-items:center;gap:0.5rem;"><span style="font-size:0.9rem;">📐</span> View Metric Formulas &amp; Statistical Logic <span style="color:var(--ink-2, #a8a8a8);font-size:0.75rem;font-weight:normal;">(4 metrics — click to expand)</span></summary><ul style="margin:0.75rem 0 0.25rem;padding-left:1.2rem;font-size:0.8rem;color:var(--ink-2, #a8a8a8);border-top:1px solid var(--gold-hair, #8c6f1f);padding-top:0.6rem;"><li><b>Volume Surprise (Negative Binomial Deviance)</b> <span class="gate">-log10 P(X &gt;= V | NegBinom(mu_baseline × (effort_t / effort_baseline), theta))</span> <span class="fnote">units: Shannon information (-log10 p; 2.0 = p &lt; 0.01, 3.0 = p &lt; 0.001)</span><div class="caveat">Negative Binomial MLE baseline fitted on trailing 28 days with effort offset (F2). Captures overdispersion honestly.</div><div class="fnote">gate: <span class="gate">support_ok (baseline_days &gt;= 14 &amp; baseline_mean &gt;= 0.5 &amp; V &gt;= 3)</span></div></li><li><b>False Discovery Rate q-value (Benjamini–Hochberg)</b> <span class="gate">Benjamini–Hochberg false discovery rate correction across all supported cells of the same day (mid-p test)</span> <span class="fnote">units: calibrated q-value</span><div class="caveat">Controls family-wise false discovery rate at alpha=0.05, eliminating random noise alarms from large hypothesis spaces.</div><div class="fnote">gate: <span class="gate">support_ok</span></div></li><li><b>support_n</b> — not described in <code>metric_meta</code>; the dashboard will not claim semantics it was not given.</li><li><b>support_ok</b> — not described in <code>metric_meta</code>; the dashboard will not claim semantics it was not given.</li></ul></details>
 
 </section>
 
-<section class="sec" id="persistence">
+<!-- <section class="sec" id="persistence">
   <h2><span class="num">7</span>Persistence</h2>
   <p class="lede">Whether a topic's attention sticks or dissipates, estimated from the whole series with a standard error instead of by discarding cells whose curve fit was weak.</p>
   
 <div class="card">
   <p class="ct">AR(1) φ with ± 1 standard error</p>
-  <p class="cs">Gold dot = the point estimate, gray bar = ± 1 SE. Cells whose
+  <details class="explain"><summary>About this panel <span class="hint">click to expand</span></summary><p class="cs">Gold dot = the point estimate, gray bar = ± 1 SE. Cells whose
   Ljung–Box p ≥ 0.05 are drawn in gray: there is no significant autocorrelation to
   model, so their φ and half-life describe noise. φ outside (0, 1) leaves the
-  half-life genuinely undefined, and it is shown as “—” rather than filled in.</p>
+  half-life genuinely undefined, and it is shown as “—” rather than filled in.</p></details>
   <div class="plot" data-panel="persistence"></div>
 </div>
 <details class="specs-dropdown" style="margin-top:0.85rem;border:1px solid var(--gold-hair, #8c6f1f);border-radius:4px;padding:0.4rem 0.75rem;background:var(--surface, #131313);"><summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--gold, #d4af37);padding:0.2rem 0;user-select:none;display:flex;align-items:center;gap:0.5rem;"><span style="font-size:0.9rem;">📐</span> View Metric Formulas &amp; Statistical Logic <span style="color:var(--ink-2, #a8a8a8);font-size:0.75rem;font-weight:normal;">(4 metrics — click to expand)</span></summary><ul style="margin:0.75rem 0 0.25rem;padding-left:1.2rem;font-size:0.8rem;color:var(--ink-2, #a8a8a8);border-top:1px solid var(--gold-hair, #8c6f1f);padding-top:0.6rem;"><li><b>AR(1) persistence</b> <span class="gate">OLS phi from log_rate_t = c + phi*log_rate_{t-1} + e (LEVEL series)</span> <span class="fnote">units: dimensionless</span><div class="caveat">SPEC DEVIATION, flagged for review: F7 specifies the AR(1) on the DIFFERENCED log rate, but differencing a stationary series forces phi&lt;0, for which ln(0.5)/ln(phi) is undefined — it produced a half-life on only 4/39 series, reproducing the coverage weakness F7 set out to fix. The level fit is published here; the differenced fit is kept verbatim in diff_ar1_phi / diff_half_life_days.</div><div class="fnote">gate: <span class="gate">n_obs&gt;=12</span></div></li><li><b>Persistence half-life</b> <span class="gate">ln(0.5)/ln(ar1_phi), defined for 0&lt;phi&lt;1</span> <span class="fnote">units: days</span><div class="caveat">NULL when phi&lt;=0 or phi&gt;=1 (not mean-reverting); read with phi_se</div><div class="fnote">gate: <span class="gate">0&lt;phi&lt;1 and n_obs&gt;=12</span></div></li><li><b>Volatility</b> <span class="gate">SD of the log-rate first differences</span> <span class="fnote">units: log rate</span><div class="fnote">gate: <span class="gate">n_obs&gt;=2</span></div></li><li><b>Ljung-Box p</b> <span class="gate">Ljung-Box Q on the log-rate level, lags 1..7</span> <span class="fnote">units: p-value</span><div class="caveat">F8's primary evidence for autocorrelation, replacing the inverted v1 null-control criterion (D4)</div><div class="fnote">gate: <span class="gate">n_obs&gt;=8</span></div></li></ul></details>
 
-</section>
+</section> -->
 
 <section class="sec" id="tone">
   <h2><span class="num">8</span>Tone</h2>
@@ -261,27 +295,27 @@
 </div>
 <div class="card">
   <p class="ct">Tone mix by platform <span class="badge gray">provisional</span></p>
-  <p class="cs">How many scored posts are positive, neutral or negative, per platform, never pooled across
+  <details class="explain"><summary>About this panel <span class="hint">click to expand</span></summary><p class="cs">How many scored posts are positive, neutral or negative, per platform, never pooled across
   platforms (platforms differ too much: net scores range from about &minus;70 to +60). A post is
-  <b>positive</b> if its tone is above +0.15 and <b>negative</b> if below &minus;0.15. The <b>net sentiment
+  <b>positive</b> if its tone is above +0.15 and <b>negative</b> if below &minus;0.15. Tone reads the wording, not the poster&rsquo;s attitude: a factual report of a bad event is scored negative, so a low value can mean negative news rather than a hostile audience. The <b>net sentiment
   score</b> is 100 &times; (positive share &minus; negative share). <b>Audience-weighted tone</b> gives posts with
   more views and interactions more influence, with weight 1 + ln(1 + views + likes + comments + shares), so a
   post with no counter still counts once; where a platform has no counters it equals the plain average.
   <b>Provisional:</b> the tone model is not yet human-validated. In a first hand-labelled check it scored
   factual reports of bad events as negative, so these numbers reflect news content as much as opinion, and
-  the &plusmn;0.15 cut-off is not validated per language.</p>
+  the &plusmn;0.15 cut-off is not validated per language.</p></details>
   <div class="plot" data-panel="tone_mix"></div>
 </div>
 <div class="card">
   <p class="ct">Largest tone drops <span class="badge gray">provisional</span></p>
-  <p class="cs">Days where a topic's tone on a platform fell significantly below its own previous 14 days
+  <details class="explain"><summary>About this panel <span class="hint">click to expand</span></summary><p class="cs">Days where a topic's tone on a platform fell significantly below its own previous 14 days
   (today is not in the baseline). z compares today with the baseline mean in baseline standard deviations
   (floor 0.05); q is the false-discovery-controlled probability across all topic &times; platform series
   that day. Needs at least 5 scored posts today and on at least 7 of the previous 14 days. This is a monitor
-  and does not feed the alert list.</p>
+  and does not feed the alert list.</p></details>
   <div class="plot" data-panel="tone_drift"></div>
 </div>
-<details class="specs-dropdown" style="margin-top:0.85rem;border:1px solid var(--gold-hair, #8c6f1f);border-radius:4px;padding:0.4rem 0.75rem;background:var(--surface, #131313);"><summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--gold, #d4af37);padding:0.2rem 0;user-select:none;display:flex;align-items:center;gap:0.5rem;"><span style="font-size:0.9rem;">📐</span> View Metric Formulas &amp; Statistical Logic <span style="color:var(--ink-2, #a8a8a8);font-size:0.75rem;font-weight:normal;">(3 metrics — click to expand)</span></summary><ul style="margin:0.75rem 0 0.25rem;padding-left:1.2rem;font-size:0.8rem;color:var(--ink-2, #a8a8a8);border-top:1px solid var(--gold-hair, #8c6f1f);padding-top:0.6rem;"><li><b>Tone (raw mean)</b> <span class="gate">mean tone_score over posts with tone_valid</span> <span class="fnote">units: [-1,1]</span><div class="caveat">unshrunk; noisy at small tone_n — prefer tone_eb</div><div class="fnote">gate: <span class="gate">tone_n&gt;0</span></div></li><li><b>Tone / Sentiment (Empirical Bayes Shrunk)</b> <span class="gate">(n × tone_mean + k × parent_mean) / (n + k), where k = sigma_w² / tau² (DerSimonian–Laird estimator)</span> <span class="fnote">units: sentiment valence [-1.0, +1.0]</span><div class="caveat">Shrinks small-sample cells toward topic, platform, and global empirical priors. Eliminates false sentiment volatility on 1-post cells.</div><div class="fnote">gate: <span class="gate">tone_n &gt; 0</span></div></li><li><b>Tone support</b> <span class="gate">posts with a valid tone score</span> <span class="fnote">units: posts</span><div class="fnote">gate: <span class="gate">none</span></div></li></ul></details>
+<details class="specs-dropdown" style="margin-top:0.85rem;border:1px solid var(--gold-hair, #8c6f1f);border-radius:4px;padding:0.4rem 0.75rem;background:var(--surface, #131313);"><summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--gold, #d4af37);padding:0.2rem 0;user-select:none;display:flex;align-items:center;gap:0.5rem;"><span style="font-size:0.9rem;">📐</span> View Metric Formulas &amp; Statistical Logic <span style="color:var(--ink-2, #a8a8a8);font-size:0.75rem;font-weight:normal;">(11 metrics — click to expand)</span></summary><ul style="margin:0.75rem 0 0.25rem;padding-left:1.2rem;font-size:0.8rem;color:var(--ink-2, #a8a8a8);border-top:1px solid var(--gold-hair, #8c6f1f);padding-top:0.6rem;"><li><b>Tone (raw mean)</b> <span class="gate">mean tone_score over posts with tone_valid</span> <span class="fnote">units: [-1,1]</span><div class="caveat">unshrunk; noisy at small tone_n — prefer tone_eb. Tone measures the wording of the post, not the poster's attitude: a factual report of a bad event (an attack, an accident) is scored negative (Phase 0 check). A negative tone can therefore mean negative news, not a hostile audience.</div><div class="fnote">gate: <span class="gate">tone_n&gt;0</span></div></li><li><b>Tone / Sentiment (Empirical Bayes Shrunk)</b> <span class="gate">(n × tone_mean + k × parent_mean) / (n + k), where k = sigma_w² / tau² (DerSimonian–Laird estimator)</span> <span class="fnote">units: sentiment valence [-1.0, +1.0]</span><div class="caveat">Shrinks small-sample cells toward topic, platform, and global empirical priors. Eliminates false sentiment volatility on 1-post cells. Tone measures the wording of the post, not the poster's attitude: a factual report of a bad event (an attack, an accident) is scored negative (Phase 0 check). A negative tone can therefore mean negative news, not a hostile audience.</div><div class="fnote">gate: <span class="gate">tone_n &gt; 0</span></div></li><li><b>Tone support</b> <span class="gate">posts with a valid tone score</span> <span class="fnote">units: posts</span><div class="fnote">gate: <span class="gate">none</span></div></li><li><b>Positive share</b> <span class="gate">tone_pos_n / tone_n</span> <span class="fnote">units: fraction</span><div class="caveat">PROVISIONAL. Cut-off +-0.15 is not yet validated per language.</div><div class="fnote">gate: <span class="gate">tone_n&gt;=5</span></div></li><li><b>Neutral share</b> <span class="gate">1 - positive share - negative share</span> <span class="fnote">units: fraction</span><div class="caveat">PROVISIONAL. Very sensitive to the cut-off (13% to 62% for +-0.05 to +-0.40).</div><div class="fnote">gate: <span class="gate">tone_n&gt;=5</span></div></li><li><b>Negative share</b> <span class="gate">tone_neg_n / tone_n</span> <span class="fnote">units: fraction</span><div class="caveat">PROVISIONAL.</div><div class="fnote">gate: <span class="gate">tone_n&gt;=5</span></div></li><li><b>Net sentiment score (NSS)</b> <span class="gate">100 x (positive share - negative share)</span> <span class="fnote">units: -100 to +100</span><div class="caveat">PROVISIONAL. Compare within a platform only: platform scores range from about -70 to +60, so a pooled score is not meaningful (NULL at the platform-rolled topic grain). Tone measures the wording of the post, not the poster's attitude: a factual report of a bad event (an attack, an accident) is scored negative (Phase 0 check). A negative tone can therefore mean negative news, not a hostile audience.</div><div class="fnote">gate: <span class="gate">tone_n&gt;=5</span></div></li><li><b>Audience-weighted tone</b> <span class="gate">sum(tone x w) / sum(w), w = 1 + ln(1 + views + likes + comments + shares)</span> <span class="fnote">units: [-1,1]</span><div class="caveat">Secondary to tone_mean/tone_eb. Weight floor 1 so no post gets weight 0; posts without a counter weigh 1 (see tone_weight_cov). Within a platform only (NULL at the platform-rolled grain). Counters are not unique people. Sensitivity check (26 Oct snapshot, 4,476 cells with &gt;=5 scored posts): Spearman 0.989 with the unweighted mean; only 3.3% of cells differ by more than 0.1 and 0.2% change sign, so the weighting rarely changes the reading (platforms without counters, e.g. Reddit, are identical).</div><div class="fnote">gate: <span class="gate">tone_n&gt;=5</span></div></li><li><b>Weighted-tone coverage</b> <span class="gate">share of tone-scored posts that carry an audience counter</span> <span class="fnote">units: fraction</span><div class="caveat">Near 0 means tone_weighted is effectively the unweighted mean (platform has no counters).</div><div class="fnote">gate: <span class="gate">tone_n&gt;0</span></div></li><li><b>Tone drift (z)</b> <span class="gate">(tone_mean today - mean of prior 14 days) / max(sd of prior 14 days, 0.05)</span> <span class="fnote">units: z-score</span><div class="caveat">Today is excluded from the baseline. Needs &gt;=5 scored posts today and on &gt;=7 of the prior 14 days; NULL otherwise. PROVISIONAL.</div><div class="fnote">gate: <span class="gate">baseline&gt;=7 days, n&gt;=5</span></div></li><li><b>Tone drift (BH q)</b> <span class="gate">Benjamini-Hochberg q of tone_drift_p across all topic x platform series on the same day</span> <span class="fnote">units: q-value</span><div class="caveat">Same false-discovery control as volume alerts.</div><div class="fnote">gate: <span class="gate">as tone_drift_z</span></div></li></ul></details>
 
 </section>
 
@@ -292,9 +326,9 @@
 <div class="warnbox">
   <div class="hd"><span aria-hidden="true">⚠</span> Uncalibrated — not publishable</div>
   <p style="margin:0 0 0.4rem">UNCALIBRATED AND NOT PUBLISHABLE. A war/terror corpus over-fires toxicity models; reports/calibration_sample.csv is not yet hand-labelled. The dashboard must render every hate_* field visibly gated.</p>
-  <p style="margin:0">Per spec §6.3 this family stays gated until
-  <code>reports/calibration_sample.csv</code> is hand-labelled and agreement is
-  measured. Until then: <b>do not quote these numbers, do not rank topics by them,
+  <p style="margin:0">Per spec §6.3 this family stays gated. A single-labeller Phase 0 check
+  (<code>reports/TONE_HATE_VALIDATION.md</code>) has been run, but it is not confirmed by a human and
+  the scores are still raw model probabilities, never calibrated. Until a human-confirmed sample exists: <b>do not quote these numbers, do not rank topics by them,
   and do not route a notification off them.</b> Gate:
   <span class="gate">non-null only where its own support count &gt; 0</span></p>
 </div>
@@ -322,50 +356,54 @@
 </div>
 <div class="card">
   <p class="ct">Reach <span class="badge">proxy</span></p>
-  <p class="cs"><b>No follower or subscriber counts exist anywhere in the corpus.</b>
+  <details class="explain"><summary>About this panel <span class="hint">click to expand</span></summary><p class="cs"><b>No follower or subscriber counts exist anywhere in the corpus.</b>
   The bars below show <b>observed views only</b> (platforms with a view counter). Platforms
   without one are not shown; their activity is a separate quantity
   (<code>engagement_proxy</code>, a log-engagement score) and is never added to views.
-  For Telegram only, a channel's median views gives a defensible audience-size
-  denominator (<code>reach_audience_norm</code>), which is still a proxy. Never
-  present either as audience size.</p>
+  An author's own typical views give a defensible comparison
+  (<code>reach_audience_norm</code>, mostly Telegram and Twitter, thinner elsewhere), which is still a proxy. Never
+  present either as audience size.</p></details>
   <div class="plot" data-panel="reach_bars"></div>
 </div>
 <div class="card">
   <p class="ct">Cross-Platform Narrative Diffusion <span class="badge">multi-platform</span></p>
-  <p class="cs">Tracks narratives that appear with identical text on two or more platforms. <b>Observed views</b> are counter values. <b>Estimated views are experimental</b>: engagement on platforms without a view counter is multiplied by a views-per-engagement ratio taken from the same story (clamped to 5&ndash;80, default 20 when the story has no paired data; the &ldquo;Estimate Basis&rdquo; column says which). No data validates this estimate. Imputation counts one post per author and platform. The &ldquo;Who Posted&rdquo; column marks stories where the account name is the same on every platform: that is one account re-publishing its own text (cross-posting), not spread between different accounts; most stories are of this kind. The breadth-weighted index (1.0&times; to 2.0&times;) is an experimental index, not audience size. &ldquo;Earliest observed&rdquo; is the first post we collected, which depends on scrape lag.</p>
+  <details class="explain"><summary>About this panel <span class="hint">click to expand</span></summary><p class="cs">Tracks narratives that appear with identical text on two or more platforms. <b>Observed views</b> are counter values summed over platforms that report views; nothing is estimated. Interactions on posts without a view counter are shown separately and are not converted into views. The &ldquo;Who Posted&rdquo; column marks stories where the account name is the same on every platform: that is one account re-publishing its own text (cross-posting), not spread between different accounts; most stories are of this kind. &ldquo;Earliest observed&rdquo; is the first post we collected, which depends on scrape lag.</p></details>
   <div class="plot" data-panel="cross_platform"></div>
 </div>
 <div class="card">
   <p class="ct">Shared-Link Narratives <span class="badge gray">preliminary</span></p>
-  <p class="cs"><b>Preliminary.</b> A second, separate way to link posts: two or more platforms
+  <details class="explain"><summary>About this panel <span class="hint">click to expand</span></summary><p class="cs"><b>Preliminary.</b> A second, separate way to link posts: two or more platforms
   posting the <b>same article link</b> (tracking parameters removed). It finds stories that exact-text
   matching misses, such as a translated post or a different headline for the same article. It only
   covers posts that contain a link, shows <b>observed views only</b> (no estimates), and is not
-  merged into the narratives above. Precision was judged by hand on a sample of 40 links and has
-  not been independently reviewed. <b>High</b> = a full article link; <b>medium</b> = a shortened
+  merged into the narratives above. Precision was judged by hand by one reviewer on 100 links (not
+  independently reviewed): full article links 35 of 40 judged right, shortened links 48 of 48. All 5
+  wrong full links were reference or app links whose posts were 26 days or more apart, so such links
+  (posts more than 21 days apart) are now <b>low</b> confidence and listed separately.
+  <b>High</b> = a full article link, posts within 21 days; <b>medium</b> = a shortened
   link, where the destination is not visible and most cases are one news aggregator posting the
-  same item on two platforms, so treat them as one source, not independent spread.</p>
+  same item on two platforms, so treat them as one source, not independent spread.</p></details>
   <div class="plot" data-panel="cross_platform_urls"></div>
 </div>
 <div class="card">
   <p class="ct">Cross-Platform Events (Semantic) <span class="badge gray">preliminary</span></p>
-  <p class="cs"><b>Preliminary.</b> Links posts on <b>different platforms that say the same thing in
+  <details class="explain"><summary>About this panel <span class="hint">click to expand</span></summary><p class="cs"><b>Preliminary.</b> Links posts on <b>different platforms that say the same thing in
   different words or languages</b>, using the stored BGE-M3 meaning embeddings: cosine similarity
   at least 0.85, posted within 3 days of each other, identical text excluded (that is the exact-text
   table above). Connected posts form an <b>event</b>. Unlike the exact-text table, most events here
   involve <b>different accounts</b>, so they show real spread of one story. Precision was judged by
-  hand on 40 random pairs (all were the same event) and has not been independently reviewed;
-  similarity below 0.80 was not tested. <b>High</b> = every link in the event is at least 0.90;
+  hand by one reviewer on 100 events (not independently reviewed): high 45 of 45 and medium 42 of 44
+  judged right; 9 rows were marked unsure because the reviewer could not read the language, and one of
+  the 2 wrong ones was a Dhivehi post matched to an unrelated English one. Similarity below 0.80 was not tested. <b>High</b> = every link in the event is at least 0.90;
   <b>medium</b> = some links are 0.85 to 0.90. Events with more than 30 distinct texts are marked
-  <b>large</b>: they may merge several related stories. Observed views only, no estimates.</p>
+  <b>large</b>: they may merge several related stories. Observed views only, no estimates.</p></details>
   <div class="plot" data-panel="cross_platform_events"></div>
 </div>
-<details class="specs-dropdown" style="margin-top:0.85rem;border:1px solid var(--gold-hair, #8c6f1f);border-radius:4px;padding:0.4rem 0.75rem;background:var(--surface, #131313);"><summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--gold, #d4af37);padding:0.2rem 0;user-select:none;display:flex;align-items:center;gap:0.5rem;"><span style="font-size:0.9rem;">📐</span> View Metric Formulas &amp; Statistical Logic <span style="color:var(--ink-2, #a8a8a8);font-size:0.75rem;font-weight:normal;">(5 metrics — click to expand)</span></summary><ul style="margin:0.75rem 0 0.25rem;padding-left:1.2rem;font-size:0.8rem;color:var(--ink-2, #a8a8a8);border-top:1px solid var(--gold-hair, #8c6f1f);padding-top:0.6rem;"><li><b>Virality Percentile (Empirical Bayes &amp; Platform-Stratified)</b> <span class="gate">Amplification_Ratio = shares/(views+1) [Video/X] | comments/(likes+1) [Discussion/IG/LinkedIn] | (likes+comments)/(views+1) [YouTube] | shares/(interactions+1) [Microblog] → 9 Scrape-Lag Cohorts [0h..90d+] → Empirical Bayes (DerSimonian-Laird shrinkage toward platform prior)</span> <span class="fnote">units: percentile [0.0, 1.0]</span><div class="caveat">Normalised engagement index, ranked within platform only: age-honest &amp; distribution-free, posts are ranked strictly against peers of the same platform and age cohort. Platforms weight actions differently, so percentiles are indicative, not exact, across platforms. Overcomes Instagram 0-shares defect via Discussion Velocity (comments/(likes+1)) and Twitter bimodal view bias via view-stratified cohorts. Reddit is excluded (no public engagement signals).</div><div class="fnote">gate: <span class="gate">non-null only where cell post support count &gt; 0</span></div></li><li><b>Audience Reach Proxy (Direct &amp; Engagement Composite)</b> <span class="gate">sum(views) when the cell has any views; otherwise ln(1 + sum(likes + comments + shares)) (an activity proxy, not audience)</span> <span class="fnote">units: views (when present) or log-engagement activity proxy — different units, do not compare or add across cells</span><div class="caveat">Reach is a proxy. Cells with a view counter report summed views; all other cells report a log-engagement activity proxy in the same column, so the two are not comparable. Shares are not weighted. Splitting the two into separate fields is planned.</div><div class="fnote">gate: <span class="gate">none</span></div></li><li><b>Audience-Normalized Reach (Channel Baseline Multiplier)</b> <span class="gate">mean(views_post / median views of the same author's OTHER posts) — the post is excluded from its own baseline; needs &gt;=5 other view-bearing posts</span> <span class="fnote">units: ratio to channel median (e.g. 1.85× = 85% above baseline)</span><div class="caveat">Defensible denominator for channel-based broadcasts (Telegram, YouTube). Evaluates whether a post exceeded its own account's typical audience footprint.</div><div class="fnote">gate: <span class="gate">author baseline available (&gt;=5 other view-bearing posts)</span></div></li><li><b>Cross-Platform Unified Story Reach (View Imputation)</b> <span class="gate">Unified_Reach = Observed_Views + Imputed_Views, where Imputed_Views = viewless_engagement × clamp(observed_views / paired_engagement, 5.0, 80.0)</span> <span class="fnote">units: total story audience impressions</span><div class="caveat">Aggregates true cross-network footprint for identical narrative clusters. Uses empirical interaction ratios from reporting networks (Telegram/YouTube/Twitter) to impute missing views on paired view-less networks (Instagram/Reddit/LinkedIn).</div><div class="fnote">gate: <span class="gate">cross_platform_stories available (≥2 distinct platforms)</span></div></li><li><b>Network Breadth Multiplier &amp; Effective Reach</b> <span class="gate">Effective_Reach = Unified_Reach × [1.0 + 0.5 × (n_platforms - 1)]</span> <span class="fnote">units: effective narrative impact impressions</span><div class="caveat">Evaluates coordinated multi-platform campaigns as a whole. Rewards cross-network penetration with a Breadth Multiplier (+50% per extra platform: 2 platforms = 1.5x, 3 platforms = 2.0x).</div><div class="fnote">gate: <span class="gate">cross_platform_stories available (≥2 distinct platforms)</span></div></li></ul></details>
+<details class="specs-dropdown" style="margin-top:0.85rem;border:1px solid var(--gold-hair, #8c6f1f);border-radius:4px;padding:0.4rem 0.75rem;background:var(--surface, #131313);"><summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--gold, #d4af37);padding:0.2rem 0;user-select:none;display:flex;align-items:center;gap:0.5rem;"><span style="font-size:0.9rem;">📐</span> View Metric Formulas &amp; Statistical Logic <span style="color:var(--ink-2, #a8a8a8);font-size:0.75rem;font-weight:normal;">(3 metrics — click to expand)</span></summary><ul style="margin:0.75rem 0 0.25rem;padding-left:1.2rem;font-size:0.8rem;color:var(--ink-2, #a8a8a8);border-top:1px solid var(--gold-hair, #8c6f1f);padding-top:0.6rem;"><li><b>Virality Percentile (Empirical Bayes &amp; Platform-Stratified)</b> <span class="gate">Amplification_Ratio = shares/(views+1) [Video/X] | comments/(likes+1) [Discussion/IG/LinkedIn] | (likes+comments)/(views+1) [YouTube] | shares/(interactions+1) [Microblog] → 9 Scrape-Lag Cohorts [0h..90d+] → Empirical Bayes (DerSimonian-Laird shrinkage toward platform prior)</span> <span class="fnote">units: percentile [0.0, 1.0]</span><div class="caveat">Normalised engagement index, ranked within platform only: age-honest &amp; distribution-free, posts are ranked strictly against peers of the same platform and age cohort. Platforms weight actions differently, so percentiles are indicative, not exact, across platforms. Overcomes Instagram 0-shares defect via Discussion Velocity (comments/(likes+1)) and Twitter bimodal view bias via view-stratified cohorts. Reddit is excluded (no public engagement signals).</div><div class="fnote">gate: <span class="gate">non-null only where cell post support count &gt; 0</span></div></li><li><b>Audience Reach Proxy (Direct &amp; Engagement Composite)</b> <span class="gate">sum(views) when the cell has any views; otherwise ln(1 + sum(likes + comments + shares)) (an activity proxy, not audience)</span> <span class="fnote">units: views (when present) or log-engagement activity proxy — different units, do not compare or add across cells</span><div class="caveat">Reach is a proxy. Cells with a view counter report summed views; all other cells report a log-engagement activity proxy in the same column, so the two are not comparable. Shares are not weighted. Splitting the two into separate fields is planned.</div><div class="fnote">gate: <span class="gate">none</span></div></li><li><b>Audience-Normalized Reach (Channel Baseline Multiplier)</b> <span class="gate">mean(views_post / baseline), baseline = median views of the same author's OTHER posts (&gt;=5 others) or, for 1-4 others, an empirical-Bayes estimate shrunk toward the platform mean — the post is excluded from its own author baseline</span> <span class="fnote">units: ratio to channel median (e.g. 1.85× = 85% above baseline)</span><div class="caveat">Defensible denominator for channel-based broadcasts (Telegram, YouTube). Evaluates whether a post exceeded its own account's typical audience footprint.</div><div class="fnote">gate: <span class="gate">author baseline available (&gt;=1 other view-bearing post)</span></div></li></ul></details>
 
 </section>
 
-<section class="sec" id="authors">
+<!-- <section class="sec" id="authors">
   <h2><span class="num">11</span>Author diversity &amp; coordination</h2>
   <p class="lede">Whether a topic's volume comes from many voices or from one account repeating itself.</p>
   
@@ -382,26 +420,26 @@
 </div>
 <details class="specs-dropdown" style="margin-top:0.85rem;border:1px solid var(--gold-hair, #8c6f1f);border-radius:4px;padding:0.4rem 0.75rem;background:var(--surface, #131313);"><summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--gold, #d4af37);padding:0.2rem 0;user-select:none;display:flex;align-items:center;gap:0.5rem;"><span style="font-size:0.9rem;">📐</span> View Metric Formulas &amp; Statistical Logic <span style="color:var(--ink-2, #a8a8a8);font-size:0.75rem;font-weight:normal;">(4 metrics — click to expand)</span></summary><ul style="margin:0.75rem 0 0.25rem;padding-left:1.2rem;font-size:0.8rem;color:var(--ink-2, #a8a8a8);border-top:1px solid var(--gold-hair, #8c6f1f);padding-top:0.6rem;"><li><b>Author entropy</b> <span class="gate">Shannon entropy of the author post-count distribution in the cell</span> <span class="fnote">units: nats</span><div class="caveat">bounded by log(n_authors)</div><div class="fnote">gate: <span class="gate">V&gt;0</span></div></li><li><b>Author diversity (1-HHI)</b> <span class="gate">1 - sum(share_author^2)</span> <span class="fnote">units: [0,1)</span><div class="caveat">0 means a single author produced the whole cell</div><div class="fnote">gate: <span class="gate">V&gt;0</span></div></li><li><b>Distinct authors</b> <span class="gate">count(distinct author_uid)</span> <span class="fnote">units: authors</span><div class="fnote">gate: <span class="gate">none</span></div></li><li><b>Coordination flag</b> <span class="gate">V&gt;=10 AND author_1_hhi&lt;0.30 AND duplicate_rate&gt;0.30</span> <span class="fnote">units: boolean</span><div class="caveat">heuristic, not a test. High duplicate rates on reddit (50%) and instagram (45%) are largely feed/template artefacts, so treat as triage only.</div><div class="fnote">gate: <span class="gate">V&gt;=10</span></div></li></ul></details>
 
-</section>
+</section> -->
 
-<section class="sec" id="readability">
+<!-- <section class="sec" id="readability">
   <h2><span class="num">12</span>Readability</h2>
-  <p class="lede">The Flesch mean, and — inseparably — the share of posts that were long enough to score at all.</p>
+  <p class="lede">The LIX readability mean (one measure for every language), and — inseparably — the share of posts that were long enough to score at all.</p>
   
 <div class="card">
   <p class="ct">Readability mean and its coverage</p>
-  <p class="cs">YouTube comments have a median length of 59 characters with 36% under
+  <details class="explain"><summary>About this panel <span class="hint">click to expand</span></summary><p class="cs">YouTube comments have a median length of 59 characters with 36% under
   40, which puts most of the corpus below the validity floor for any readability
   formula. The mean therefore describes a minority of posts, and the coverage meter
   is what tells you how small that minority is. A coverage figure below 20% is
-  drawn in gray, not gold.</p>
+  drawn in gray, not gold.</p></details>
   <div data-panel="readability"></div>
 </div>
-<details class="specs-dropdown" style="margin-top:0.85rem;border:1px solid var(--gold-hair, #8c6f1f);border-radius:4px;padding:0.4rem 0.75rem;background:var(--surface, #131313);"><summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--gold, #d4af37);padding:0.2rem 0;user-select:none;display:flex;align-items:center;gap:0.5rem;"><span style="font-size:0.9rem;">📐</span> View Metric Formulas &amp; Statistical Logic <span style="color:var(--ink-2, #a8a8a8);font-size:0.75rem;font-weight:normal;">(2 metrics — click to expand)</span></summary><ul style="margin:0.75rem 0 0.25rem;padding-left:1.2rem;font-size:0.8rem;color:var(--ink-2, #a8a8a8);border-top:1px solid var(--gold-hair, #8c6f1f);padding-top:0.6rem;"><li><b>Readability</b> <span class="gate">mean of valid, language-appropriate readability scores, winsorised to [0,100]</span> <span class="fnote">units: score</span><div class="caveat">coverage is low on short posts (13.7% on youtube_video, 48% on telegram) — always read alongside readability_coverage. Raw scores reach 1703 on degenerate text, hence the winsorisation.</div><div class="fnote">gate: <span class="gate">read_n&gt;0</span></div></li><li><b>Readability coverage</b> <span class="gate">share of posts in the cell with readability_valid</span> <span class="fnote">units: fraction</span><div class="fnote">gate: <span class="gate">none</span></div></li></ul></details>
+<details class="specs-dropdown" style="margin-top:0.85rem;border:1px solid var(--gold-hair, #8c6f1f);border-radius:4px;padding:0.4rem 0.75rem;background:var(--surface, #131313);"><summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--gold, #d4af37);padding:0.2rem 0;user-select:none;display:flex;align-items:center;gap:0.5rem;"><span style="font-size:0.9rem;">📐</span> View Metric Formulas &amp; Statistical Logic <span style="color:var(--ink-2, #a8a8a8);font-size:0.75rem;font-weight:normal;">(2 metrics — click to expand)</span></summary><ul style="margin:0.75rem 0 0.25rem;padding-left:1.2rem;font-size:0.8rem;color:var(--ink-2, #a8a8a8);border-top:1px solid var(--gold-hair, #8c6f1f);padding-top:0.6rem;"><li><b>Readability</b> <span class="gate">mean of valid LIX readability scores (one measure for every language), winsorised to [0,100]</span> <span class="fnote">units: score</span><div class="caveat">coverage is low on short posts (13.7% on youtube_video, 48% on telegram) — always read alongside readability_coverage. Raw scores reach 1703 on degenerate text, hence the winsorisation. LIX for every language: earlier runs averaged Flesch-Kincaid grade (English) with LIX (other languages), two different scales; the English-only Flesch-Kincaid grade is kept separately (post_scores.readability_fk_grade). Not scored for zh/ja/th/my (no word spaces).</div><div class="fnote">gate: <span class="gate">read_n&gt;0</span></div></li><li><b>Readability coverage</b> <span class="gate">share of posts in the cell with readability_valid</span> <span class="fnote">units: fraction</span><div class="fnote">gate: <span class="gate">none</span></div></li></ul></details>
 
-</section>
+</section> -->
 
-<section class="sec" id="ontology">
+<!-- <section class="sec" id="ontology">
   <h2><span class="num">13</span>Ontology</h2>
   <p class="lede">The entity every per-topic metric is about. Ontology was promoted from an output to a dependency: <code>keyword</code> is NULL for the whole of Telegram, so without derived clusters two thirds of the corpus has no answer to “a signal about <em>what</em>?”.</p>
   
@@ -410,23 +448,20 @@
 could not place are kept as an explicit topic so coverage gaps stay visible instead of
 silently vanishing from every denominator.</div>
 
-</section>
+</section> -->
 
-<section class="sec" id="hashtags">
-  <h2><span class="num">14</span>Hashtags<span class="badge crit">⚠ ~15% coverage</span></h2>
+<!-- <section class="sec" id="hashtags">
+  <h2><span class="num">14</span>Hashtags<span class="badge crit">⚠ uneven coverage</span></h2>
   <p class="lede">Built, because hashtag alerting genuinely works where hashtags exist — and framed, because most of this corpus has none.</p>
   
 <div class="warnbox">
   <div class="hd"><span aria-hidden="true">⚠</span> Coverage warning — spec §4</div>
-  <p style="margin:0 0 0.4rem">The <code>hashtags</code> field is populated for
-  LinkedIn (502/924) and Instagram (237/337) and is <b>empty for Telegram, YouTube,
-  Reddit and Facebook</b>. Mining inline <code>#tags</code> from post text adds only
-  Telegram 1,883/14,595 (12.9%) and Reddit 66/2,107 (3.1%).</p>
-  <p style="margin:0 0 0.4rem"><b>Hashtags cover roughly 15% of the corpus and ~13%
-  of Telegram, the dominant source. A hashtag-keyed alerting system would be blind to
-  about 85% of collected material.</b></p>
+  <p style="margin:0 0 0.4rem">Share of posts with at least one hashtag (field or mined from the text), at the last build: <b>well covered</b>: mastodon 100%, youtube_video 85%, tiktok 84%, instagram 78%, facebook 63%, twitter 55%, linkedin 42%; <b>barely covered</b>: snapchat 15.6%, truthsocial 15.4%, telegram 14.5%, whatsapp 7.8%, reddit 2.4%, youtube_comment 0.1%. Overall 27.6% of all rows (posts plus YouTube comments, which almost never carry hashtags).</p>
+  <p style="margin:0 0 0.4rem"><b>Coverage is very uneven: a hashtag-keyed alerting system would see Instagram,
+  TikTok, YouTube videos and Mastodon well, and almost nothing on Reddit, YouTube comments or Telegram
+  (the largest source).</b></p>
   <p style="margin:0">15,523 distinct tags are in <code>tag_dim</code>. <b>Key alerts on <code>topic_id</code></b>, which covers
-  79% of posts with the remainder explicitly <code>unassigned</code>; treat hashtag
+  about 92% of posts (457,752 of 497,530 at the last build) with the remainder explicitly <code>unassigned</code>; treat hashtag
   and keyword as secondary facets. Alerts in
   <code>UI/data/metrics.json</code> that came from a hashtag are tagged
   <code>grain: "hashtag"</code> so a consumer can weight them accordingly.</p>
@@ -436,9 +471,9 @@ silently vanishing from every denominator.</div>
   <div class="plot" data-panel="tags"></div>
 </div>
 
-</section>
+</section> -->
 
-<section class="sec" id="methodology">
+<!-- <section class="sec" id="methodology">
   <h2><span class="num">15</span>Methodology &amp; data quality</h2>
   <p class="lede">What every number on this page is allowed to mean, and where it stops.</p>
   
@@ -452,22 +487,23 @@ silently vanishing from every denominator.</div>
     <div data-panel="run_meta"></div>
   </div>
 </div>
-<div class="warnbox"><div class="hd"><span aria-hidden="true">⚠</span> Contract differences detected at build time</div><ul style="margin:0;padding-left:1.1rem"><li><b>topic_dim</b> — columns beyond §5 (carried through unchanged): <code>cluster_size</code></li><li><b>tag_dim</b> — columns beyond §5 (carried through unchanged): <code>in_ts_scope</code></li><li><b>platform_dim</b> — columns beyond §5 (carried through unchanged): <code>n_posts, first_day, last_day, embedding_coverage</code></li><li><b>run_meta</b> — columns beyond §5 (carried through unchanged): <code>n_source_posts, n_ts_posts, code_version</code></li><li><b>metrics_daily</b> — columns beyond §5 (carried through unchanged): <code>hate_n, read_n, views_sum, E_sum, mean_confidence, duplicate_rate, virality_pct_raw, virality_n, effort_source, log_rate, log_count, growth_count, baseline_mu, baseline_theta, baseline_days, baseline_mean, baseline_dist, baseline_method, burst_support_ok, burst_method, onset_slope, novelty_n, novelty_base_n, share_V, surprise_q_global, emergence_flag</code></li><li><b>burst_episodes</b> — columns beyond §5 (carried through unchanged): <code>n_days, burst_method, onset_method, onset_r2, decay_ok</code></li><li><b>persistence</b> — columns beyond §5 (carried through unchanged): <code>fit_ok, ar1_series, diff_ar1_phi, diff_phi_se, diff_half_life_days, diff_ljung_box_q, diff_ljung_box_p, diff_n_obs, mean_reverting, total_V, support_n</code></li><li><b>alert_candidates</b> — columns beyond §5 (carried through unchanged): <code>grain, support_n</code></li></ul></div>
+<div class="warnbox"><div class="hd"><span aria-hidden="true">⚠</span> Contract differences detected at build time</div><ul style="margin:0;padding-left:1.1rem"><li><b>topic_dim</b> — columns beyond §5 (carried through unchanged): <code>cluster_size</code></li><li><b>tag_dim</b> — columns beyond §5 (carried through unchanged): <code>in_ts_scope</code></li><li><b>platform_dim</b> — columns beyond §5 (carried through unchanged): <code>n_posts, first_day, last_day, embedding_coverage</code></li><li><b>run_meta</b> — columns beyond §5 (carried through unchanged): <code>n_source_posts, n_ts_posts, code_version</code></li><li><b>metrics_daily</b> — columns beyond §5 (carried through unchanged): <code>tone_pos_n, tone_neg_n, tone_pos_share, tone_neu_share, tone_neg_share, net_sentiment_score, tone_weighted, tone_weight_cov, tone_drift_z, tone_drift_p, tone_drift_q, tone_drift_base_n, tone_drift_flag, hate_n, read_n, views_sum, E_sum, eng_sum, mean_confidence, duplicate_rate, virality_pct_raw, observed_views, engagement_proxy, virality_n, effort_source, log_rate, log_count, growth_count, baseline_mu, baseline_theta, baseline_days, baseline_mean, baseline_dist, baseline_method, burst_support_ok, burst_method, onset_slope, novelty_n, novelty_base_n, share_V, surprise_q_global, emergence_flag</code></li><li><b>burst_episodes</b> — columns beyond §5 (carried through unchanged): <code>n_days, burst_method, onset_method, onset_r2, decay_ok</code></li><li><b>persistence</b> — columns beyond §5 (carried through unchanged): <code>fit_ok, ar1_series, diff_ar1_phi, diff_phi_se, diff_half_life_days, diff_ljung_box_q, diff_ljung_box_p, diff_n_obs, mean_reverting, total_V, support_n</code></li><li><b>alert_candidates</b> — columns beyond §5 (carried through unchanged): <code>grain, support_n</code></li></ul></div>
 <div class="card">
   <p class="ct">Known caveats carried through the whole dashboard</p>
   <ul style="margin:0.2rem 0 0;padding-left:1.1rem;font-size:0.82rem;color:var(--ink-2)">
     <li><b>The corpus is live.</b> It ingests while it is read, so any two queries run
     separately disagree. Every extract runs inside one <code>REPEATABLE READ</code>
     snapshot; production Postgres is read-only and nothing is ever written back.</li>
-    <li><b>The collector is a confounder.</b> Telegram went 422 → 1,393 posts/day
-    while active channels went 18 → 24. All trend metrics are computed on the
+    <li><b>The collector is a confounder.</b> In the extract of 26 Oct 2026, Telegram's daily posts rose from
+    about 138 (first two weeks of the collection window) to about 544 (last two weeks) while distinct active
+    channels rose from about 13 to 19. All trend metrics are computed on the
     effort-normalised log rate for exactly this reason; raw counts are kept beside
     them for transparency, not for trends.</li>
-    <li><b>Duplicates were a prerequisite, not hygiene.</b> Telegram had 37% exact
+    <li><b>Duplicates were a prerequisite, not hygiene.</b> At the first extract (before de-duplication) Telegram had 37% exact
     duplicate <code>post_url</code>s (Reddit 36%, Instagram 43% duplicate text), which
     inflated every Telegram volume figure by roughly 1.6× before dedup.</li>
     <li><b>Sparsity is handled in the model, not by clipping.</b> v1's robust-z reached
-    |z| = 143 on cells of ≤ 2 posts because MAD collapsed toward zero. v2 uses a
+    |z| = 59 on this extract (143 on the first one) on cells of ≤ 2 posts because MAD collapsed toward zero. v2 uses a
     Negative-Binomial exceedance probability and a support gate, so a single post
     against a small baseline scores as the non-event it is.</li>
     <li><b>Absent is not zero.</b> Reddit has no engagement fields at all; Facebook has
@@ -479,10 +515,21 @@ silently vanishing from every denominator.</div>
     not measurable from a single snapshot; an append-only
     <code>engagement_snapshots</code> table was seeded so the honest version becomes
     available later.</li>
-    <li><b>The corpus is multilingual.</b> Telegram is 62% English, then ru/zh-cn/bn/uk/hi
-    plus 2,626 <code>unknown</code>. English-only NLP would silently mishandle ~38%,
+    <li><b>The corpus is multilingual.</b> Telegram is 63% English (43,003 of 68,452 posts), then ru, zh, hi and bn,
+    plus 7,326 <code>unknown</code>. English-only NLP would silently mishandle ~37%,
     so tone and toxicity use local multilingual models — and nothing leaves the
     network.</li>
+    <li><b>Alerts are leads, not confirmed events.</b> Only two severity levels exist (high, medium). Under the
+    stricter Benjamini–Yekutieli correction about 58% of alerts survive (49 of 85 on the 26 Oct data).</li>
+    <li><b>Day rule.</b> Topic and geo metrics place a post on its <code>posted_at</code> day, or on its scrape day when
+    it has no posting date.</li>
+    <li><b>Tone reads wording, not attitude.</b> A factual report of a bad event is scored negative, so a low tone
+    can mean negative news rather than a hostile audience. Tone labels are not yet human-confirmed.</li>
+    <li><b>Cross-platform reach is observed views only.</b> The earlier imputed views and breadth multiplier were
+    removed (imputed views were 42% of reported reach and rested on a fixed clamp the data contradict).</li>
+    <li><b>Readability is one scale.</b> LIX for every language; Chinese, Japanese, Thai and Burmese are not scored.</li>
+    <li><b>Weekday pattern.</b> There is no explicit weekday term; the effort offset absorbs most of it (weekend/weekday
+    median ratio 0.73 raw, 0.88 after the offset).</li>
   </ul>
 </div>
 <div class="card">
@@ -493,100 +540,65 @@ silently vanishing from every denominator.</div>
   <div data-panel="meta_table"></div>
 </div>
 
-</section>
+</section> -->
 
 <section class="sec" id="entities">
-  <h2><span class="num">16</span>Entity directory<span class="badge gray">verification: partial (precision unmeasured)</span></h2>
-  <p class="lede">Who and what this corpus is actually about: people, organisations and places resolved from free text, kept even when a subtype can't be determined — unresolved is a category, not a silent drop.</p>
+  <h2><span class="num">16</span>Entity directory</h2>
+  <p class="lede">People, organisations, locations, and events extracted across the corpus, mapped to 25 official production subtypes.</p>
   
-<div class="card">
-  <p class="ct">What's in the directory</p>
-  <p class="cs">251,729 distinct entities were resolved from
-  2,056,941 Named Entity Recognition + gazetteer mentions across the corpus
-  (model: <code>Babelscape/wikineural-multilingual-ner</code>, hybrid with a
-  104-surface-form port/border/pipeline/railway gazetteer). Only
-  21.6% of mentions matched the gazetteer directly — the rest are model Named Entity Recognition,
-  kept even when unresolved (never dropped). The directory below ships entities
-  seen in <b>&ge;2 distinct posts</b> (70,237 of
-  251,729); singleton mentions are counted in the totals
-  above but not rendered row-by-row.</p>
-  <ul style="margin:0.4rem 0 0;padding-left:1.1rem;font-size:0.8rem;color:var(--ink-2)">
-    <li><b>LOCATION</b>: 73,524 entities, 998,838 mentions</li><li><b>ORG</b>: 88,998 entities, 693,405 mentions</li><li><b>PERSON</b>: 89,207 entities, 364,698 mentions</li>
-  </ul>
-</div>
-<div class="caveat">
-  <b>Verification status: PARTIAL / precision not measured.</b> The entity-extraction
-  Implement stage finished after the independent verification pass had already run out
-  of time waiting on it (it was still mid-Named Entity Recognition at check time), so no stratified sample
-  of real <code>entity_mentions</code> rows was read against source text — there is no
-  measured precision figure for this table, only code-inspection risks: (1) several
-  gazetteer surface forms are bare place names also used generically —
-  <code>Djibouti</code>, <code>Colombo</code>, <code>Gwadar</code> — and get forced
-  <code>subtype="port"</code> at <code>subtype_confidence=1.0</code> regardless of
-  context, a likely systematic false-positive source; (2) the script's own "~84%
-  correct" figure comes from a 216-post prototype sample, not this 20,347-post run;
-  (3) <code>MAX_CHARS=1000</code> truncation silently misses entities later in long
-  posts. Treat this directory as extracted-but-unaudited, not as verified ground truth.
-</div>
-<div class="card"><p class="ct">Entity taxonomy &amp; top mentions, per type</p><p class="cs">Every subtype the schema defines &mdash; Political Leader, Military Leader, Diplomat, Business Executive (people); Ministry, State-Owned Enterprise, Armed Group, International Organization, Business/Corporate Org (organisations); Port, Border Town, Economic Zone, Pipeline, Railway (locations) &mdash; shown even where a slot has zero instances so far, dimmed rather than hidden. Click a populated card to jump to that type's top-mentions chart below.</p><div data-panel="entity_top_bars"></div></div>
+<div class="card"><p class="ct">Entity taxonomy &amp; top mentions, per type</p><details class="explain"><summary>About this panel <span class="hint">click to expand</span></summary><p class="cs">Every subtype the production schema defines &mdash; PERSON (5 subtypes), LOCATION (10 subtypes), ORGANIZATION (8 subtypes), and EVENT / INCIDENT (2 subtypes) &mdash; shown with mention counts across the corpus. Click a populated card to jump to that type's chart below.</p></details><div data-panel="entity_top_bars"></div></div>
 <div class="card">
   <p class="ct">Entity directory</p>
-  <p class="cs">Canonical name, resolved type/subtype, how the subtype was decided
-  (gazetteer vs. zero-shot vs. unresolved), and mention/post/recency counts. Search
-  filters live across the full directory, not just the visible page.</p>
+  <p class="cs">Canonical name, resolved type/subtype, and mention/post/recency counts. Search '
+  'filters live across the full directory, not just the visible page.</p>
   <div data-panel="entity_search"></div><div data-panel="entity_directory_table"></div>
 </div>
 
 </section>
 
 <section class="sec" id="risktheme">
-  <h2><span class="num">17</span>Risk categories &amp; thematic dimensions<span class="badge crit">⚠ verification: UNSOUND</span></h2>
+  <h2><span class="num">17</span>Risk categories &amp; thematic dimensions<span class="badge gray">verification: PARTIAL</span></h2>
   <p class="lede">9 risk categories and 12 thematic dimensions, multi-label per post via zero-shot embedding similarity to a category description — shown here, flagged here, because the fix is re-tuning, not silence.</p>
   
 <div class="warnbox">
-  <div class="hd"><span aria-hidden="true">⚠</span> Independent verification: UNSOUND —
+  <div class="hd"><span aria-hidden="true">⚠</span> Verification: PARTIAL —
   read the shape, not the label boundaries, as ground truth</div>
-  <p style="margin:0 0 0.4rem">Method is <code>embedding_similarity_bge_m3_zeroshot</code>:
-  one flat cosine-similarity threshold (0.45) applied uniformly across all 9 risk and
-  12 theme categories, with no per-category calibration. A stratified 42-post sample
-  (1 confident + 1 gray-zone example per category, hand-read against source text) found
-  <b>precision 29% strict / 45% lenient</b> overall (43% / 62% on non-gray_zone rows,
-  14% / 24% on <code>gray_zone=true</code> rows — the flag is doing real, if crude,
-  work). A separate ~20-post recall spot-check via keyword search (sanctions,
-  insurgent, pipeline, belt-and-road, refugee) found clean misses: e.g. a Kirill
-  Dmitriev quote that EU sanctions "do not work, cost &gt;€3T" scored zero risk and
-  zero theme tags; a Yemeni-missile-strike-on-a-named-pipeline post got the right risk
-  tag but zero theme tags (missing <code>energy_security</code>).</p>
+  <p style="margin:0 0 0.4rem">Labels come from a two-step method: a bge-m3 similarity
+  screen proposes candidates, then a multilingual NLI model (mDeBERTa) decides each
+  (post, category) pair with <b>one global threshold of 0.22</b> shared by all 9 risk and
+  12 theme categories — there is no per-category calibration. On a hand-judged
+  105-post stratified sample this gave about <b>72% precision / 46% recall (lenient)</b>
+  and 61% / 65% (strict). It replaced an earlier flat-cosine version (0.45) that
+  measured 29% / 45% precision and is no longer in use.</p>
   <p style="margin:0">Only 31.2% of the corpus (155,369 of
-  497,530 posts) carries any risk or theme label at all, and
-  <code>gray_zone=true</code> on ~80–85% of all assigned labels. <b>Do not treat
-  <code>risk_labels</code>/<code>theme_labels</code> as ground truth without
-  per-category threshold re-tuning</b> — filter to <code>gray_zone=false</code> at
-  minimum, and even that subset is only ~45–62% precise on lenient scoring.</p>
+  497,530 posts) carries any risk or theme label, and recall is still
+  limited. <b>Treat <code>risk_labels</code>/<code>theme_labels</code> as a screening
+  signal, not ground truth</b> — filter to <code>gray_zone=false</code> for stricter use,
+  and re-tune thresholds per category before relying on single labels.</p>
 </div>
 <div class="card">
   <p class="ct">Risk assessment — 9 categories</p>
-  <p class="cs">Domestic Instability, Policy Shifts, Project Delays, Sanctions, Border
+  <details class="explain"><summary>About this panel <span class="hint">click to expand</span></summary><p class="cs">Domestic Instability, Policy Shifts, Project Delays, Sanctions, Border
   Conflicts, Insurgencies, Shipping Disruptions, Pipeline Vulnerabilities, International
   Pressure. Card value is in-window post volume; hover for the latest surprise score and
-  active-alert count. Click a card to jump to its row in the heatmap below.</p>
+  active-alert count. Click a card to jump to its row in the heatmap below.</p></details>
   <div data-panel="risk_overview"></div>
 </div>
 <div class="card">
   <p class="ct">Risk-category signal, by day</p>
-  <p class="cs">Mean NB-surprise per category × day (same statistic as the topic
+  <details class="explain"><summary>About this panel <span class="hint">click to expand</span></summary><p class="cs">Mean NB-surprise per category × day (same statistic as the topic
   intensity heatmap in §6), ringed where the cell cleared BH q &lt; 0.05, hatched
   where the support gate wasn't met. This shows <em>when volume moved</em> for a
-  label — it does not vouch for the label's precision above.</p>
+  label — it does not vouch for the label's precision above.</p></details>
   <div data-panel="risk_heat"></div>
 </div>
 <div class="card">
   <p class="ct">Thematic &amp; relational dimensions — 12 categories</p>
-  <p class="cs">Political Relations, Economic Relations, Belt and Road Initiative (BRI),
+  <details class="explain"><summary>About this panel <span class="hint">click to expand</span></summary><p class="cs">Political Relations, Economic Relations, Belt and Road Initiative (BRI),
   Energy Security, Maritime Security, Maritime Dimensions, Security &amp; Military
   Relations, Border Issues, Internal Conflict &amp; China's Role, Technology &amp;
   Digital Influence, Humanitarian Dimension, International Relations. Click a card to
-  jump to its trend panel below.</p>
+  jump to its trend panel below.</p></details>
   <div data-panel="theme_overview"></div>
 </div>
 <div class="card">
@@ -599,31 +611,32 @@ silently vanishing from every denominator.</div>
 
 </section>
 
-<section class="sec" id="geotimeline">
-  <h2><span class="num">18</span>Timeline &amp; alerts — entity / risk / theme<span class="badge">verification: SOUND</span></h2>
+<!-- <section class="sec" id="geotimeline">
+  <h2><span class="num">18</span>Timeline &amp; alerts — entity / risk / theme<span class="badge gray">provisional</span></h2>
   <p class="lede">“Timeline Analysis” applied to the geo-ontology dimensions: the same False Discovery Rate-gated surprise detector as §2, run per entity, per risk category and per theme category.</p>
   
 <div class="card">
   <p class="ct">Same alerting logic as §2, extended to three more grains</p>
-  <p class="cs">Entity, risk-category and theme-category daily volumes are each fit to
+  <details class="explain"><summary>About this panel <span class="hint">click to expand</span></summary><p class="cs">Entity, risk-category and theme-category daily volumes are each fit to
   their own trailing Negative-Binomial baseline (<code>scripts/lib/stats_v2.py</code>,
   reused rather than reimplemented), giving a per-cell exceedance p-value. Those are
   Benjamini–Hochberg corrected <em>within each dimension family, per day</em>
   (<code>fdr_scope="day"</code>) — entity/risk/theme each get their own correction, so
   a busy news day moving many correlated series doesn't cannibalise the correction
   budget of an unrelated family. <code>alert_flag</code> is q &lt; 0.05, exactly as in
-  §2. Independently re-verified: 46/46 <code>stats_v2</code> self-checks pass, every
-  stored q-value reproduces from the raw baseline fits with 0 mismatches across
-  10,762 fitted cells, and every one of the 2,560 rows below
-  matches its source <code>*_metrics_daily.alert_flag</code> count exactly
-  (2440 entity, 55 risk, 65 theme).</p>
+  §2. The 2,589 rows below match their source
+  <code>*_metrics_daily.alert_flag</code> counts
+  (2467 entity, 56 risk, 66 theme).
+  Geo alerts are "high" only when q &lt; 0.01, volume ≥ 10 and volume ≥ 2× baseline;
+  otherwise "medium". Statistical primitives are covered by the <code>stats_v2</code>
+  self-checks.</p></details>
 </div>
 <div class="card">
   <p class="ct">Timeline — where and when each grain crossed its baseline</p>
-  <p class="cs">One swimlane per dimension: all 9 risk categories, all 12 themes, and
+  <details class="explain"><summary>About this panel <span class="hint">click to expand</span></summary><p class="cs">One swimlane per dimension: all 9 risk categories, all 12 themes, and
   the top entities by alert count. Each dot is one False Discovery Rate-gated day; colour + icon carry
   severity (never colour alone), matching the §2 severity legend. Hover any dot for the
-  rationale string the alert actually fired on.</p>
+  rationale string the alert actually fired on.</p></details>
   <div data-panel="geo_timeline"></div>
 </div>
 <div class="card">
@@ -633,13 +646,13 @@ silently vanishing from every denominator.</div>
   <div data-panel="geo_alerts_table"></div>
 </div>
 
-</section>
+</section> -->
 
-<section class="sec" id="geoverify">
+<!-- <section class="sec" id="geoverify">
   <h2><span class="num">19</span>Geo-ontology — verification summary</h2>
   <p class="lede">Every subsystem built for this layer, and what an independent verification pass found — including the parts that are not fully sound. Full record: <code>docs/GEOPOLITICAL_ONTOLOGY_SPEC.md</code>.</p>
-  <div class="card"><dl class="kv"><div><dt>Topic clustering v2</dt><dd><span class="sev medium"><span class="ic">●</span>PARTIAL</span><div class="fnote" style="margin-top:0.25rem">3 → 11 clusters, largest-cluster share 85–94% → 23–29% under every denominator checked — a real, reproducible fix (topic_dim_v2/post_topic_v2 reconcile to the row). But the single largest cluster (t010, 25.7% of the whole corpus) is still an incoherent grab-bag under direct text sampling — the old failure mode, shrunk, not eliminated.</div></dd></div><div><dt>Entity extraction</dt><dd><span class="sev medium"><span class="ic">●</span>PARTIAL / unmeasured</span><div class="fnote" style="margin-top:0.25rem">20,347 posts Named Entity Recognition'd, 110,983 mentions, 29,136 resolved entities — the Implement stage finished, but the verification pass ran out of time waiting on it and never read a single real mention against source text. No precision figure exists for this table yet; code-review-only risks are noted in §16.</div></dd></div><div><dt>Risk / theme labels</dt><dd><span class="sev critical"><span class="ic">◆</span>UNSOUND</span><div class="fnote" style="margin-top:0.25rem">Flat 0.45 cosine threshold across all 21 categories. Measured precision 29% strict / 45% lenient; confirmed recall misses on unambiguous, textbook-clear posts. Needs per-category threshold calibration or a stronger classifier before being trusted as ground truth. Detail in §17.</div></dd></div><div><dt>Timeline metrics (entity/risk/theme)</dt><dd><span class="sev high"><span class="ic">▲</span>SOUND</span><div class="fnote" style="margin-top:0.25rem">46/46 stats_v2 self-checks pass; independent recomputation of every NB baseline, p-value, BH q-value and alert-candidate row matched stored values with 0 mismatches. No correctness defects found. Detail in §18.</div></dd></div></dl></div>
-</section>
+  <div class="card"><dl class="kv"><div><dt>Topic clustering v2</dt><dd><span class="sev medium"><span class="ic">●</span>PARTIAL</span><div class="fnote" style="margin-top:0.25rem">3 → 11 clusters, largest-cluster share 85–94% → 23–29% under every denominator checked — a real, reproducible fix (topic_dim_v2/post_topic_v2 reconcile to the row). But the single largest cluster (t010, 25.7% of the whole corpus) is still an incoherent grab-bag under direct text sampling — the old failure mode, shrunk, not eliminated.</div></dd></div><div><dt>Entity extraction</dt><dd><span class="sev medium"><span class="ic">●</span>PARTIAL / unmeasured</span><div class="fnote" style="margin-top:0.25rem">20,347 posts Named Entity Recognition'd, 110,983 mentions, 29,136 resolved entities — the Implement stage finished, but the verification pass ran out of time waiting on it and never read a single real mention against source text. No precision figure exists for this table yet; code-review-only risks are noted in §16.</div></dd></div><div><dt>Risk / theme labels</dt><dd><span class="sev medium"><span class="ic">●</span>PARTIAL</span><div class="fnote" style="margin-top:0.25rem">Bge-m3 screen + mDeBERTa NLI decision, one global 0.22 threshold across all 21 categories. Measured on 105 hand-judged posts: ~72% precision / 46% recall (lenient), 61% / 65% (strict). Per-category calibration still needed. Detail in §17.</div></dd></div><div><dt>Timeline metrics (entity/risk/theme)</dt><dd><span class="sev high"><span class="ic">▲</span>SOUND</span><div class="fnote" style="margin-top:0.25rem">stats_v2 self-checks pass; an earlier independent recomputation of NB baselines, p-values and BH q-values matched stored values. Re-run it after the next full rebuild. Detail in §18.</div></dd></div></dl></div>
+</section> -->
 
 <section class="sec" id="livener">
   <h2><span class="num">20</span>Live Named Entity Recognition</h2>
