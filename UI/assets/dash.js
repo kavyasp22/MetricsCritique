@@ -2202,25 +2202,59 @@
   var BURST_SEL_PLATS = null;  // map of plat -> bool, or null = all
   var BURST_SEL_TOPICS = null; // map of topic_id -> bool, or null = all
 
-  function makeBurstFilterDropdown(title, keys, store, labeller, countsMap, onChange) {
-    var wrap = h('div', { class: 'burst-filter-wrap' });
-    var trigger = h('button', { type: 'button', class: 'burst-dd-trigger' });
+  function makeBurstFilterDropdown(viewKey, title, keys, store, labeller, countsMap, onChange, onGroupChange) {
+    var isActiveGroup = (BURST_VIEW === viewKey);
+    var wrap = h('div', { class: 'burst-filter-wrap' + (isActiveGroup ? ' active' : '') });
+
+    // Group By Pill button
+    var grpBtn = h('button', {
+      type: 'button',
+      class: 'burst-dd-grp-btn' + (isActiveGroup ? ' active' : ''),
+      text: title,
+      title: 'Group by ' + title
+    });
+
+    // Dropdown filter button
+    var trigBtn = h('button', {
+      type: 'button',
+      class: 'burst-dd-trig-btn',
+      title: 'Filter ' + title.toLowerCase()
+    });
     var trigText = h('span', {});
     var arrow = h('span', { class: 'burst-dd-arrow', text: '▼' });
-    trigger.appendChild(trigText);
-    trigger.appendChild(arrow);
+    trigBtn.appendChild(trigText);
+    trigBtn.appendChild(arrow);
+
+    wrap.appendChild(grpBtn);
+    wrap.appendChild(trigBtn);
 
     var menu = h('div', { class: 'burst-dd-menu', style: 'display:none;' });
 
-    // Header with Title and Select All / Clear
+    // Header with Title + Group switch + Select All / Clear
     var hdr = h('div', { class: 'burst-dd-header' });
+    var titleBox = h('div', { class: 'burst-dd-title-box' });
     var titleEl = h('span', { class: 'burst-dd-title', text: title });
+    titleBox.appendChild(titleEl);
+
+    if (!isActiveGroup && onGroupChange) {
+      var grpLink = h('button', { type: 'button', class: 'burst-dd-act-btn burst-dd-switch-grp', text: 'Group by ' + title.toLowerCase() });
+      grpLink.addEventListener('click', function (e) {
+        e.stopPropagation();
+        BURST_VIEW = viewKey;
+        onGroupChange();
+      });
+      titleBox.appendChild(grpLink);
+    } else {
+      var grpBadge = h('span', { class: 'burst-dd-grouped-badge', text: '✓ Grouped' });
+      titleBox.appendChild(grpBadge);
+    }
+
     var acts = h('div', { class: 'burst-dd-actions' });
     var selAll = h('button', { type: 'button', class: 'burst-dd-act-btn', text: 'Select all' });
     var clear = h('button', { type: 'button', class: 'burst-dd-act-btn', text: 'Clear' });
     acts.appendChild(selAll);
     acts.appendChild(clear);
-    hdr.appendChild(titleEl);
+    hdr.appendChild(titleBox);
     hdr.appendChild(acts);
     menu.appendChild(hdr);
 
@@ -2233,7 +2267,6 @@
     // List container
     var list = h('div', { class: 'burst-dd-list' });
     menu.appendChild(list);
-    wrap.appendChild(trigger);
     wrap.appendChild(menu);
 
     function getLabel(k) { return labeller ? labeller(k) : k; }
@@ -2241,15 +2274,13 @@
     function refreshTrigger() {
       var sel = keys.filter(function (k) { return store[k]; });
       if (sel.length === keys.length) {
-        trigText.textContent = 'All ' + title.toLowerCase() + ' (' + keys.length + ')';
+        trigText.textContent = 'All (' + keys.length + ')';
       } else if (sel.length === 0) {
-        trigText.textContent = 'None (' + title + ')';
+        trigText.textContent = 'None';
       } else if (sel.length === 1) {
         trigText.textContent = getLabel(sel[0]);
-      } else if (sel.length <= 2) {
-        trigText.textContent = sel.map(getLabel).join(', ');
       } else {
-        trigText.textContent = sel.length + ' ' + title.toLowerCase();
+        trigText.textContent = sel.length + ' sel';
       }
     }
 
@@ -2299,8 +2330,7 @@
       renderList(search.value);
     });
 
-    trigger.addEventListener('click', function (e) {
-      e.stopPropagation();
+    function toggleMenu() {
       document.querySelectorAll('.burst-filter-wrap.open').forEach(function (w) {
         if (w !== wrap) {
           w.classList.remove('open');
@@ -2314,6 +2344,21 @@
         renderList('');
         setTimeout(function () { search.focus(); }, 50);
       }
+    }
+
+    grpBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (BURST_VIEW !== viewKey && onGroupChange) {
+        BURST_VIEW = viewKey;
+        onGroupChange();
+      } else {
+        toggleMenu();
+      }
+    });
+
+    trigBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      toggleMenu();
     });
 
     document.addEventListener('click', function (e) {
@@ -2363,41 +2408,35 @@
       return !!BURST_SEL_PLATS[p] && !!BURST_SEL_TOPICS[t];
     });
 
-    /* --- control bar: Group by + Platforms Dropdown + Topics Dropdown + Expand/Collapse --- */
+    /* --- control bar: Group by merged combo dropdowns + Expand/Collapse in one clean bar --- */
     var ctlWrap = h('div', { class: 'burst-ctl-wrap' });
 
-    /* view toggle row */
     var viewRow = h('div', { class: 'burst-ctl-bar' });
     var lblEl = h('span', { class: 'burst-ctl-lbl', text: 'Group by:' });
     viewRow.appendChild(lblEl);
-    ['platform', 'topic'].forEach(function (v) {
-      var btn = h('button', { type: 'button', class: 'burst-btn' + (BURST_VIEW === v ? ' active' : '') });
-      btn.textContent = v === 'platform' ? 'Platform' : 'Topic';
-      btn.addEventListener('click', function () {
-        BURST_VIEW = v;
-        host.textContent = '';
-        P.bursts(host);
-      });
-      viewRow.appendChild(btn);
-    });
 
-    // Add Platforms dropdown
-    var platDd = makeBurstFilterDropdown('Platforms', availPlats, BURST_SEL_PLATS, null, platCounts, function () {
+    // Add Platforms merged combo dropdown
+    var platDd = makeBurstFilterDropdown('platform', 'Platform', availPlats, BURST_SEL_PLATS, null, platCounts, function () {
+      host.textContent = '';
+      P.bursts(host);
+    }, function () {
       host.textContent = '';
       P.bursts(host);
     });
     viewRow.appendChild(platDd);
 
-    // Add Topics dropdown
-    var topicDd = makeBurstFilterDropdown('Topics', availTopics, BURST_SEL_TOPICS, topicLabel, topicCounts, function () {
+    // Add Topics merged combo dropdown
+    var topicDd = makeBurstFilterDropdown('topic', 'Topic', availTopics, BURST_SEL_TOPICS, topicLabel, topicCounts, function () {
+      host.textContent = '';
+      P.bursts(host);
+    }, function () {
       host.textContent = '';
       P.bursts(host);
     });
     viewRow.appendChild(topicDd);
-
     ctlWrap.appendChild(viewRow);
 
-    /* expand / collapse row */
+    /* expand / collapse */
     var actRow = h('div', { class: 'burst-actions' });
     var bOpen = h('button', { type: 'button', class: 'dtt-btn' });
     bOpen.textContent = 'Expand all';
