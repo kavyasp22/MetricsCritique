@@ -2020,7 +2020,7 @@ details.dtt-block[open] > summary::before { transform: rotate(90deg); }
 .dtt-track { display: block; height: 6px; background: rgba(143, 163, 191, 0.15); border-radius: 3px; overflow: hidden; }
 .dtt-bar { display: block; height: 6px; background: var(--gold, #e3bc4b); border-radius: 3px; }
 
-/* ---- burst episodes: sticky X-axis date header & scrollable Y-axis rows ---- */
+/* ---- burst episodes: sticky X-axis date footer & scrollable Y-axis rows ---- */
 .gantt-wrap {
   overflow-x: auto;
   border: 1px solid var(--grid, #202b3c);
@@ -2031,15 +2031,6 @@ details.dtt-block[open] > summary::before { transform: rotate(90deg); }
 .gantt-inner {
   display: flex;
   flex-direction: column;
-}
-.gantt-header {
-  position: sticky;
-  top: 0;
-  z-index: 4;
-  background: var(--elev, #161e2b);
-  border-bottom: 1px solid var(--grid, #263346);
-  user-select: none;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
 }
 .gantt-body {
   max-height: 400px;
@@ -2060,6 +2051,15 @@ details.dtt-block[open] > summary::before { transform: rotate(90deg); }
 }
 .gantt-body::-webkit-scrollbar-thumb:hover {
   background: var(--gold, #e3bc4b);
+}
+.gantt-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  background: var(--elev, #161e2b);
+  border-top: 1px solid var(--grid, #263346);
+  user-select: none;
+  box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.25);
 }
 
 /* ==========================================================================

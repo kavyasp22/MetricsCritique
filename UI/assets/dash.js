@@ -1406,7 +1406,7 @@
   function gantt(host, cfg) {
     if (!cfg.rows.length) { empty(host, cfg.emptyMsg || 'No episodes detected in the current selection.'); return; }
     var rowH = 22, labelW = cfg.labelW || 200;
-    var m = { t: 4, r: 24, b: 8, l: labelW };
+    var m = { t: 8, r: 24, b: 8, l: labelW };
     var inner = Math.max(280, (cfg.width || 700) - labelW - m.r);
     var w = labelW + inner + m.r;
     var days = cfg.days;
@@ -1421,29 +1421,7 @@
     outer.appendChild(innerWrap);
     host.appendChild(outer);
 
-    /* --- 1. Fixed / Sticky X-Axis Date Header --- */
-    var headerHt = 26;
-    var headerBox = h('div', { class: 'gantt-header' });
-    var headerSvg = el('svg', { width: w, height: headerHt, viewBox: '0 0 ' + w + ' ' + headerHt, style: 'display:block;' });
-    var headerG = el('g', { transform: 'translate(' + m.l + ',0)' });
-
-    headerG.appendChild(svgText(-8, 14, BURST_VIEW === 'platform' ? 'Topic' : 'Platform',
-      { anchor: 'end', baseline: 'middle', size: 9, fill: K.ink3, weight: 600 }));
-
-    for (var i = 0; i < days.length; i += st) {
-      var xi = x(i);
-      headerG.appendChild(svgText(xi, 13, fmtDay(days[i]),
-        { anchor: 'middle', size: 8.5, tabular: true, fill: K.ink2 }));
-      headerG.appendChild(el('line', {
-        x1: xi, x2: xi, y1: 19, y2: headerHt,
-        stroke: K.grid, 'stroke-width': 1
-      }));
-    }
-    headerSvg.appendChild(headerG);
-    headerBox.appendChild(headerSvg);
-    innerWrap.appendChild(headerBox);
-
-    /* --- 2. Scrollable Rows Body (Y-Axis) --- */
+    /* --- 1. Scrollable Rows Body (Y-Axis) --- */
     var totalRowsHt = cfg.rows.length * rowH;
     var bodyHt = m.t + totalRowsHt + m.b;
     var bodyBox = h('div', { class: 'gantt-body' });
@@ -1494,7 +1472,26 @@
     bodyBox.appendChild(bodySvg);
     innerWrap.appendChild(bodyBox);
 
-    return { headerSvg: headerSvg, svg: bodySvg, g: bodyG, w: w, h: bodyHt, iw: inner, ih: totalRowsHt };
+    /* --- 2. Fixed X-Axis Date Footer (below rows) --- */
+    var footerHt = 26;
+    var footerBox = h('div', { class: 'gantt-footer' });
+    var footerSvg = el('svg', { width: w, height: footerHt, viewBox: '0 0 ' + w + ' ' + footerHt, style: 'display:block;' });
+    var footerG = el('g', { transform: 'translate(' + m.l + ',0)' });
+
+    for (var i = 0; i < days.length; i += st) {
+      var xi = x(i);
+      footerG.appendChild(el('line', {
+        x1: xi, x2: xi, y1: 0, y2: 6,
+        stroke: K.grid, 'stroke-width': 1
+      }));
+      footerG.appendChild(svgText(xi, 17, fmtDay(days[i]),
+        { anchor: 'middle', size: 8.5, tabular: true, fill: K.ink2 }));
+    }
+    footerSvg.appendChild(footerG);
+    footerBox.appendChild(footerSvg);
+    innerWrap.appendChild(footerBox);
+
+    return { svg: bodySvg, footerSvg: footerSvg, g: bodyG, w: w, h: bodyHt, iw: inner, ih: totalRowsHt };
   }
 
   /* ---------------------------------------------------------- swimlane ---- */
