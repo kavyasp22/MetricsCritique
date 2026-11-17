@@ -6412,10 +6412,10 @@
       {
         icon: '👥',
         title: '3. Sentiment Analysis',
-        subtitle: 'Tone · Net sentiment score · Tone drift · Hate/toxicity (uncalibrated)',
+        subtitle: 'Tone · Net sentiment score · Tone drift',
         metrics: [
-          { id: 'tone', label: '8. Tone' },
-          { id: 'hate', label: '9. Hate / toxicity' }
+          { id: 'tone', label: '8. Tone' }
+          /* { id: 'hate', label: '9. Hate / toxicity' } */
         ]
       },
       {
