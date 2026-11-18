@@ -24,7 +24,7 @@
       "Wang Yi"
     ],
     "entity_type": "PERSON",
-    "entity_subtype": "diplomat"
+    "entity_subtype": "political_leader"
   },
   {
     "entity_uid": "narendra_modi",
@@ -44,7 +44,7 @@
       "EAM Jaishankar"
     ],
     "entity_type": "PERSON",
-    "entity_subtype": "diplomat"
+    "entity_subtype": "political_leader"
   },
   {
     "entity_uid": "rajnath_singh",
@@ -88,7 +88,7 @@
       "General Munir"
     ],
     "entity_type": "PERSON",
-    "entity_subtype": "military_leader"
+    "entity_subtype": "military_personnel"
   },
   {
     "entity_uid": "min_aung_hlaing",
@@ -96,7 +96,7 @@
       "Min Aung Hlaing"
     ],
     "entity_type": "PERSON",
-    "entity_subtype": "military_leader"
+    "entity_subtype": "military_personnel"
   },
   {
     "entity_uid": "vladimir_putin",
@@ -114,7 +114,7 @@
       "Lavrov"
     ],
     "entity_type": "PERSON",
-    "entity_subtype": "diplomat"
+    "entity_subtype": "political_leader"
   },
   {
     "entity_uid": "volodymyr_zelensky",
@@ -134,7 +134,7 @@
       "MOFA"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "ministry"
+    "entity_subtype": "government_body"
   },
   {
     "entity_uid": "india_mea",
@@ -143,7 +143,7 @@
       "MEA"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "ministry"
+    "entity_subtype": "government_body"
   },
   {
     "entity_uid": "china_mnd",
@@ -152,7 +152,7 @@
       "Chinese Defence Ministry"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "ministry"
+    "entity_subtype": "government_body"
   },
   {
     "entity_uid": "cccc",
@@ -161,7 +161,7 @@
       "CCCC"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "state_owned_enterprise"
+    "entity_subtype": "commercial_company"
   },
   {
     "entity_uid": "cosco",
@@ -170,7 +170,7 @@
       "COSCO"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "state_owned_enterprise"
+    "entity_subtype": "commercial_company"
   },
   {
     "entity_uid": "chec",
@@ -179,7 +179,7 @@
       "CHEC"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "state_owned_enterprise"
+    "entity_subtype": "commercial_company"
   },
   {
     "entity_uid": "sinopec",
@@ -187,7 +187,7 @@
       "Sinopec"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "state_owned_enterprise"
+    "entity_subtype": "commercial_company"
   },
   {
     "entity_uid": "cnpc",
@@ -196,7 +196,7 @@
       "China National Petroleum Corporation"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "state_owned_enterprise"
+    "entity_subtype": "commercial_company"
   },
   {
     "entity_uid": "pla",
@@ -206,7 +206,7 @@
       "解放军"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "armed_group"
+    "entity_subtype": "militant_group_non_state"
   },
   {
     "entity_uid": "pla_navy",
@@ -215,7 +215,7 @@
       "PLAN"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "armed_group"
+    "entity_subtype": "militant_group_non_state"
   },
   {
     "entity_uid": "isi",
@@ -224,7 +224,7 @@
       "Inter-Services Intelligence"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "armed_group"
+    "entity_subtype": "militant_group_non_state"
   },
   {
     "entity_uid": "let",
@@ -233,7 +233,7 @@
       "LeT"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "armed_group"
+    "entity_subtype": "militant_group_non_state"
   },
   {
     "entity_uid": "jem",
@@ -242,7 +242,7 @@
       "JeM"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "armed_group"
+    "entity_subtype": "militant_group_non_state"
   },
   {
     "entity_uid": "arakan_army",
@@ -250,7 +250,7 @@
       "Arakan Army"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "armed_group"
+    "entity_subtype": "militant_group_non_state"
   },
   {
     "entity_uid": "bri",
@@ -260,7 +260,7 @@
       "One Belt One Road"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "international_org"
+    "entity_subtype": "ngo"
   },
   {
     "entity_uid": "sco",
@@ -269,7 +269,7 @@
       "SCO"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "international_org"
+    "entity_subtype": "ngo"
   },
   {
     "entity_uid": "saarc",
@@ -278,7 +278,7 @@
       "South Asian Association for Regional Cooperation"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "international_org"
+    "entity_subtype": "ngo"
   },
   {
     "entity_uid": "bimstec",
@@ -286,7 +286,7 @@
       "BIMSTEC"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "international_org"
+    "entity_subtype": "ngo"
   },
   {
     "entity_uid": "adb",
@@ -295,7 +295,7 @@
       "ADB"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "international_org"
+    "entity_subtype": "ngo"
   },
   {
     "entity_uid": "aiib",
@@ -304,7 +304,7 @@
       "Asian Infrastructure Investment Bank"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "international_org"
+    "entity_subtype": "ngo"
   },
   {
     "entity_uid": "huawei",
@@ -312,7 +312,7 @@
       "Huawei"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "business_org"
+    "entity_subtype": "commercial_company"
   },
   {
     "entity_uid": "xiaomi",
@@ -320,7 +320,7 @@
       "Xiaomi"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "business_org"
+    "entity_subtype": "commercial_company"
   },
   {
     "entity_uid": "byd",
@@ -328,7 +328,7 @@
       "BYD"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "business_org"
+    "entity_subtype": "commercial_company"
   },
   {
     "entity_uid": "adani_group",
@@ -337,7 +337,7 @@
       "Adani"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "business_org"
+    "entity_subtype": "commercial_company"
   },
   {
     "entity_uid": "reliance",
@@ -346,7 +346,7 @@
       "Reliance"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "business_org"
+    "entity_subtype": "commercial_company"
   },
   {
     "entity_uid": "gwadar_port",
@@ -355,7 +355,7 @@
       "Gwadar Port"
     ],
     "entity_type": "LOCATION",
-    "entity_subtype": "port"
+    "entity_subtype": "naval_base_port"
   },
   {
     "entity_uid": "hambantota_port",
@@ -364,7 +364,7 @@
       "Hambantota Port"
     ],
     "entity_type": "LOCATION",
-    "entity_subtype": "port"
+    "entity_subtype": "naval_base_port"
   },
   {
     "entity_uid": "chittagong_port",
@@ -373,7 +373,7 @@
       "Chittagong Port"
     ],
     "entity_type": "LOCATION",
-    "entity_subtype": "port"
+    "entity_subtype": "naval_base_port"
   },
   {
     "entity_uid": "kyaukpyu_port",
@@ -382,7 +382,7 @@
       "Kyaukpyu Port"
     ],
     "entity_type": "LOCATION",
-    "entity_subtype": "port"
+    "entity_subtype": "naval_base_port"
   },
   {
     "entity_uid": "colombo_port",
@@ -391,7 +391,7 @@
       "Colombo"
     ],
     "entity_type": "LOCATION",
-    "entity_subtype": "port"
+    "entity_subtype": "naval_base_port"
   },
   {
     "entity_uid": "djibouti_base",
@@ -399,7 +399,7 @@
       "Djibouti"
     ],
     "entity_type": "LOCATION",
-    "entity_subtype": "port"
+    "entity_subtype": "naval_base_port"
   },
   {
     "entity_uid": "sittwe_port",
@@ -408,7 +408,7 @@
       "Sittwe Port"
     ],
     "entity_type": "LOCATION",
-    "entity_subtype": "port"
+    "entity_subtype": "naval_base_port"
   },
   {
     "entity_uid": "doklam",
@@ -416,7 +416,7 @@
       "Doklam"
     ],
     "entity_type": "LOCATION",
-    "entity_subtype": "border_town"
+    "entity_subtype": "disputed_border"
   },
   {
     "entity_uid": "galwan_valley",
@@ -425,7 +425,7 @@
       "Galwan"
     ],
     "entity_type": "LOCATION",
-    "entity_subtype": "border_town"
+    "entity_subtype": "disputed_border"
   },
   {
     "entity_uid": "pangong_tso",
@@ -434,7 +434,7 @@
       "Pangong Lake"
     ],
     "entity_type": "LOCATION",
-    "entity_subtype": "border_town"
+    "entity_subtype": "disputed_border"
   },
   {
     "entity_uid": "cpec",
@@ -443,7 +443,7 @@
       "CPEC"
     ],
     "entity_type": "LOCATION",
-    "entity_subtype": "economic_zone"
+    "entity_subtype": "strategic_corridor"
   },
   {
     "entity_uid": "gwadar_sez",
@@ -452,7 +452,7 @@
       "Gwadar SEZ"
     ],
     "entity_type": "LOCATION",
-    "entity_subtype": "economic_zone"
+    "entity_subtype": "strategic_corridor"
   },
   {
     "entity_uid": "kyaukpyu_kunming_pipeline",
@@ -461,7 +461,7 @@
       "China-Myanmar pipeline"
     ],
     "entity_type": "LOCATION",
-    "entity_subtype": "pipeline"
+    "entity_subtype": "strategic_corridor"
   },
   {
     "entity_uid": "china_pakistan_pipeline",
@@ -469,7 +469,7 @@
       "China-Pakistan pipeline"
     ],
     "entity_type": "LOCATION",
-    "entity_subtype": "pipeline"
+    "entity_subtype": "strategic_corridor"
   },
   {
     "entity_uid": "china_nepal_railway",
@@ -478,7 +478,7 @@
       "Trans-Himalayan railway"
     ],
     "entity_type": "LOCATION",
-    "entity_subtype": "railway"
+    "entity_subtype": "strategic_corridor"
   },
   {
     "entity_uid": "kunming_singapore_railway",
@@ -487,7 +487,7 @@
       "Pan-Asia Railway"
     ],
     "entity_type": "LOCATION",
-    "entity_subtype": "railway"
+    "entity_subtype": "strategic_corridor"
   },
   {
     "entity_uid": "united_states",
@@ -669,7 +669,7 @@
       "欧盟"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "international_org"
+    "entity_subtype": "ngo"
   },
   {
     "entity_uid": "kyiv",
@@ -739,7 +739,7 @@
       "霍尔木兹海峡"
     ],
     "entity_type": "LOCATION",
-    "entity_subtype": "port"
+    "entity_subtype": "naval_base_port"
   },
   {
     "entity_uid": "donald_trump",
@@ -780,7 +780,7 @@
       "U.S. Military"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "military_leader"
+    "entity_subtype": "military_personnel"
   },
   {
     "entity_uid": "xinhua",
@@ -789,7 +789,7 @@
       "Xinhua"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "state_owned_enterprise"
+    "entity_subtype": "commercial_company"
   },
   {
     "entity_uid": "nato",
@@ -799,7 +799,7 @@
       "НАТО"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "international_org"
+    "entity_subtype": "ngo"
   },
   {
     "entity_uid": "hezbollah",
@@ -808,6 +808,6 @@
       "真主党"
     ],
     "entity_type": "ORG",
-    "entity_subtype": "armed_group"
+    "entity_subtype": "militant_group_non_state"
   }
 ]

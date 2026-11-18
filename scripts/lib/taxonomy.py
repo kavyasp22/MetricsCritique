@@ -158,30 +158,41 @@ LEGACY_AXES: dict[str, dict] = {
     },
 }
 
-# Entity subtypes are a third legacy axis. Zero-instance slots
-# (business_executive, railway) are listed on purpose so the full taxonomy is
-# always visible in the UI, honestly marked empty rather than omitted --
-# absence of a subtype is itself a finding.
+# Entity subtypes taxonomy: 25 official subtypes across PERSON, LOCATION, ORG, EVENT.
+# Aligned with production database schema (POI, LOI, OOI, EOI).
 ENTITY_SUBTYPES: dict[str, list[tuple[str, str]]] = {
     "PERSON": [
-        ("political_leader", "Political Leader"),
-        ("military_leader", "Military Leader"),
-        ("diplomat", "Diplomat"),
-        ("business_executive", "Business Executive"),
-    ],
-    "ORG": [
-        ("ministry", "Ministry"),
-        ("state_owned_enterprise", "State-Owned Enterprise"),
-        ("armed_group", "Armed Group"),
-        ("international_org", "International Organization"),
-        ("business_org", "Business / Corporate Org"),
+        ("political_leader", "Political Leader / Head of State"),
+        ("civilian", "Civilian / Public Figure"),
+        ("military_personnel", "Military Commander / Officer"),
+        ("journalist_analyst", "Journalist / Defense Analyst"),
+        ("legal_actor", "Judicial / Legal Official"),
     ],
     "LOCATION": [
-        ("port", "Port"),
-        ("border_town", "Border Town"),
-        ("economic_zone", "Economic Zone"),
-        ("pipeline", "Pipeline"),
-        ("railway", "Railway"),
+        ("country", "Sovereign State / Nation"),
+        ("geographic_location", "Geographic Location / City / Province"),
+        ("conflict_zone", "Active Conflict Zone / Hostile Sector"),
+        ("disputed_border", "Disputed Border / Line of Actual Control"),
+        ("military_installation", "Military Installation / Airbase / Garrison"),
+        ("naval_base_port", "Naval Base / Strategic Port Facility"),
+        ("strategic_corridor", "Strategic Transit Corridor / Choke Point"),
+        ("restricted_operational_zone", "Restricted Operational Zone"),
+        ("territorial_waters", "Territorial Waters / Maritime EEZ"),
+        ("refugee_camp_displacement_zone", "Displacement / Humanitarian Zone"),
+    ],
+    "ORG": [
+        ("government_body", "Government Body / Executive Agency"),
+        ("political_party", "Political Party / Coalition"),
+        ("commercial_company", "Commercial Corporation / Defense Contractor"),
+        ("military_branch_coalition", "Armed Forces Branch / Military Coalition"),
+        ("militant_group_non_state", "Militant / Insurgent Group"),
+        ("ngo", "Non-Governmental Organization / Agency"),
+        ("military_hardware", "Military Weapon System / Hardware"),
+        ("naval_vessel", "Naval Warship / Combatant Vessel"),
+    ],
+    "EVENT": [
+        ("military_exercise", "Joint Military Exercise / Maneuver"),
+        ("protest_demonstration", "Protest / Mass Demonstration"),
     ],
 }
 

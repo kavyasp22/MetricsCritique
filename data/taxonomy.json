@@ -1,6 +1,6 @@
 {
  "$schema_version": "1.0",
- "generated_at": "2026-08-06T05:13:14+00:00",
+ "generated_at": "2026-11-16T06:28:51+00:00",
  "generator": "scripts/lib/taxonomy.py",
  "framework": "Global Geopolitical Event & Topic Coding Framework",
  "framework_version": "1.0",
@@ -377,45 +377,69 @@
    "status": "in_production",
    "order": [
     "political_leader",
-    "military_leader",
-    "diplomat",
-    "business_executive",
-    "ministry",
-    "state_owned_enterprise",
-    "armed_group",
-    "international_org",
-    "business_org",
-    "port",
-    "border_town",
-    "economic_zone",
-    "pipeline",
-    "railway"
+    "civilian",
+    "military_personnel",
+    "journalist_analyst",
+    "legal_actor",
+    "country",
+    "geographic_location",
+    "conflict_zone",
+    "disputed_border",
+    "military_installation",
+    "naval_base_port",
+    "strategic_corridor",
+    "restricted_operational_zone",
+    "territorial_waters",
+    "refugee_camp_displacement_zone",
+    "government_body",
+    "political_party",
+    "commercial_company",
+    "military_branch_coalition",
+    "militant_group_non_state",
+    "ngo",
+    "military_hardware",
+    "naval_vessel",
+    "military_exercise",
+    "protest_demonstration"
    ],
    "groups": {
     "PERSON": [
      "political_leader",
-     "military_leader",
-     "diplomat",
-     "business_executive"
-    ],
-    "ORG": [
-     "ministry",
-     "state_owned_enterprise",
-     "armed_group",
-     "international_org",
-     "business_org"
+     "civilian",
+     "military_personnel",
+     "journalist_analyst",
+     "legal_actor"
     ],
     "LOCATION": [
-     "port",
-     "border_town",
-     "economic_zone",
-     "pipeline",
-     "railway"
+     "country",
+     "geographic_location",
+     "conflict_zone",
+     "disputed_border",
+     "military_installation",
+     "naval_base_port",
+     "strategic_corridor",
+     "restricted_operational_zone",
+     "territorial_waters",
+     "refugee_camp_displacement_zone"
+    ],
+    "ORG": [
+     "government_body",
+     "political_party",
+     "commercial_company",
+     "military_branch_coalition",
+     "militant_group_non_state",
+     "ngo",
+     "military_hardware",
+     "naval_vessel"
+    ],
+    "EVENT": [
+     "military_exercise",
+     "protest_demonstration"
     ]
    },
    "entries": {
     "political_leader": {
-     "display": "Political Leader",
+     "display": "Political Leader / Head of State",
      "description": "PERSON",
      "model_description": null,
      "hypothesis": null,
@@ -427,8 +451,8 @@
      "crosswalk_from": [],
      "crosswalk_to": []
     },
-    "military_leader": {
-     "display": "Military Leader",
+    "civilian": {
+     "display": "Civilian / Public Figure",
      "description": "PERSON",
      "model_description": null,
      "hypothesis": null,
@@ -440,8 +464,8 @@
      "crosswalk_from": [],
      "crosswalk_to": []
     },
-    "diplomat": {
-     "display": "Diplomat",
+    "military_personnel": {
+     "display": "Military Commander / Officer",
      "description": "PERSON",
      "model_description": null,
      "hypothesis": null,
@@ -453,8 +477,8 @@
      "crosswalk_from": [],
      "crosswalk_to": []
     },
-    "business_executive": {
-     "display": "Business Executive",
+    "journalist_analyst": {
+     "display": "Journalist / Defense Analyst",
      "description": "PERSON",
      "model_description": null,
      "hypothesis": null,
@@ -466,73 +490,21 @@
      "crosswalk_from": [],
      "crosswalk_to": []
     },
-    "ministry": {
-     "display": "Ministry",
-     "description": "ORG",
+    "legal_actor": {
+     "display": "Judicial / Legal Official",
+     "description": "PERSON",
      "model_description": null,
      "hypothesis": null,
      "code": null,
-     "parent_key": "ORG",
+     "parent_key": "PERSON",
      "level": 2,
      "alertable": true,
      "alertable_reason": null,
      "crosswalk_from": [],
      "crosswalk_to": []
     },
-    "state_owned_enterprise": {
-     "display": "State-Owned Enterprise",
-     "description": "ORG",
-     "model_description": null,
-     "hypothesis": null,
-     "code": null,
-     "parent_key": "ORG",
-     "level": 2,
-     "alertable": true,
-     "alertable_reason": null,
-     "crosswalk_from": [],
-     "crosswalk_to": []
-    },
-    "armed_group": {
-     "display": "Armed Group",
-     "description": "ORG",
-     "model_description": null,
-     "hypothesis": null,
-     "code": null,
-     "parent_key": "ORG",
-     "level": 2,
-     "alertable": true,
-     "alertable_reason": null,
-     "crosswalk_from": [],
-     "crosswalk_to": []
-    },
-    "international_org": {
-     "display": "International Organization",
-     "description": "ORG",
-     "model_description": null,
-     "hypothesis": null,
-     "code": null,
-     "parent_key": "ORG",
-     "level": 2,
-     "alertable": true,
-     "alertable_reason": null,
-     "crosswalk_from": [],
-     "crosswalk_to": []
-    },
-    "business_org": {
-     "display": "Business / Corporate Org",
-     "description": "ORG",
-     "model_description": null,
-     "hypothesis": null,
-     "code": null,
-     "parent_key": "ORG",
-     "level": 2,
-     "alertable": true,
-     "alertable_reason": null,
-     "crosswalk_from": [],
-     "crosswalk_to": []
-    },
-    "port": {
-     "display": "Port",
+    "country": {
+     "display": "Sovereign State / Nation",
      "description": "LOCATION",
      "model_description": null,
      "hypothesis": null,
@@ -544,8 +516,8 @@
      "crosswalk_from": [],
      "crosswalk_to": []
     },
-    "border_town": {
-     "display": "Border Town",
+    "geographic_location": {
+     "display": "Geographic Location / City / Province",
      "description": "LOCATION",
      "model_description": null,
      "hypothesis": null,
@@ -557,8 +529,8 @@
      "crosswalk_from": [],
      "crosswalk_to": []
     },
-    "economic_zone": {
-     "display": "Economic Zone",
+    "conflict_zone": {
+     "display": "Active Conflict Zone / Hostile Sector",
      "description": "LOCATION",
      "model_description": null,
      "hypothesis": null,
@@ -570,8 +542,8 @@
      "crosswalk_from": [],
      "crosswalk_to": []
     },
-    "pipeline": {
-     "display": "Pipeline",
+    "disputed_border": {
+     "display": "Disputed Border / Line of Actual Control",
      "description": "LOCATION",
      "model_description": null,
      "hypothesis": null,
@@ -583,13 +555,208 @@
      "crosswalk_from": [],
      "crosswalk_to": []
     },
-    "railway": {
-     "display": "Railway",
+    "military_installation": {
+     "display": "Military Installation / Airbase / Garrison",
      "description": "LOCATION",
      "model_description": null,
      "hypothesis": null,
      "code": null,
      "parent_key": "LOCATION",
+     "level": 2,
+     "alertable": true,
+     "alertable_reason": null,
+     "crosswalk_from": [],
+     "crosswalk_to": []
+    },
+    "naval_base_port": {
+     "display": "Naval Base / Strategic Port Facility",
+     "description": "LOCATION",
+     "model_description": null,
+     "hypothesis": null,
+     "code": null,
+     "parent_key": "LOCATION",
+     "level": 2,
+     "alertable": true,
+     "alertable_reason": null,
+     "crosswalk_from": [],
+     "crosswalk_to": []
+    },
+    "strategic_corridor": {
+     "display": "Strategic Transit Corridor / Choke Point",
+     "description": "LOCATION",
+     "model_description": null,
+     "hypothesis": null,
+     "code": null,
+     "parent_key": "LOCATION",
+     "level": 2,
+     "alertable": true,
+     "alertable_reason": null,
+     "crosswalk_from": [],
+     "crosswalk_to": []
+    },
+    "restricted_operational_zone": {
+     "display": "Restricted Operational Zone",
+     "description": "LOCATION",
+     "model_description": null,
+     "hypothesis": null,
+     "code": null,
+     "parent_key": "LOCATION",
+     "level": 2,
+     "alertable": true,
+     "alertable_reason": null,
+     "crosswalk_from": [],
+     "crosswalk_to": []
+    },
+    "territorial_waters": {
+     "display": "Territorial Waters / Maritime EEZ",
+     "description": "LOCATION",
+     "model_description": null,
+     "hypothesis": null,
+     "code": null,
+     "parent_key": "LOCATION",
+     "level": 2,
+     "alertable": true,
+     "alertable_reason": null,
+     "crosswalk_from": [],
+     "crosswalk_to": []
+    },
+    "refugee_camp_displacement_zone": {
+     "display": "Displacement / Humanitarian Zone",
+     "description": "LOCATION",
+     "model_description": null,
+     "hypothesis": null,
+     "code": null,
+     "parent_key": "LOCATION",
+     "level": 2,
+     "alertable": true,
+     "alertable_reason": null,
+     "crosswalk_from": [],
+     "crosswalk_to": []
+    },
+    "government_body": {
+     "display": "Government Body / Executive Agency",
+     "description": "ORG",
+     "model_description": null,
+     "hypothesis": null,
+     "code": null,
+     "parent_key": "ORG",
+     "level": 2,
+     "alertable": true,
+     "alertable_reason": null,
+     "crosswalk_from": [],
+     "crosswalk_to": []
+    },
+    "political_party": {
+     "display": "Political Party / Coalition",
+     "description": "ORG",
+     "model_description": null,
+     "hypothesis": null,
+     "code": null,
+     "parent_key": "ORG",
+     "level": 2,
+     "alertable": true,
+     "alertable_reason": null,
+     "crosswalk_from": [],
+     "crosswalk_to": []
+    },
+    "commercial_company": {
+     "display": "Commercial Corporation / Defense Contractor",
+     "description": "ORG",
+     "model_description": null,
+     "hypothesis": null,
+     "code": null,
+     "parent_key": "ORG",
+     "level": 2,
+     "alertable": true,
+     "alertable_reason": null,
+     "crosswalk_from": [],
+     "crosswalk_to": []
+    },
+    "military_branch_coalition": {
+     "display": "Armed Forces Branch / Military Coalition",
+     "description": "ORG",
+     "model_description": null,
+     "hypothesis": null,
+     "code": null,
+     "parent_key": "ORG",
+     "level": 2,
+     "alertable": true,
+     "alertable_reason": null,
+     "crosswalk_from": [],
+     "crosswalk_to": []
+    },
+    "militant_group_non_state": {
+     "display": "Militant / Insurgent Group",
+     "description": "ORG",
+     "model_description": null,
+     "hypothesis": null,
+     "code": null,
+     "parent_key": "ORG",
+     "level": 2,
+     "alertable": true,
+     "alertable_reason": null,
+     "crosswalk_from": [],
+     "crosswalk_to": []
+    },
+    "ngo": {
+     "display": "Non-Governmental Organization / Agency",
+     "description": "ORG",
+     "model_description": null,
+     "hypothesis": null,
+     "code": null,
+     "parent_key": "ORG",
+     "level": 2,
+     "alertable": true,
+     "alertable_reason": null,
+     "crosswalk_from": [],
+     "crosswalk_to": []
+    },
+    "military_hardware": {
+     "display": "Military Weapon System / Hardware",
+     "description": "ORG",
+     "model_description": null,
+     "hypothesis": null,
+     "code": null,
+     "parent_key": "ORG",
+     "level": 2,
+     "alertable": true,
+     "alertable_reason": null,
+     "crosswalk_from": [],
+     "crosswalk_to": []
+    },
+    "naval_vessel": {
+     "display": "Naval Warship / Combatant Vessel",
+     "description": "ORG",
+     "model_description": null,
+     "hypothesis": null,
+     "code": null,
+     "parent_key": "ORG",
+     "level": 2,
+     "alertable": true,
+     "alertable_reason": null,
+     "crosswalk_from": [],
+     "crosswalk_to": []
+    },
+    "military_exercise": {
+     "display": "Joint Military Exercise / Maneuver",
+     "description": "EVENT",
+     "model_description": null,
+     "hypothesis": null,
+     "code": null,
+     "parent_key": "EVENT",
+     "level": 2,
+     "alertable": true,
+     "alertable_reason": null,
+     "crosswalk_from": [],
+     "crosswalk_to": []
+    },
+    "protest_demonstration": {
+     "display": "Protest / Mass Demonstration",
+     "description": "EVENT",
+     "model_description": null,
+     "hypothesis": null,
+     "code": null,
+     "parent_key": "EVENT",
      "level": 2,
      "alertable": true,
      "alertable_reason": null,
