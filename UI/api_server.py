@@ -54,10 +54,22 @@ def _limit(qs: dict) -> int:
 
 
 def _day_clause(qs, where, params, col="p.posted_at"):
+    """One day (`day`) or a range (`from` / `to`, inclusive). The metrics assign a post to its
+    posted day, or to its scraped day when posted_at is missing, so the same rule is used here;
+    otherwise a drill-down count would not match the number on the card that opened it."""
+    scraped = col.replace("posted_at", "scraped_at")
+    expr = f"CAST(coalesce({col}, {scraped}) AS DATE)"
     day = qs.get("day", [None])[0]
     if day:
-        where.append(f"CAST({col} AS DATE) = ?")
+        where.append(f"{expr} = ?")
         params.append(day)
+    d_from, d_to = qs.get("from", [None])[0], qs.get("to", [None])[0]
+    if d_from:
+        where.append(f"{expr} >= ?")
+        params.append(d_from)
+    if d_to:
+        where.append(f"{expr} <= ?")
+        params.append(d_to)
 
 
 def _platform_clause(qs, where, params, col="p.platform"):
@@ -65,6 +77,11 @@ def _platform_clause(qs, where, params, col="p.platform"):
     if platform:
         where.append(f"{col} = ?")
         params.append(platform)
+        return
+    plats = [x for x in qs.get("platforms", [""])[0].split(",") if x]
+    if plats:
+        where.append(f"{col} IN (" + ",".join("?" * len(plats)) + ")")
+        params.extend(plats)
 
 
 class NotYetPopulated(Exception):
@@ -159,6 +176,43 @@ def build_query(view: str, qs: dict):
                 ORDER BY c.posted_at DESC
             """
             return sql, params
+
+        if platform is None:
+            # All platforms (or a chosen list): the card counts posts AND YouTube comments, so the
+            # drill-down must list both or its total will not match the number on the card.
+            plats = [x for x in qs.get("platforms", [""])[0].split(",") if x]
+            want_comments = (not plats) or ("youtube_comment" in plats)
+            post_plats = [x for x in plats if x != "youtube_comment"]
+            parts, uparams = [], []
+            if (not plats) or post_plats:
+                w, pr = [], []
+                if topic_id in ("t004", "t005"):
+                    w.append("pt.topic_id IN ('t004', 't005')")
+                else:
+                    w.append("pt.topic_id = ?"); pr.append(topic_id)
+                if post_plats:
+                    w.append("p.platform IN (" + ",".join("?" * len(post_plats)) + ")"); pr.extend(post_plats)
+                _day_clause(qs, w, pr)
+                parts.append(f"""SELECT {POST_COLS}, pt.confidence FROM analytics.post_topic pt
+                    JOIN analytics.post_facts p ON p.post_uid = pt.post_uid WHERE {' AND '.join(w)}""")
+                uparams += pr
+            if want_comments:
+                w, pr = [], []
+                if topic_id in ("t004", "t005"):
+                    w.append("pt.topic_id IN ('t004', 't005')")
+                else:
+                    w.append("pt.topic_id = ?"); pr.append(topic_id)
+                _day_clause(qs, w, pr, col="c.posted_at")
+                parts.append(f"""SELECT c.comment_uid AS post_uid, 'youtube_comment' AS platform, c.posted_at,
+                       coalesce(c.author_display_name, 'anonymous') AS author_name,
+                       left(coalesce(c.text, ''), 500) AS text, '' AS url, pt.confidence
+                    FROM analytics.comment_facts c
+                    JOIN analytics.post_facts pf ON c.video_id = pf.native_id AND pf.platform = 'youtube_video'
+                    JOIN analytics.post_topic pt ON pt.post_uid = pf.post_uid WHERE {' AND '.join(w)}""")
+                uparams += pr
+            sql = ("SELECT *, count(*) OVER () AS total_rows FROM (" + " UNION ALL ".join(parts) +
+                   ") u ORDER BY posted_at DESC")
+            return sql, uparams
 
         if topic_id in ("t004", "t005"):
             where.append("pt.topic_id IN ('t004', 't005')")

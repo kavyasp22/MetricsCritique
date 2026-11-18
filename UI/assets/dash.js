@@ -5568,6 +5568,12 @@
     var i = ALLDAYS.indexOf(days[0]);
     return ALLDAYS.slice(Math.max(0, i - days.length), i);
   }
+  /* drill-down parameters that match the card's own numbers: the selected dates (and platform choice) */
+  function exDrillParams(p, withPlatforms) {
+    p.from = S.from; p.to = S.to;
+    if (withPlatforms && exAnyPlat()) { p.platforms = PLATFORMS.filter(exPlatOk).join(','); }
+    return p;
+  }
   function exSet(a) { var o = {}; a.forEach(function (d) { o[d] = true; }); return o; }
   function exTextOk(s) { return !EX.q || String(s || '').toLowerCase().indexOf(EX.q.toLowerCase()) >= 0; }
   function exDayNum(d) { return Math.round(Date.parse(day(d)) / 86400000); }
@@ -5687,7 +5693,7 @@
       { k: 'stage', label: 'Stage' }
     ], rows, {
       open: true, label: 'Trending topics (' + rows.length + ')',
-      rowDrill: function (r) { return { view: 'topic', params: { topic_id: r.topic_id }, title: r.topic }; }
+      rowDrill: function (r) { return { view: 'topic', params: exDrillParams({ topic_id: r.topic_id }, true), title: r.topic, subtitle: S.from + ' \u2192 ' + S.to }; }
     });
   }
 
@@ -5844,7 +5850,7 @@
       { k: 'drops', label: 'Tone-drop days', num: true }
     ], plat, {
       open: true, label: 'Tone by platform (' + plat.length + ')',
-      rowDrill: function (r) { return { view: 'platform', params: { platform: r.key }, title: r.name + ' — recent posts' }; }
+      rowDrill: function (r) { return { view: 'platform', params: exDrillParams({ platform: r.key }), title: r.name + ' \u2014 posts', subtitle: S.from + ' \u2192 ' + S.to }; }
     });
     var top = exSentRows('topic').sort(function (a, b) { return b.n - a.n; }).slice(0, EX.top);
     host.appendChild(h('p', { class: 'cs', text: 'By topic, all selected platforms together. Shares come from summed counts; the topic NSS is not shown ' +
@@ -5860,7 +5866,7 @@
       { k: 'drops', label: 'Tone-drop days', num: true }
     ], top, {
       open: true, label: 'Tone by topic (' + top.length + ')',
-      rowDrill: function (r) { return { view: 'topic', params: { topic_id: r.key }, title: r.name }; }
+      rowDrill: function (r) { return { view: 'topic', params: exDrillParams({ topic_id: r.key }, true), title: r.name, subtitle: S.from + ' \u2192 ' + S.to }; }
     });
     var cur = exSet(exDays());
     var drops = T('metrics_daily').filter(function (r) {
@@ -5939,7 +5945,7 @@
       { k: 'eng', label: 'Engagement (log)', num: true, fmt: function (v) { return v == null ? '\u2014' : Number(v).toFixed(1); } }
     ], br, {
       open: true, label: 'Breakout groups by virality percentile (' + br.length + ')',
-      rowDrill: function (r) { return { view: 'topic', params: { topic_id: r.topic_id, platform: r.platform }, title: r.topic + ' \u00b7 ' + r.platform }; }
+      rowDrill: function (r) { return { view: 'topic', params: exDrillParams({ topic_id: r.topic_id, platform: r.platform }), title: r.topic + ' \u00b7 ' + r.platform, subtitle: S.from + ' \u2192 ' + S.to }; }
     });
     host.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Top individual posts' }));
     var plats = PLATFORMS.filter(exPlatOk).join(',');

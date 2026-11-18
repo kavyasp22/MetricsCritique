@@ -11,12 +11,17 @@ const script = readFileSync(`${ROOT}/assets/dash.js`, 'utf8');
 const base = JSON.parse(readFileSync(`${ROOT}/data/metrics.json`, 'utf8'));
 const errors = [];
 let calls = [];
+const drillCalls = [];
 
 const dom = new JSDOM(html, {
   runScripts: 'dangerously', url: 'http://localhost/',
   beforeParse(win) {
     win.fetch = (u) => {
       u = String(u);
+      if (u.includes('/api/drill')) {
+        drillCalls.push(u);
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ view: 'topic', shown: 0, total: 0, rows: [] }) });
+      }
       if (u.includes('/api/explore/viral')) {
         calls.push(u);
         return Promise.resolve({ ok: true, json: () => Promise.resolve({
@@ -74,6 +79,12 @@ const cb = doc.getElementById('ex-unclass'); cb.checked = true; cb.dispatchEvent
 check('ticking Include Unclassified brings it back',
   [...view().querySelectorAll('table tbody tr')].some((tr) => tr.children[0].textContent.trim() === 'Unclassified'));
 const cb2 = doc.getElementById('ex-unclass'); cb2.checked = false; cb2.dispatchEvent(new dom.window.Event('change')); await wait(400);
+{
+  const row = view().querySelector('table tbody tr');
+  drillCalls.length = 0; row.click(); await wait(500);
+  const u = drillCalls[0] || '';
+  check('clicking a Trending Topics row opens the drill-down with the selected dates', /from=2026-10-20/.test(u) && /to=2026-10-26/.test(u) && /topic_id=/.test(u), u);
+}
 const lifeRows = await rows('life');
 check('Lifecycle has onset slope, half-life and persistence table',
   /Onset slope/.test(view().textContent) && /Persistence by topic and platform/.test(view().textContent));
@@ -101,6 +112,14 @@ const vtext = view().textContent;
   const iv = heads.findIndex((x) => x.includes('Observed views')), ir = heads.findIndex((x) => x.includes('Reach vs author norm'));
   const bad = [...view().querySelectorAll('table tbody tr')].filter((tr) => tr.children[iv]?.textContent.trim() === '\u2014' && tr.children[ir]?.textContent.trim() !== '\u2014');
   check('a group with no observed views shows reach as a dash, never 0.0x', iv > 0 && ir > 0 && bad.length === 0, String(bad.length));
+}
+{
+  const row = view().querySelector('table tbody tr');
+  drillCalls.length = 0; row.click(); await wait(500);
+  const u = drillCalls[0] || '';
+  check('clicking a breakout row opens the drill-down with the selected dates and its platform',
+    (() => { const m = doc.querySelector('.ex-ctl .cs')?.textContent.match(/(\d{4}-\d{2}-\d{2}) \u2192 (\d{4}-\d{2}-\d{2})/);
+      return !!m && u.includes('from=' + m[1]) && u.includes('to=' + m[2]) && /platform=/.test(u) && /topic_id=/.test(u); })(), u);
 }
 check('Viral card shows stored virality percentile + audience-normalised reach groups', /Virality pct/.test(vtext) && /Reach vs author norm/.test(vtext));
 check('Breakout groups table has rows', view().querySelectorAll('table tbody tr').length > 0, String(view().querySelectorAll('table tbody tr').length));
