@@ -5830,7 +5830,7 @@
       'Positive / negative = tone above +0.15 / below −0.15 (a provisional cut-off, not validated per language). ' +
       'Net sentiment score (NSS) = 100 × (positive share − negative share) and is compared within one platform only, ' +
       'because platform levels differ widely (about −70 to +60). Shares are shown only with at least 20 scored posts. ' +
-      'Tone is provisional: it has been checked by one labeller, not yet confirmed by a second.' }));
+      'Tone is provisional: it has only been checked against a draft labelling, not yet confirmed by a human reviewer.' }));
     var fmtPct = function (v) { return v == null ? '—' : Math.round(v * 100) + '%'; };
     var plat = exSentRows('platform').sort(function (a, b) { return b.n - a.n; });
     tableView(host, [
