@@ -5542,7 +5542,7 @@
      (topics, bursts, shared stories) and, for Viral Posts, the read-only /api/explore/viral.
      Nothing here writes anywhere. The date range is the shared S.from / S.to. */
 
-  var EX = { tile: 'topics', platforms: {}, q: '', entityUid: '', entityName: '', top: 25,
+  var EX = { tile: 'topics', platforms: {}, q: '', entityUid: '', entityName: '', top: 25, unclass: false,
              viral: null, viralKey: '' };
   var EX_TILES = [
     { k: 'topics', t: 'Trending Topics', s: "What's gaining attention?",
@@ -5601,14 +5601,39 @@
   function exMax(a, v) { return (isNum(v) && (a == null || v > a)) ? v : a; }
   function exMin(a, v) { return (isNum(v) && (a == null || v < a)) ? v : a; }
 
+  /* Stage of a topic from its own daily series (effort-normalised: posts per active channel, so a
+     collector ramp-up does not look like a surge). Compares the last 3 days with the 3 before them:
+       starting  = clearly up and the earlier period (same length, just before) was under 30% as large;  rising = up by 25% or more;
+       declining = down by 20% or more;  peak = flat and within 10% of the best 3-day level in the range;
+       steady = flat, below that level.  Needs 6+ days and 20+ posts in them, otherwise "too little data". */
+  function exSeriesStage(daily, days, prevTotal) {
+    if (days.length < 6) { return 'too little data'; }
+    function rate(d) { var o = daily[d]; return o && o.eff > 0 ? o.V / o.eff : 0; }
+    function posts(d) { return daily[d] ? daily[d].V : 0; }
+    var last6 = days.slice(-6), tot = 0;
+    last6.forEach(function (d) { tot += posts(d); });
+    if (tot < 20) { return 'too little data'; }
+    var r = days.map(rate), n = r.length;
+    function mean(a, i, j) { var x = 0; for (var k = i; k < j; k++) { x += a[k]; } return x / Math.max(1, j - i); }
+    var m3 = mean(r, n - 3, n), p3 = mean(r, n - 6, n - 3);
+    var best = m3;
+    for (var i = 3; i <= n; i++) { best = Math.max(best, mean(r, i - 3, i)); }
+    var curTotal = 0; days.forEach(function (d) { curTotal += posts(d); });
+    if (p3 > 0 && m3 >= 1.25 * p3) { return (prevTotal > 0 && prevTotal < 0.3 * curTotal) ? 'starting' : 'rising'; }   // no earlier period (full window) cannot be "starting"
+    if (p3 > 0 && m3 <= 0.8 * p3) { return 'declining'; }
+    return m3 >= 0.9 * best ? 'peak' : 'steady';
+  }
+
   function exTopicRows() {
     var g = exCells(), by = {};
     g.cells.forEach(function (c) {
       var r = c.r, tid = exTid(r.topic_id);
       var o = by[tid] || (by[tid] = { topic_id: tid, cur: 0, prev: 0, plats: {}, alertDays: {}, emer: null, minq: null,
-        mom: null, momDay: '', burstDays: {} });
+        mom: null, momDay: '', burstDays: {}, daily: {} });
       if (c.inPrev) { o.prev += (r.V || 0); }
       if (!c.inCur) { return; }
+      var dd = o.daily[c.d] || (o.daily[c.d] = { V: 0, eff: 0 });
+      dd.V += (r.V || 0); dd.eff += (isNum(r.effort) ? r.effort : 0);
       o.cur += (r.V || 0);
       if ((r.V || 0) > 0) { o.plats[r.platform] = true; }
       if (r.support_ok) {
@@ -5629,9 +5654,9 @@
         emergence: o.emer, minq: o.minq,
         alert_days: Object.keys(o.alertDays).length, burst_days: Object.keys(o.burstDays).length,
         momentum: o.mom, platforms: Object.keys(o.plats).length,
-        stage: exStage(eps.filter(function (e) { return exTid(e.topic_id) === tid; }), toDay)
+        stage: exSeriesStage(o.daily, g.days, o.prev)
       };
-    }).filter(function (r) { return r.posts > 0 && exTextOk(r.topic); });
+    }).filter(function (r) { return r.posts > 0 && exTextOk(r.topic) && (EX.unclass || r.topic !== 'Unclassified'); });
   }
 
   function exTopicsView(host) {
@@ -5643,7 +5668,9 @@
       'acceleration, semantic novelty and days-to-threshold; relative to this run’s panel, so read it as a ranking, not a probability). ' +
       'Alert days = days the volume jump was statistically significant (Benjamini–Hochberg q < 0.05); only cells with enough support are counted. ' +
       'Growth compares the selected days with the same number of days just before them (shown only with at least 10 earlier and 20 current posts). ' +
-      'Momentum is the recent direction of volume, not a forecast. Click a row to open its posts.' }));
+      'Momentum is the recent direction of volume, not a forecast. Stage compares the last 3 days with the 3 before, as posts per active channel ' +
+      '(starting / rising / peak / steady / declining; "too little data" under 20 posts in the last 6 days). ' +
+      '"Unclassified" (posts not assigned to a topic) is left out unless you tick the box. Click a row to open its posts.' }));
     tableView(host, [
       { k: 'topic', label: 'Topic' },
       { k: 'posts', label: 'Posts', num: true, fmt: function (v) { return fmtInt(v); } },
@@ -5666,7 +5693,7 @@
     var days = exDays(), toDay = days[days.length - 1] || S.to;
     var all = T('burst_episodes').filter(function (e) {
       return exPlatOk(e.platform) && day(e.end_day) >= S.from && day(e.start_day) <= S.to &&
-        exTextOk(topicLabel(exTid(e.topic_id)));
+        exTextOk(topicLabel(exTid(e.topic_id))) && (EX.unclass || topicLabel(exTid(e.topic_id)) !== 'Unclassified');
     });
     var rows = all.map(function (e) {
       return {
@@ -5807,7 +5834,7 @@
         pct: o.vn >= 20 ? o.vs / o.vn : null, n_rated: o.vn,
         reach: o.rn >= 20 ? o.rs / o.rn : null,
         views: o.hasViews ? o.views : null, eng: o.engN ? o.eng / o.engN : null };
-    }).filter(function (r) { return r.pct != null && exTextOk(r.topic); });
+    }).filter(function (r) { return r.pct != null && exTextOk(r.topic) && (EX.unclass || r.topic !== 'Unclassified'); });
   }
 
   function exViralView(host) {
@@ -5958,6 +5985,12 @@
       }
       ent.addEventListener('change', applyEnt);
       row2.appendChild(ent); row2.appendChild(dl);
+    }
+    if (EX.tile === 'topics' || EX.tile === 'life' || EX.tile === 'viral') {
+      var ub = h('input', { type: 'checkbox', id: 'ex-unclass' });
+      ub.checked = !!EX.unclass;
+      ub.addEventListener('change', function () { EX.unclass = ub.checked; render(); });
+      row2.appendChild(h('label', { class: 'ex-plat-opt' }, [ub, h('span', { text: ' Include Unclassified' })]));
     }
     var sel = h('select', { class: 'ex-top' });
     [10, 25, 50].forEach(function (v) {

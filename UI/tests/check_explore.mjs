@@ -66,6 +66,14 @@ const rows = (k) => { [...doc.querySelectorAll('.ex-tile')].find((x) => x.datase
 const topicHead = [...view().querySelectorAll('table thead th')].map((x) => x.textContent);
 check('Trending Topics uses the stored metrics (emergence, q-value, alert days, momentum)',
   ['Emergence', 'Min q', 'Alert days', 'Burst days', 'Momentum'].every((c) => topicHead.some((h) => h.includes(c))), topicHead.join(' | '));
+const topicNames = [...view().querySelectorAll('table tbody tr')].map((tr) => tr.children[0].textContent.trim());
+check('Unclassified is left out of Trending Topics by default', !topicNames.includes('Unclassified'), topicNames.join(', '));
+const stages = [...view().querySelectorAll('table tbody tr')].map((tr) => tr.children[topicHead.findIndex((x) => x.includes('Stage'))].textContent.trim());
+check('stage is one of the defined labels', stages.every((s) => ['starting', 'rising', 'peak', 'steady', 'declining', 'too little data'].includes(s)), [...new Set(stages)].join(', '));
+const cb = doc.getElementById('ex-unclass'); cb.checked = true; cb.dispatchEvent(new dom.window.Event('change')); await wait(500);
+check('ticking Include Unclassified brings it back',
+  [...view().querySelectorAll('table tbody tr')].some((tr) => tr.children[0].textContent.trim() === 'Unclassified'));
+const cb2 = doc.getElementById('ex-unclass'); cb2.checked = false; cb2.dispatchEvent(new dom.window.Event('change')); await wait(400);
 const lifeRows = await rows('life');
 check('Lifecycle has onset slope, half-life and persistence table',
   /Onset slope/.test(view().textContent) && /Persistence by topic and platform/.test(view().textContent));
