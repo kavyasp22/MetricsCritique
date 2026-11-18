@@ -11,8 +11,8 @@ Writes (same file, new tables; the stage-21 tables are not changed):
 Merges only happen inside the same parent type (PERSON / ORG / LOCATION / EVENT). Rules,
 strongest first; every merge records which rule fired so it can be reviewed and undone:
 
-  R1 normalise   same name after case, accents, punctuation, a leading "the", leading
-                 titles (president, general, dr ...) and a trailing 's are removed.
+  R1 normalise   same name after case, accents, punctuation, a leading "the" and a trailing
+                 's are removed; for PERSON only, also leading titles (president, dr ...).
   R2 gazetteer   a surface form listed in data/gazetteer.json joins that gazetteer entity's
                  group (data/gazetteer.json is curated; 86 entries).
   R3 surname     a one-word PERSON ("Putin") joins the full-name PERSON that ends with it
@@ -64,7 +64,7 @@ MIN_FULL_POSTS = 20
 DOMINANCE = 0.70
 
 
-def norm(name: str) -> str:
+def norm(name: str, etype: str = "PERSON") -> str:
     s = unicodedata.normalize("NFKD", name)
     s = "".join(c for c in s if not unicodedata.combining(c)).lower()
     s = re.sub(r"[’']s\b", "", s)
@@ -74,7 +74,9 @@ def norm(name: str) -> str:
         toks = toks[1:]
     # strip a leading title only if a real name follows ("prime minister" and
     # "minister of" stay as they are, "president trump" -> "trump")
-    while (len(toks) > 1 and toks[0] in TITLES and toks[1] not in STOP
+    # titles only exist in front of PEOPLE: "ms now", "general assembly" and
+    # "prime minister's office" are names of organisations, not a title plus a name
+    while (etype == "PERSON" and len(toks) > 1 and toks[0] in TITLES and toks[1] not in STOP
            and (toks[1] not in TITLES or len(toks) > 2)):
         toks = toks[1:]
     return " ".join(toks)
@@ -84,7 +86,7 @@ def main() -> int:
     con = duckdb.connect(str(DB), read_only=False)
     dim = con.execute("SELECT entity_uid, canonical_name, entity_type, distinct_posts "
                       "FROM entity_dim_prod").fetchdf()
-    dim["key"] = dim["canonical_name"].map(norm)
+    dim["key"] = [norm(n, t) for n, t in zip(dim["canonical_name"], dim["entity_type"])]
     dim = dim[dim["key"] != ""].copy()
     parent = {u: u for u in dim["entity_uid"]}      # union-find
     rule = {}                                       # alias_uid -> rule that merged it
@@ -116,7 +118,7 @@ def main() -> int:
     by_key = {(r.entity_type, r.key): r.entity_uid for r in dim.itertuples()}
     for ent in json.loads(GAZ.read_text(encoding="utf-8")):
         t = ent["entity_type"]
-        members = [by_key[(t, norm(sf))] for sf in ent["surface_forms"] if (t, norm(sf)) in by_key]
+        members = [by_key[(t, norm(sf, t))] for sf in ent["surface_forms"] if (t, norm(sf, t)) in by_key]
         for other in members[1:]:
             union(members[0], other, "R2_gazetteer")
 
