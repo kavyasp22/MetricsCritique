@@ -5552,7 +5552,9 @@
     { k: 'spread', t: 'Cross-Platform Spread', s: 'Where is the story spreading?',
       i: '<circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v5M12 12l-6 5M12 12l6 5"/>' },
     { k: 'life', t: 'Trend Lifecycle', s: 'Is it rising, peaking or declining?',
-      i: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 14l3-3 3 3 4-5"/>' }
+      i: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 14l3-3 3 3 4-5"/>' },
+    { k: 'sent', t: 'Sentiment Analysis', s: 'How is the tone shifting?',
+      i: '<circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9.5h.01M15 9.5h.01"/>' }
   ];
 
   function exAnyPlat() { return Object.keys(EX.platforms).some(function (k) { return EX.platforms[k]; }); }
@@ -5797,6 +5799,89 @@
   }
 
 
+  /* ---- Sentiment Analysis card: stored tone metrics only (counts are summed before shares are taken) ---- */
+  function exSentRows(groupBy) {
+    var g = exCells(), by = {};
+    g.cells.forEach(function (c) {
+      if (!c.inCur) { return; }
+      var r = c.r;
+      if (!(r.tone_n > 0)) { return; }
+      var key = groupBy === 'platform' ? r.platform : exTid(r.topic_id);
+      var o = by[key] || (by[key] = { key: key, n: 0, pos: 0, neg: 0, ebw: 0, ebn: 0, drops: 0 });
+      o.n += r.tone_n; o.pos += (r.tone_pos_n || 0); o.neg += (r.tone_neg_n || 0);
+      if (isNum(r.tone_eb)) { o.ebw += r.tone_eb * r.tone_n; o.ebn += r.tone_n; }
+      if (r.tone_drift_flag) { o.drops++; }
+    });
+    return Object.keys(by).map(function (k) {
+      var o = by[k], ok = o.n >= 20;
+      return {
+        key: k, name: groupBy === 'platform' ? k : topicLabel(k), n: o.n,
+        pos: ok ? o.pos / o.n : null, neg: ok ? o.neg / o.n : null,
+        neu: ok ? (o.n - o.pos - o.neg) / o.n : null,
+        nss: (ok && groupBy === 'platform') ? 100 * (o.pos - o.neg) / o.n : null,
+        tone: o.ebn >= 20 ? o.ebw / o.ebn : null, drops: o.drops
+      };
+    }).filter(function (r) { return exTextOk(r.name) && (groupBy === 'platform' || EX.unclass || r.name !== 'Unclassified'); });
+  }
+
+  function exSentView(host) {
+    host.appendChild(h('p', { class: 'cs', text: 'Tone of the posts’ wording, from the stored tone scores (multilingual model). ' +
+      'It measures the language of the post, not the poster’s attitude: a factual report of an attack or accident reads as negative. ' +
+      'Positive / negative = tone above +0.15 / below −0.15 (a provisional cut-off, not validated per language). ' +
+      'Net sentiment score (NSS) = 100 × (positive share − negative share) and is compared within one platform only, ' +
+      'because platform levels differ widely (about −70 to +60). Shares are shown only with at least 20 scored posts. ' +
+      'Tone is provisional: it has been checked by one labeller, not yet confirmed by a second.' }));
+    var fmtPct = function (v) { return v == null ? '—' : Math.round(v * 100) + '%'; };
+    var plat = exSentRows('platform').sort(function (a, b) { return b.n - a.n; });
+    tableView(host, [
+      { k: 'name', label: 'Platform' },
+      { k: 'n', label: 'Posts scored', num: true, fmt: fmtInt },
+      { k: 'pos', label: 'Positive', num: true, fmt: fmtPct },
+      { k: 'neu', label: 'Neutral', num: true, fmt: fmtPct },
+      { k: 'neg', label: 'Negative', num: true, fmt: fmtPct },
+      { k: 'nss', label: 'NSS', num: true, fmt: function (v) { return v == null ? '—' : (v >= 0 ? '+' : '') + Math.round(v); } },
+      { k: 'tone', label: 'Mean tone', num: true, fmt: function (v) { return v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(2); } },
+      { k: 'drops', label: 'Tone-drop days', num: true }
+    ], plat, {
+      open: true, label: 'Tone by platform (' + plat.length + ')',
+      rowDrill: function (r) { return { view: 'platform', params: { platform: r.key }, title: r.name + ' — recent posts' }; }
+    });
+    var top = exSentRows('topic').sort(function (a, b) { return b.n - a.n; }).slice(0, EX.top);
+    host.appendChild(h('p', { class: 'cs', text: 'By topic, all selected platforms together. Shares come from summed counts; the topic NSS is not shown ' +
+      'because it would mix platforms with different levels. Tone-drop days = days the tone fell significantly below its own previous 14 days ' +
+      '(Benjamini–Hochberg q < 0.05; a monitor, not an alert).' }));
+    tableView(host, [
+      { k: 'name', label: 'Topic' },
+      { k: 'n', label: 'Posts scored', num: true, fmt: fmtInt },
+      { k: 'pos', label: 'Positive', num: true, fmt: fmtPct },
+      { k: 'neu', label: 'Neutral', num: true, fmt: fmtPct },
+      { k: 'neg', label: 'Negative', num: true, fmt: fmtPct },
+      { k: 'tone', label: 'Mean tone', num: true, fmt: function (v) { return v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(2); } },
+      { k: 'drops', label: 'Tone-drop days', num: true }
+    ], top, {
+      open: true, label: 'Tone by topic (' + top.length + ')',
+      rowDrill: function (r) { return { view: 'topic', params: { topic_id: r.key }, title: r.name }; }
+    });
+    var cur = exSet(exDays());
+    var drops = T('metrics_daily').filter(function (r) {
+      return r.tone_drift_flag && cur[day(r.day)] && exPlatOk(r.platform) && exTextOk(topicLabel(exTid(r.topic_id)));
+    }).map(function (r) {
+      return { topic_id: exTid(r.topic_id), topic: topicLabel(exTid(r.topic_id)), platform: r.platform, day: day(r.day),
+        z: r.tone_drift_z, tone: r.tone_mean, n: r.tone_n };
+    }).sort(function (a, b) { return a.z - b.z; }).slice(0, EX.top);
+    host.appendChild(h('p', { class: 'cs', text: 'Significant tone drops in the selected range (tone clearly below the topic’s own recent level). ' +
+      'z = how many standard deviations below the previous 14 days. Click a row to open that day’s posts.' }));
+    tableView(host, [
+      { k: 'day', label: 'Day' }, { k: 'topic', label: 'Topic' }, { k: 'platform', label: 'Platform' },
+      { k: 'z', label: 'Drop (z)', num: true, fmt: function (v) { return v == null ? '—' : Number(v).toFixed(1); } },
+      { k: 'tone', label: 'Mean tone', num: true, fmt: function (v) { return v == null ? '—' : Number(v).toFixed(2); } },
+      { k: 'n', label: 'Posts scored', num: true, fmt: fmtInt }
+    ], drops, {
+      open: !!drops.length, label: 'Significant tone drops (' + drops.length + ')',
+      rowDrill: function (r) { return { view: 'topic', params: { topic_id: r.topic_id, platform: r.platform, day: r.day }, title: r.topic + ' · ' + r.platform, subtitle: r.day }; }
+    });
+  }
+
   function exPostCard(p, byViews) {
     var when = p.posted_at ? day(p.posted_at) : '';
     var metric = byViews ? (fmtCompact(p.views || 0) + ' views') : ('engagement ' + fmtCompact(p.engagement || 0));
@@ -5986,7 +6071,7 @@
       ent.addEventListener('change', applyEnt);
       row2.appendChild(ent); row2.appendChild(dl);
     }
-    if (EX.tile === 'topics' || EX.tile === 'life' || EX.tile === 'viral') {
+    if (EX.tile === 'topics' || EX.tile === 'life' || EX.tile === 'viral' || EX.tile === 'sent') {
       var ub = h('input', { type: 'checkbox', id: 'ex-unclass' });
       ub.checked = !!EX.unclass;
       ub.addEventListener('change', function () { EX.unclass = ub.checked; render(); });
@@ -6015,6 +6100,7 @@
     if (EX.tile === 'topics') { exTopicsView(card); }
     else if (EX.tile === 'viral') { exViralView(card); }
     else if (EX.tile === 'spread') { exSpreadView(card); }
+    else if (EX.tile === 'sent') { exSentView(card); }
     else { exLifeView(card); }
   };
 

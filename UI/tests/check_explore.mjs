@@ -49,8 +49,8 @@ check('Explore view shown, others hidden',
   doc.getElementById('advanced-view').style.display === 'none');
 check('data-mode is explore', doc.body.getAttribute('data-mode') === 'explore');
 const tiles = doc.querySelectorAll('.ex-tile');
-check('four tiles', tiles.length === 4, String(tiles.length));
-check('tile titles', ['Trending Topics', 'Viral Posts', 'Cross-Platform Spread', 'Trend Lifecycle']
+check('five tiles', tiles.length === 5, String(tiles.length));
+check('tile titles', ['Trending Topics', 'Viral Posts', 'Cross-Platform Spread', 'Trend Lifecycle', 'Sentiment Analysis']
   .every((t) => [...tiles].some((x) => x.textContent.includes(t))));
 check('Needs attention / status panel rendered', !!doc.querySelector('#explore-view .attn-box'));
 check('alerts show entity names, not raw keys like person:xyz', !/\b(person|org|location|event):[a-z_]/i.test(doc.querySelector('#explore-view').textContent.split('Social Signal Monitor')[0]) &&
@@ -88,6 +88,12 @@ check('Shared links tier renders with match confidence column', /Match/.test([..
 [...view().querySelectorAll('.df-preset-btn')].find((x) => x.textContent.includes('Similar meaning')).click(); await wait(500);
 check('Similar-meaning tier is labelled preliminary', /Preliminary/.test(view().textContent));
 check('Cross-Platform Spread shows rows or an explicit empty state', spreadRows > 0 || /No rows/.test(view().textContent), String(spreadRows));
+const sentRows = await rows('sent');
+const stext = view().textContent;
+check('Sentiment card shows tone by platform with rows', sentRows > 0 && /Tone by platform/.test(stext), String(sentRows));
+check('Sentiment card states what tone measures and that it is provisional', /wording/.test(stext) && /provisional/i.test(stext));
+check('Sentiment card has NSS and positive/neutral/negative columns', ['NSS', 'Positive', 'Neutral', 'Negative'].every((c) => stext.includes(c)));
+check('Sentiment card does not show hate scores', !/hate/i.test(stext));
 await rows('viral'); await wait(500);
 const vtext = view().textContent;
 {
