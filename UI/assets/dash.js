@@ -5609,6 +5609,24 @@
       i: '<circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9.5h.01M15 9.5h.01"/>' }
   ];
 
+  /* Explore opens on the LAST DAY of data; the Overview / Detailed pages keep their own range (default last 7 days).
+     The shared range S is swapped while Explore is showing and restored when leaving, so neither page changes the other. */
+  var EXS = { active: false, ov: null, range: null };
+  function exSyncRange() {
+    var m = document.body && document.body.getAttribute('data-mode');
+    if (m === 'explore' && !EXS.active && S.from) {
+      EXS.ov = { from: S.from, to: S.to, windowOnly: S.windowOnly };
+      var W = WINDAYS.length ? WINDAYS : ALLDAYS, last = W[W.length - 1];
+      var r = EXS.range || { from: last, to: last, windowOnly: true };
+      S.from = r.from; S.to = r.to; S.windowOnly = r.windowOnly;
+      EXS.active = true;
+    } else if (m !== 'explore' && m !== 'military' && EXS.active) {
+      EXS.range = { from: S.from, to: S.to, windowOnly: S.windowOnly };
+      if (EXS.ov) { S.from = EXS.ov.from; S.to = EXS.ov.to; S.windowOnly = EXS.ov.windowOnly; }
+      EXS.active = false;
+    }
+  }
+
   function exAnyPlat() { return Object.keys(EX.platforms).some(function (k) { return EX.platforms[k]; }); }
   function exPlatOk(p) { return !exAnyPlat() || !!EX.platforms[p]; }
   function exTid(t) { return t === 't005' ? 't004' : t; }
@@ -5765,7 +5783,7 @@
   function exWhyBullets(r, rank, n) {
     var b = [], nd = exDays().length;
     b.push(fmtInt(r.posts) + ' posts between ' + S.from + ' and ' + S.to + (r.growth != null
-      ? ' \u2014 ' + (r.growth >= 0 ? '+' : '') + Math.round(r.growth * 100) + '% against the previous ' + nd + ' days (' + fmtInt(r.prev) + ' posts).'
+      ? ' \u2014 ' + (r.growth >= 0 ? '+' : '') + Math.round(r.growth * 100) + '% against the previous ' + (nd === 1 ? 'day' : nd + ' days') + ' (' + fmtInt(r.prev) + ' posts).'
       : ' \u2014 too few posts in one of the two periods to compare growth.'));
     if (r.emergence != null) { b.push('Emergence score ' + Number(r.emergence).toFixed(2) + ', rank ' + rank + ' of ' + n + ' topics in this view.'); }
     b.push(r.alert_days > 0 ? r.alert_days + ' day' + (r.alert_days === 1 ? '' : 's') + ' where the jump in volume was statistically significant (q < ' + EX_RULES.alpha + ').'
@@ -6290,7 +6308,7 @@
   P.explore_controls = function (host) {
     var card = h('div', { class: 'card ex-ctl' });
     var row1 = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'DATE RANGE' })]);
-    [['Last 7d', 7], ['Last 14d', 14], ['Last 30d', 30], ['Full window', 0]].forEach(function (p) {
+    [['Last 1d', 1], ['Last 7d', 7], ['Last 14d', 14], ['Last 30d', 30], ['Full window', 0]].forEach(function (p) {
       var b = h('button', { type: 'button', class: 'df-preset-btn', text: p[0] });
       b.addEventListener('click', function () {
         var W = WINDAYS.length ? WINDAYS : ALLDAYS;
@@ -6812,6 +6830,7 @@
 
   var rafId = null;
   function render() {
+    exSyncRange();
     readTokens();
     applyFilters();
     updateFilterChrome();

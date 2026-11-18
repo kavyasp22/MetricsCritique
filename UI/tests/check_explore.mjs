@@ -47,7 +47,12 @@ const check = (n, c, d = '') => { c ? ok++ : bad++; console.log(`  ${c ? 'PASS' 
 
 const btn = doc.getElementById('mode-explore-btn');
 check('Explore button exists', !!btn);
+const ovFrom = doc.querySelector('#basic-date-strip .bds-date-input').value, ovTo = doc.querySelectorAll('#basic-date-strip .bds-date-input')[1].value;
 btn.click(); await wait(600);
+check('Explore opens on the last day of data only (1 day)', doc.getElementById('ex-date-from').value === '2026-10-26' && doc.getElementById('ex-date-to').value === '2026-10-26',
+  doc.getElementById('ex-date-from').value + ' -> ' + doc.getElementById('ex-date-to').value);
+check('Overview range was the last 7 days before Explore (unchanged default)', ovFrom === '2026-10-20' && ovTo === '2026-10-26', ovFrom + ' -> ' + ovTo);
+check('Explore has a Last 1d button', [...doc.querySelectorAll('#explore-view .df-preset-btn')].some((b) => b.textContent === 'Last 1d'));
 check('Explore view shown, others hidden',
   doc.getElementById('explore-view').style.display !== 'none' &&
   doc.getElementById('basic-view').style.display === 'none' &&
@@ -83,12 +88,13 @@ const cb2 = doc.getElementById('ex-unclass'); cb2.checked = false; cb2.dispatchE
   const row = view().querySelector('.tv table tbody tr');
   drillCalls.length = 0; row.click(); await wait(500);
   const u = drillCalls[0] || '';
-  check('clicking a Trending Topics row opens the drill-down with the selected dates', /from=2026-10-20/.test(u) && /to=2026-10-26/.test(u) && /topic_id=/.test(u), u);
+  check('clicking a Trending Topics row opens the drill-down with the selected dates', /from=2026-10-26/.test(u) && /to=2026-10-26/.test(u) && /topic_id=/.test(u), u);
 }
 const lifeRows = await rows('life');
 check('Lifecycle has onset slope, half-life and persistence table',
   /Onset slope/.test(view().textContent) && /Persistence by topic and platform/.test(view().textContent));
 check('Trend Lifecycle shows rows or an explicit empty state', lifeRows > 0 || /No rows/.test(view().textContent), String(lifeRows));
+[...doc.querySelectorAll('#explore-view .df-preset-btn')].find((b) => b.textContent === 'Last 7d').click(); await wait(500);
 await rows('spread');
 const storyCards = view().querySelectorAll('.ex-story').length;
 check('Spread opens as story cards by default', storyCards > 0, String(storyCards));
@@ -142,6 +148,9 @@ const q2 = doc.querySelector('.ex-q'); q2.value = 'zzzzqqq'; q2.dispatchEvent(ne
 await wait(600);
 check('a search with no match empties Trending Topics', view().querySelectorAll('.tv table tbody tr').length === 0);
 doc.getElementById('mode-basic-btn').click(); await wait(500);
+check('Overview range is still the last 7 days after using Explore (not changed to 1 day)',
+  (() => { const i = doc.querySelectorAll('#basic-date-strip .bds-date-input'); return i[0].value === '2026-10-20' && i[1].value === '2026-10-26'; })(),
+  [...doc.querySelectorAll('#basic-date-strip .bds-date-input')].map((x) => x.value).join(' -> '));
 check('switching back to Overview hides Explore', doc.getElementById('explore-view').style.display === 'none' &&
   doc.getElementById('basic-view').style.display !== 'none');
 check('zero script errors', errors.length === 0, errors.join(' | '));
