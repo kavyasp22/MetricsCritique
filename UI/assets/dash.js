@@ -315,11 +315,31 @@
          recency -- say which, rather than always claiming "most recent". */
       var byScore = (cfg.view === 'risk' || cfg.view === 'theme'
         || (cfg.view === 'alert' && (cfg.params || {}).dimension_type !== 'entity'));
-      subEl.textContent = 'Showing ' + data.shown + ' of ' + fmtInt(data.total) +
-        ' underlying posts, ' + (byScore ? 'strongest match first.' : 'most recent first.');
+      var sortKey = (cfg.params || {}).sort;
+      var SORT_LABEL = { views: 'views', engagement: 'engagement (likes + comments + shares)', shares: 'shares / forwards', likes: 'likes' };
+      var rangeTxt = (cfg.params || {}).from ? (' between ' + cfg.params.from + ' and ' + cfg.params.to) : '';
+      subEl.textContent = 'Showing ' + data.shown + ' of ' + fmtInt(data.total) + ' underlying posts' + rangeTxt + ', ' +
+        (sortKey ? ('ranked by ' + (SORT_LABEL[sortKey] || sortKey) + '.') : (byScore ? 'strongest match first.' : 'most recent first.'));
       if (!data.rows.length) {
         bodyEl.appendChild(h('div', { class: 'empty', text: 'No underlying posts matched this selection.' }));
         return;
+      }
+      if (sortKey) {
+        var ctl = h('div', { class: 'dr-sort' }, [h('span', { text: 'Rank by ' })]);
+        var sel = h('select', {});
+        ['views', 'engagement', 'shares', 'likes'].forEach(function (k) {
+          var o = h('option', { text: k === 'shares' ? 'shares / forwards' : k, value: k });
+          if (k === sortKey) { o.selected = true; }
+          sel.appendChild(o);
+        });
+        sel.addEventListener('change', function () {
+          var np = {}; Object.keys(cfg.params).forEach(function (k2) { np[k2] = cfg.params[k2]; });
+          np.sort = sel.value;
+          DRILL.open({ view: cfg.view, params: np, title: cfg.title, subtitle: cfg.subtitle });
+        });
+        ctl.appendChild(sel);
+        ctl.appendChild(h('span', { class: 'dr-sort-note', text: ' Compare within one platform only: views and engagement are different units.' }));
+        bodyEl.appendChild(ctl);
       }
       var list = h('div', { class: 'drill-list' });
       data.rows.forEach(function (row) { list.appendChild(drillRowNode(row)); });
@@ -360,7 +380,13 @@
     if (isNum(row.score)) { metaBits.push('score ' + fmt(row.score, 2)); }
     if (isNum(row.similarity)) { metaBits.push('similarity ' + fmt(row.similarity, 2)); }
     if (row.gray_zone) { metaBits.push('gray-zone'); }
+    var mx = [];
+    if (isNum(row.views)) { mx.push(fmtCompact(row.views) + ' views'); }
+    if (isNum(row.likes)) { mx.push(fmtCompact(row.likes) + ' likes'); }
+    if (isNum(row.comments)) { mx.push(fmtCompact(row.comments) + ' comments'); }
+    if (isNum(row.shares)) { mx.push(fmtCompact(row.shares) + ' shares / forwards'); }
     var wrap = h('div', { class: 'dr-row' }, [head]);
+    if (mx.length) { wrap.appendChild(h('div', { class: 'dr-metrics', text: mx.join(' \u00b7 ') })); }
     if (metaBits.length) { wrap.appendChild(h('div', { class: 'dr-meta', text: metaBits.join(' · ') })); }
     wrap.appendChild(h('div', { class: 'dr-text', text: row.text || '(no text captured)' }));
     if (row.url) {
@@ -5945,7 +5971,13 @@
       { k: 'eng', label: 'Engagement (log)', num: true, fmt: function (v) { return v == null ? '\u2014' : Number(v).toFixed(1); } }
     ], br, {
       open: true, label: 'Breakout groups by virality percentile (' + br.length + ')',
-      rowDrill: function (r) { return { view: 'topic', params: exDrillParams({ topic_id: r.topic_id, platform: r.platform }), title: r.topic + ' \u00b7 ' + r.platform, subtitle: S.from + ' \u2192 ' + S.to }; }
+      rowDrill: function (r) {
+        var pp = exDrillParams({ topic_id: r.topic_id, platform: r.platform });
+        // views where the platform has a view counter, else engagement; if it has neither (some platforms
+        // carry no counters at all) there is nothing to rank by, so keep the default newest-first order
+        if (r.views != null) { pp.sort = 'views'; } else if (r.eng != null && r.eng > 0) { pp.sort = 'engagement'; }
+        return { view: 'topic', params: pp, title: r.topic + ' \u00b7 ' + r.platform, subtitle: S.from + ' \u2192 ' + S.to };
+      }
     });
     host.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Top individual posts' }));
     var plats = PLATFORMS.filter(exPlatOk).join(',');

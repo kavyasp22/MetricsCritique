@@ -2884,3 +2884,7 @@ body[data-mode="explore"] #global-filters { display: none !important; }
 @media (max-width: 760px) { .ex-tiles, .ex-cols { grid-template-columns: 1fr; } }
 /* wide metric tables scroll inside their card instead of being cut off */
 #explore-view details.tv, #explore-view .tv-raw-wrap { overflow-x: auto; max-width: 100%; }
+.dr-metrics { font-size: 0.74rem; color: var(--gold, #e3bc4b); margin: 0.15rem 0; }
+.dr-sort { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: 0.78rem; margin: 0.4rem 0 0.6rem; }
+.dr-sort select { background: transparent; color: inherit; border: 1px solid rgba(143, 163, 191, 0.4); border-radius: 6px; padding: 0.15rem 0.4rem; font: inherit; }
+.dr-sort-note { color: var(--ink-3, #8fa3bf); }

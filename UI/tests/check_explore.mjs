@@ -117,9 +117,9 @@ const vtext = view().textContent;
   const row = view().querySelector('table tbody tr');
   drillCalls.length = 0; row.click(); await wait(500);
   const u = drillCalls[0] || '';
-  check('clicking a breakout row opens the drill-down with the selected dates and its platform',
+  check('clicking a breakout row opens the drill-down with the selected dates, its platform and a views/engagement ranking',
     (() => { const m = doc.querySelector('.ex-ctl .cs')?.textContent.match(/(\d{4}-\d{2}-\d{2}) \u2192 (\d{4}-\d{2}-\d{2})/);
-      return !!m && u.includes('from=' + m[1]) && u.includes('to=' + m[2]) && /platform=/.test(u) && /topic_id=/.test(u); })(), u);
+      return !!m && u.includes('from=' + m[1]) && u.includes('to=' + m[2]) && /platform=/.test(u) && /topic_id=/.test(u) && /sort=(views|engagement)/.test(u); })(), u);
 }
 check('Viral card shows stored virality percentile + audience-normalised reach groups', /Virality pct/.test(vtext) && /Reach vs author norm/.test(vtext));
 check('Breakout groups table has rows', view().querySelectorAll('table tbody tr').length > 0, String(view().querySelectorAll('table tbody tr').length));

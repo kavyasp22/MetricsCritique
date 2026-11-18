@@ -84,6 +84,47 @@ def _platform_clause(qs, where, params, col="p.platform"):
         params.extend(plats)
 
 
+_ENG_P = "(coalesce(p.likes,0)+coalesce(p.comments,0)+coalesce(p.shares,0))"
+_ENG_U = "(coalesce(likes,0)+coalesce(comments,0)+coalesce(shares,0))"
+SORTS = ("views", "engagement", "shares", "likes")
+POST_METRICS = ", p.views, p.likes, p.comments, p.shares"
+COMMENT_METRICS = ", CAST(NULL AS DOUBLE) AS views, c.likes AS likes, CAST(NULL AS DOUBLE) AS comments, CAST(NULL AS DOUBLE) AS shares"
+
+
+def _sort_key(qs):
+    s = qs.get("sort", [None])[0]
+    return s if s in SORTS else None
+
+
+def _order_posts(sort, col="p.posted_at"):
+    """ORDER BY for post rows. Views and engagement are different units, so each sort is only
+    meaningful within one platform; ties fall back to engagement, then a stable id."""
+    if sort == "views":
+        return f"p.views DESC NULLS LAST, {_ENG_P} DESC, p.posted_at DESC"
+    if sort == "engagement":
+        return f"{_ENG_P} DESC, p.posted_at DESC"
+    if sort == "shares":
+        return f"p.shares DESC NULLS LAST, {_ENG_P} DESC, p.posted_at DESC"
+    if sort == "likes":
+        return f"p.likes DESC NULLS LAST, {_ENG_P} DESC, p.posted_at DESC"
+    return f"{col} DESC"
+
+
+def _order_comments(sort):
+    # comments only carry a like count
+    return "c.likes DESC NULLS LAST, c.comment_uid" if sort in SORTS and sort != "shares" else "c.posted_at DESC"
+
+
+def _json_safe(o):
+    if isinstance(o, float):
+        return None if (o != o or o in (float("inf"), float("-inf"))) else o
+    if isinstance(o, dict):
+        return {k: _json_safe(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_json_safe(v) for v in o]
+    return o
+
+
 class NotYetPopulated(Exception):
     """A well-formed request against a declared-but-not-yet-built table.
 
@@ -166,14 +207,14 @@ def build_query(view: str, qs: dict):
                 SELECT c.comment_uid AS post_uid, 'youtube_comment' AS platform, c.posted_at,
                        coalesce(c.author_display_name, 'anonymous') AS author_name,
                        left(coalesce(c.text, ''), 500) AS text,
-                       '' AS url,
+                       '' AS url{COMMENT_METRICS},
                        pt.confidence,
                        count(*) OVER () AS total_rows
                 FROM analytics.comment_facts c
                 JOIN analytics.post_facts pf ON c.video_id = pf.native_id AND pf.platform = 'youtube_video'
                 JOIN analytics.post_topic pt ON pt.post_uid = pf.post_uid
                 WHERE {' AND '.join(c_where)}
-                ORDER BY c.posted_at DESC
+                ORDER BY {_order_comments(_sort_key(qs))}
             """
             return sql, params
 
@@ -193,7 +234,7 @@ def build_query(view: str, qs: dict):
                 if post_plats:
                     w.append("p.platform IN (" + ",".join("?" * len(post_plats)) + ")"); pr.extend(post_plats)
                 _day_clause(qs, w, pr)
-                parts.append(f"""SELECT {POST_COLS}, pt.confidence FROM analytics.post_topic pt
+                parts.append(f"""SELECT {POST_COLS}{POST_METRICS}, pt.confidence FROM analytics.post_topic pt
                     JOIN analytics.post_facts p ON p.post_uid = pt.post_uid WHERE {' AND '.join(w)}""")
                 uparams += pr
             if want_comments:
@@ -205,13 +246,18 @@ def build_query(view: str, qs: dict):
                 _day_clause(qs, w, pr, col="c.posted_at")
                 parts.append(f"""SELECT c.comment_uid AS post_uid, 'youtube_comment' AS platform, c.posted_at,
                        coalesce(c.author_display_name, 'anonymous') AS author_name,
-                       left(coalesce(c.text, ''), 500) AS text, '' AS url, pt.confidence
+                       left(coalesce(c.text, ''), 500) AS text, '' AS url{COMMENT_METRICS}, pt.confidence
                     FROM analytics.comment_facts c
                     JOIN analytics.post_facts pf ON c.video_id = pf.native_id AND pf.platform = 'youtube_video'
                     JOIN analytics.post_topic pt ON pt.post_uid = pf.post_uid WHERE {' AND '.join(w)}""")
                 uparams += pr
+            sk = _sort_key(qs)
+            order = {"views": f"views DESC NULLS LAST, {_ENG_U} DESC, posted_at DESC",
+                     "engagement": f"{_ENG_U} DESC, posted_at DESC",
+                     "shares": f"shares DESC NULLS LAST, {_ENG_U} DESC, posted_at DESC",
+                     "likes": f"likes DESC NULLS LAST, {_ENG_U} DESC, posted_at DESC"}.get(sk, "posted_at DESC")
             sql = ("SELECT *, count(*) OVER () AS total_rows FROM (" + " UNION ALL ".join(parts) +
-                   ") u ORDER BY posted_at DESC")
+                   f") u ORDER BY {order}")
             return sql, uparams
 
         if topic_id in ("t004", "t005"):
@@ -222,11 +268,11 @@ def build_query(view: str, qs: dict):
         _platform_clause(qs, where, params)
         _day_clause(qs, where, params)
         sql = f"""
-            SELECT {POST_COLS}, pt.confidence, count(*) OVER () AS total_rows
+            SELECT {POST_COLS}{POST_METRICS}, pt.confidence, count(*) OVER () AS total_rows
             FROM analytics.post_topic pt
             JOIN analytics.post_facts p ON p.post_uid = pt.post_uid
             WHERE {' AND '.join(where)}
-            ORDER BY p.posted_at DESC
+            ORDER BY {_order_posts(_sort_key(qs))}
         """
         return sql, params
 
@@ -870,7 +916,9 @@ class Handler(SimpleHTTPRequestHandler):
         pass  # quiet; avoid growing a log file for a local dev server
 
     def _json(self, obj, status=200):
-        body = json.dumps(obj, default=str).encode("utf-8")
+        # NaN / Infinity are not valid JSON: a browser's JSON.parse rejects the whole response, so
+        # missing numbers (for example a platform with no view counter) are sent as null.
+        body = json.dumps(_json_safe(obj), default=str).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -930,7 +978,10 @@ class Handler(SimpleHTTPRequestHandler):
                     cols = [c for c in rows.columns if c != "total_rows"]
                     records = rows[cols].to_dict(orient="records")
                     related = None
-                    if view not in ("cross_platform", "cross_platform_url", "cross_platform_event"):
+                    # a ranked-posts drill (sort=...) is a list of the top posts, not an exploration of
+                    # related items; skipping the related block avoids a ~8 s scan of all embeddings
+                    if (view not in ("cross_platform", "cross_platform_url", "cross_platform_event")
+                            and not _sort_key(qs)):
                         try:
                             seed = min((r["post_uid"] for r in records), default=None) if records else None
                             related = compute_related(cur, view, qs, seed)
