@@ -895,7 +895,7 @@ details.tv > summary {
 
 details.tv > summary::-webkit-details-marker { display: none; }
 details.tv > summary::before { content: "+ "; color: var(--gold); }
-details.tv[open] > summary::before { content: "\2212 "; }
+details.tv[open] > summary::before { content: "\2212\00a0"; }
 details.tv > summary:hover { color: var(--ink-2); }
 details.tv > summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
@@ -2932,6 +2932,6 @@ body[data-mode="explore"] #global-filters { display: none !important; }
 .ex-explain > summary { cursor: pointer; list-style: none; font-size: 0.85rem; color: var(--ink-2); }
 .ex-explain > summary::-webkit-details-marker { display: none; }
 .ex-explain > summary::before { content: "+ "; color: var(--gold); }
-.ex-explain[open] > summary::before { content: "\2212 "; }
+.ex-explain[open] > summary::before { content: "\2212\00a0"; }
 .ex-explain-hint { color: var(--gold); font-weight: 400; }
 .ex-explain > p { margin: 0.4rem 0 0; }
