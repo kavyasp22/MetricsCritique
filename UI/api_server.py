@@ -584,6 +584,53 @@ def _per_axis_cap(n_axes: int) -> int:
     return max(RELATED_MIN_PER_AXIS, -(-RELATED_LIMIT // n_axes))
 
 
+def explore_viral(qs: dict) -> dict:
+    """Explore page: posts ranked by observed views (and, separately, engagement for platforms
+    that give no view count). Read-only. Filters: from/to (day), platforms (csv), q (text),
+    entity_uid. Returns two lists so a post with no views is never ranked as zero."""
+    where, params = ["1=1"], []
+    d_from, d_to = qs.get("from", [""])[0], qs.get("to", [""])[0]
+    if d_from:
+        where.append("CAST(p.posted_at AS DATE) >= ?"); params.append(d_from)
+    if d_to:
+        where.append("CAST(p.posted_at AS DATE) <= ?"); params.append(d_to)
+    plats = [x for x in qs.get("platforms", [""])[0].split(",") if x]
+    if plats:
+        where.append("p.platform IN (" + ",".join("?" * len(plats)) + ")"); params += plats
+    q = qs.get("q", [""])[0].strip()
+    if q:
+        where.append("p.text ILIKE ?"); params.append("%" + q.replace("%", "") + "%")
+    ent = qs.get("entity_uid", [""])[0].strip()
+    join = ""
+    if ent:
+        join = "JOIN (SELECT DISTINCT post_uid FROM geo.entity_mentions WHERE entity_uid = ?) em ON em.post_uid = p.post_uid"
+        params_join = [ent]
+    else:
+        params_join = []
+    limit = _limit(qs)
+    base = (f"SELECT {POST_COLS}, p.views, p.likes, p.comments, p.shares, "
+            f"coalesce(p.likes,0)+coalesce(p.comments,0)+coalesce(p.shares,0) AS engagement "
+            f"FROM analytics.post_facts p {join} WHERE {' AND '.join(where)}")
+    cur = _main_con.cursor()
+    try:
+        with_views = cur.execute(base + " AND p.views > 0 ORDER BY p.views DESC, p.post_uid LIMIT ?",
+                                 params_join + params + [limit]).fetchdf().to_dict(orient="records")
+        no_views = cur.execute(base + " AND (p.views IS NULL OR p.views = 0) AND "
+                               "(coalesce(p.likes,0)+coalesce(p.comments,0)+coalesce(p.shares,0)) > 0 "
+                               "ORDER BY engagement DESC, p.post_uid LIMIT ?",
+                               params_join + params + [limit]).fetchdf().to_dict(orient="records")
+        total = cur.execute(f"SELECT count(*) FROM analytics.post_facts p {join} WHERE {' AND '.join(where)}",
+                            params_join + params).fetchall()[0][0]
+    finally:
+        cur.close()
+    def clean(rows):
+        # missing counts come back from pandas as NaN, which is not valid JSON (a browser's
+        # JSON.parse rejects the whole response); send null instead
+        return [{k: (None if isinstance(v, float) and v != v else v) for k, v in r.items()} for r in rows]
+
+    return {"total_posts": int(total), "with_views": clean(with_views), "without_views": clean(no_views)}
+
+
 def compute_related(cur, view: str, qs: dict, seed_post_uid):
     sel_sql, sel_params = build_query(view, qs)
     # Deterministic scope sample. `SELECT DISTINCT ... LIMIT n` discards the
@@ -809,6 +856,12 @@ class Handler(SimpleHTTPRequestHandler):
             raw = qs.get("domains", [""])[0]
             doms = tuple(d for d in raw.split(",") if d) or DEFAULT_MILITARY
             self._json(live_overview(days, doms))
+            return
+        if parsed.path == "/api/explore/viral":
+            try:
+                self._json(explore_viral(parse_qs(parsed.query)))
+            except Exception as e:
+                self._json({"error": f"query failed: {e}"}, status=500)
             return
         if parsed.path == "/api/drill":
             qs = parse_qs(parsed.query)

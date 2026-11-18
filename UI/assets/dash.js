@@ -5524,28 +5524,383 @@
     host.appendChild(footer);
   };
 
+  /* =============================================================== Explore page
+     A user-driven page: four tiles (Trending Topics, Viral Posts, Cross-Platform Spread,
+     Trend Lifecycle), each with its own filters. Reads the snapshot tables already loaded
+     (topics, bursts, shared stories) and, for Viral Posts, the read-only /api/explore/viral.
+     Nothing here writes anywhere. The date range is the shared S.from / S.to. */
+
+  var EX = { tile: 'topics', platforms: {}, q: '', entityUid: '', entityName: '', top: 25,
+             viral: null, viralKey: '' };
+  var EX_TILES = [
+    { k: 'topics', t: 'Trending Topics', s: "What's gaining attention?",
+      i: '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>' },
+    { k: 'viral', t: 'Viral Posts', s: 'Which posts are breaking out?',
+      i: '<path d="M12 3c1 3 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-3-1-5 1-9z"/>' },
+    { k: 'spread', t: 'Cross-Platform Spread', s: 'Where is the story spreading?',
+      i: '<circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v5M12 12l-6 5M12 12l6 5"/>' },
+    { k: 'life', t: 'Trend Lifecycle', s: 'Is it rising, peaking or declining?',
+      i: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 14l3-3 3 3 4-5"/>' }
+  ];
+
+  function exAnyPlat() { return Object.keys(EX.platforms).some(function (k) { return EX.platforms[k]; }); }
+  function exPlatOk(p) { return !exAnyPlat() || !!EX.platforms[p]; }
+  function exTid(t) { return t === 't005' ? 't004' : t; }
+  function exDays() {
+    return ALLDAYS.filter(function (d) { return d >= S.from && d <= S.to; });
+  }
+  function exPrevDays(days) {
+    if (!days.length) { return []; }
+    var i = ALLDAYS.indexOf(days[0]);
+    return ALLDAYS.slice(Math.max(0, i - days.length), i);
+  }
+  function exSet(a) { var o = {}; a.forEach(function (d) { o[d] = true; }); return o; }
+  function exTextOk(s) { return !EX.q || String(s || '').toLowerCase().indexOf(EX.q.toLowerCase()) >= 0; }
+  function exDayNum(d) { return Math.round(Date.parse(day(d)) / 86400000); }
+
+  /* stage of a topic at the end of the selected range, from its burst episodes */
+  function exStage(eps, toDay) {
+    var best = null;
+    eps.forEach(function (e) {
+      if (day(e.start_day) > toDay) { return; }
+      if (!best || day(e.peak_day) > day(best.peak_day)) { best = e; }
+    });
+    if (!best) { return 'steady'; }
+    var to = exDayNum(toDay), pk = exDayNum(best.peak_day), st = exDayNum(best.start_day), en = exDayNum(best.end_day);
+    if (to > en + 1) { return 'steady'; }
+    if (to < pk) { return (to - st) <= 2 ? 'starting' : 'rising'; }
+    if (to - pk <= 1) { return 'peak'; }
+    return 'declining';
+  }
+
+  function exTopicRows() {
+    var days = exDays(), prev = exPrevDays(days);
+    var cur = exSet(days), pre = exSet(prev), win = exSet(WINDAYS);
+    var by = {};
+    T('metrics_daily').forEach(function (r) {
+      var d = day(r.day);
+      if (!exPlatOk(r.platform)) { return; }
+      var inCur = cur[d] && (!S.windowOnly || win[d]), inPrev = pre[d];
+      if (!inCur && !inPrev) { return; }
+      var tid = exTid(r.topic_id);
+      var o = by[tid] || (by[tid] = { topic_id: tid, cur: 0, prev: 0, plats: {}, alerts: 0 });
+      if (inCur) { o.cur += (r.V || 0); if ((r.V || 0) > 0) { o.plats[r.platform] = true; } }
+      if (inPrev) { o.prev += (r.V || 0); }
+    });
+    T('alert_candidates').forEach(function (a) {
+      if (!cur[day(a.day)]) { return; }
+      if (a.platform != null && !exPlatOk(a.platform)) { return; }
+      var tid = exTid(a.topic_id);
+      if (by[tid]) { by[tid].alerts++; }
+    });
+    var toDay = days[days.length - 1] || S.to;
+    var eps = T('burst_episodes').filter(function (e) { return exPlatOk(e.platform); });
+    return Object.keys(by).map(function (tid) {
+      var o = by[tid];
+      var ok = o.prev >= 10 && o.cur >= 20;
+      return {
+        topic_id: tid, topic: topicLabel(tid), posts: o.cur, prev: o.prev,
+        growth: ok ? (o.cur - o.prev) / o.prev : null,
+        platforms: Object.keys(o.plats).length, alerts: o.alerts,
+        stage: exStage(eps.filter(function (e) { return exTid(e.topic_id) === tid; }), toDay)
+      };
+    }).filter(function (r) { return r.posts > 0 && exTextOk(r.topic); });
+  }
+
+  function exTopicsView(host) {
+    var rows = exTopicRows().sort(function (a, b) {
+      var ga = a.growth == null ? -Infinity : a.growth, gb = b.growth == null ? -Infinity : b.growth;
+      return gb - ga || b.posts - a.posts;
+    }).slice(0, EX.top);
+    host.appendChild(h('p', { class: 'cs', text: 'Growth compares the selected days with the same number of days just before them. ' +
+      'Shown only where the earlier period had at least 10 posts and this one at least 20 (otherwise "—"). ' +
+      'Click a row to open its posts.' }));
+    tableView(host, [
+      { k: 'topic', label: 'Topic' },
+      { k: 'posts', label: 'Posts', num: true, fmt: function (v) { return fmtInt(v); } },
+      { k: 'growth', label: 'Growth vs earlier period', num: true,
+        fmt: function (v) { return (v >= 0 ? '+' : '') + Math.round(v * 100) + '%'; } },
+      { k: 'platforms', label: 'Platforms', num: true },
+      { k: 'stage', label: 'Stage' },
+      { k: 'alerts', label: 'Alerts', num: true }
+    ], rows, {
+      open: true, label: 'Trending topics (' + rows.length + ')',
+      rowDrill: function (r) { return { view: 'topic', params: { topic_id: r.topic_id }, title: r.topic }; }
+    });
+  }
+
+  function exLifeView(host) {
+    var days = exDays(), toDay = days[days.length - 1] || S.to;
+    var all = T('burst_episodes').filter(function (e) {
+      return exPlatOk(e.platform) && day(e.end_day) >= S.from && day(e.start_day) <= S.to &&
+        exTextOk(topicLabel(exTid(e.topic_id)));
+    });
+    var rows = all.map(function (e) {
+      return {
+        topic_id: exTid(e.topic_id), topic: topicLabel(exTid(e.topic_id)), platform: e.platform,
+        start: day(e.start_day), peak: day(e.peak_day), end: day(e.end_day), n_days: e.n_days,
+        peak_V: e.peak_V, total_V: e.total_V, half_life: e.half_life_days,
+        stage: exStage([e], toDay)
+      };
+    }).sort(function (a, b) { return b.peak < a.peak ? -1 : (b.peak > a.peak ? 1 : 0); }).slice(0, EX.top * 4);
+    var cnt = {}; rows.forEach(function (r) { cnt[r.stage] = (cnt[r.stage] || 0) + 1; });
+    host.appendChild(h('p', { class: 'cs', text: 'Each row is one burst of activity for a topic on a platform. Stage is judged at the end of the selected range: ' +
+      'starting, rising, peak, declining, or steady (no active burst). ' +
+      Object.keys(cnt).map(function (k) { return cnt[k] + ' ' + k; }).join(' · ') }));
+    tableView(host, [
+      { k: 'topic', label: 'Topic' }, { k: 'platform', label: 'Platform' }, { k: 'stage', label: 'Stage' },
+      { k: 'start', label: 'Started' }, { k: 'peak', label: 'Peak day' }, { k: 'end', label: 'Ended' },
+      { k: 'n_days', label: 'Days', num: true },
+      { k: 'peak_V', label: 'Peak posts/day', num: true },
+      { k: 'total_V', label: 'Total posts', num: true },
+      { k: 'half_life', label: 'Half-life (days)', num: true, fmt: function (v) { return Number(v).toFixed(1); } }
+    ], rows, {
+      open: true, label: 'Burst episodes in the selected range (' + rows.length + ')',
+      rowDrill: function (r) {
+        return { view: 'topic', params: { topic_id: r.topic_id, platform: r.platform, day: r.peak },
+                 title: r.topic + ' · ' + r.platform, subtitle: 'peak day ' + r.peak };
+      }
+    });
+  }
+
+  function exSpreadView(host) {
+    var rows = T('cross_platform_stories').filter(function (s) {
+      var d = s.origin_time ? day(s.origin_time) : null;
+      var pl = Array.isArray(s.platforms) ? s.platforms : [s.platforms];
+      return d && d >= S.from && d <= S.to && pl.some(exPlatOk) && exTextOk(s.snippet);
+    }).map(function (s) {
+      var pl = Array.isArray(s.platforms) ? s.platforms : [s.platforms];
+      return {
+        story_id: s.story_id, snippet: s.snippet, origin: s.origin_platform, platforms: pl.join(', '),
+        n_platforms: s.n_platforms, posts: s.n_posts, spread_h: s.spread_duration_hours,
+        views: s.observed_views || 0, eng: s.viewless_engagement || 0, first: day(s.origin_time)
+      };
+    }).sort(function (a, b) { return (b.views + b.eng) - (a.views + a.eng); }).slice(0, EX.top * 4);
+    host.appendChild(h('p', { class: 'cs', text: 'Stories are groups of near-identical posts on different platforms. "Earliest observed" is ' +
+      'the first post we saw, not the confirmed origin. Views are observed counts only (no estimates). Click a row to see every post.' }));
+    tableView(host, [
+      { k: 'snippet', label: 'Story (sample text)', wrap: true },
+      { k: 'origin', label: 'Earliest observed on' },
+      { k: 'platforms', label: 'Platforms' },
+      { k: 'posts', label: 'Posts', num: true },
+      { k: 'spread_h', label: 'Observed spread (h)', num: true, fmt: function (v) { return Number(v).toFixed(1); } },
+      { k: 'views', label: 'Observed views', num: true, fmt: function (v) { return fmtCompact(v); } },
+      { k: 'first', label: 'First seen' }
+    ], rows, {
+      open: true, label: 'Cross-platform stories (' + rows.length + ')',
+      rowDrill: function (r) {
+        return { view: 'cross_platform', params: { story_id: r.story_id },
+                 title: 'Story spread (earliest observed: ' + r.origin + ')' };
+      }
+    });
+  }
+
+  function exPostCard(p, byViews) {
+    var when = p.posted_at ? day(p.posted_at) : '';
+    var metric = byViews ? (fmtCompact(p.views || 0) + ' views') : ('engagement ' + fmtCompact(p.engagement || 0));
+    var title = h('div', { class: 'ex-post-top' }, [
+      h('b', { text: p.platform }), h('span', { text: ' · ' + when + ' · ' }),
+      h('span', { class: 'ex-post-m', text: metric }),
+      h('span', { text: ' · ' + (p.likes != null ? fmtCompact(p.likes) + ' likes' : '') +
+        (p.shares != null ? ' · ' + fmtCompact(p.shares) + ' shares' : '') })
+    ]);
+    var kids = [title, h('div', { class: 'ex-post-text', text: String(p.text || '').slice(0, 300) })];
+    if (p.url && /^https?:/i.test(p.url)) {
+      var a = h('a', { text: 'source post', href: p.url });
+      a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer');
+      kids.push(h('div', { class: 'ex-post-link' }, [a]));
+    }
+    return h('div', { class: 'ex-post' }, kids);
+  }
+
+  function exViralView(host) {
+    var plats = PLATFORMS.filter(exPlatOk).join(',');
+    var key = [S.from, S.to, plats, EX.q, EX.entityUid, EX.top].join('|');
+    host.appendChild(h('p', { class: 'cs', text: 'Posts ranked by observed views. Platforms that give no view count are listed separately, ' +
+      'ranked by likes + comments + shares, and are never ranked as zero views. Views are observed counts, not estimates; ' +
+      'a post with the most views is not necessarily the most influential.' + (EX.entityName ? ' Filtered to posts naming ' + EX.entityName + '.' : '') }));
+    var body = h('div', { class: 'ex-viral' });
+    host.appendChild(body);
+    function paint(d) {
+      body.textContent = '';
+      body.appendChild(h('p', { class: 'cs', text: fmtInt(d.total_posts) + ' posts match the filters.' }));
+      var a = h('div', { class: 'ex-col' }, [h('div', { class: 'ct', text: 'Ranked by views (' + d.with_views.length + ')' })]);
+      d.with_views.forEach(function (p) { a.appendChild(exPostCard(p, true)); });
+      if (!d.with_views.length) { empty(a, 'No posts with view counts match.'); }
+      var b = h('div', { class: 'ex-col' }, [h('div', { class: 'ct', text: 'No view count — ranked by engagement (' + d.without_views.length + ')' })]);
+      d.without_views.forEach(function (p) { b.appendChild(exPostCard(p, false)); });
+      if (!d.without_views.length) { empty(b, 'None.'); }
+      body.appendChild(h('div', { class: 'ex-cols' }, [a, b]));
+    }
+    if (EX.viral && EX.viralKey === key) { paint(EX.viral); return; }
+    body.appendChild(h('div', { class: 'empty', text: 'Loading…' }));
+    var url = '/api/explore/viral?from=' + encodeURIComponent(S.from) + '&to=' + encodeURIComponent(S.to) +
+      '&platforms=' + encodeURIComponent(plats) + '&q=' + encodeURIComponent(EX.q) +
+      '&entity_uid=' + encodeURIComponent(EX.entityUid) + '&limit=' + EX.top;
+    fetch(url, { cache: 'no-store' }).then(function (r) {
+      if (!r.ok) { throw new Error('HTTP ' + r.status); }
+      return r.json();
+    }).then(function (d) {
+      if (d.error) { throw new Error(d.error); }
+      EX.viral = d; EX.viralKey = key;
+      if (body.isConnected !== false) { paint(d); }
+    }).catch(function (err) {
+      body.textContent = '';
+      empty(body, 'Viral posts need the API server (' + err.message + '). The static snapshot has no post-level data.');
+    });
+  }
+
+  function exEntityOptions() {
+    var rows = T('entity_dim').slice(0, 1500);
+    var map = {};
+    rows.forEach(function (r) { if (!map[r.canonical_name]) { map[r.canonical_name] = r; } });
+    return map;
+  }
+
+  P.explore_attention = function (host) { P.basic_attention(host); };
+  P.explore_alerts = function (host) { P.basic_alerts_list(host); };
+
+  P.explore_tiles = function (host) {
+    var card = h('div', { class: 'card ex-card' });
+    card.appendChild(h('div', { class: 'ex-card-t', text: 'Social Signal Monitor' }));
+    var grid = h('div', { class: 'ex-tiles' });
+    EX_TILES.forEach(function (t) {
+      var b = h('button', { type: 'button', class: 'ex-tile' + (EX.tile === t.k ? ' active' : '') });
+      b.setAttribute('data-tile', t.k);
+      b.setAttribute('aria-pressed', EX.tile === t.k ? 'true' : 'false');
+      var ic = document.createElementNS(SVGNS, 'svg');
+      ic.setAttribute('viewBox', '0 0 24 24'); ic.setAttribute('width', '26'); ic.setAttribute('height', '26');
+      ic.setAttribute('fill', 'none'); ic.setAttribute('stroke', 'currentColor');
+      ic.setAttribute('stroke-width', '2'); ic.setAttribute('stroke-linecap', 'round'); ic.setAttribute('stroke-linejoin', 'round');
+      ic.innerHTML = t.i;
+      b.appendChild(ic);
+      b.appendChild(h('div', { class: 'ex-tile-t', text: t.t }));
+      b.appendChild(h('div', { class: 'ex-tile-s', text: t.s }));
+      b.addEventListener('click', function () { EX.tile = t.k; render(); });
+      grid.appendChild(b);
+    });
+    card.appendChild(grid);
+    host.appendChild(card);
+  };
+
+  P.explore_controls = function (host) {
+    var card = h('div', { class: 'card ex-ctl' });
+    var row1 = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'DATE RANGE' })]);
+    [['Last 7d', 7], ['Last 14d', 14], ['Last 30d', 30], ['Full window', 0]].forEach(function (p) {
+      var b = h('button', { type: 'button', class: 'df-preset-btn', text: p[0] });
+      b.addEventListener('click', function () {
+        var W = WINDAYS.length ? WINDAYS : ALLDAYS;
+        S.to = W[W.length - 1];
+        S.from = p[1] ? W[Math.max(0, W.length - p[1])] : W[0];
+        S.windowOnly = true; render();
+      });
+      row1.appendChild(b);
+    });
+    row1.appendChild(h('span', { class: 'cs', text: S.from + ' → ' + S.to }));
+    card.appendChild(row1);
+
+    var row2 = h('div', { class: 'ex-row' });
+    var det = h('details', { class: 'ex-plat' });
+    var n = exAnyPlat() ? Object.keys(EX.platforms).filter(function (k) { return EX.platforms[k]; }).length : 0;
+    det.appendChild(h('summary', { text: n ? n + ' platforms' : 'All platforms' }));
+    var menu = h('div', { class: 'ex-plat-menu' });
+    var acts = h('div', { class: 'ex-plat-acts' });
+    var sa = h('button', { type: 'button', text: 'Select all' }), cl = h('button', { type: 'button', text: 'Clear' });
+    sa.addEventListener('click', function () { PLATFORMS.forEach(function (p) { EX.platforms[p] = true; }); EX.viral = null; render(); });
+    cl.addEventListener('click', function () { EX.platforms = {}; EX.viral = null; render(); });
+    acts.appendChild(sa); acts.appendChild(cl); menu.appendChild(acts);
+    PLATFORMS.forEach(function (p) {
+      var cb = h('input', { type: 'checkbox' });
+      cb.checked = !!EX.platforms[p];
+      cb.addEventListener('change', function () { EX.platforms[p] = cb.checked; EX.viral = null; });
+      menu.appendChild(h('label', { class: 'ex-plat-opt' }, [cb, h('span', { text: ' ' + p })]));
+    });
+    var ap = h('button', { type: 'button', class: 'df-preset-btn', text: 'Apply platforms' });
+    ap.addEventListener('click', function () { render(); });
+    menu.appendChild(ap);
+    det.appendChild(menu); row2.appendChild(det);
+
+    var q = h('input', { type: 'text', class: 'ex-q', placeholder: EX.tile === 'viral' ? 'Search post text…' : 'Search topic or text…' });
+    q.value = EX.q;
+    function applyQ() { EX.q = q.value.trim(); EX.viral = null; render(); }
+    q.addEventListener('keydown', function (e) { if (e.key === 'Enter') { applyQ(); } });
+    row2.appendChild(q);
+    if (EX.tile === 'viral') {
+      var opts = exEntityOptions();
+      var dl = h('datalist', { id: 'ex-ent-list' });
+      Object.keys(opts).forEach(function (nm) {
+        var o = document.createElement('option'); o.value = nm;
+        o.label = opts[nm].entity_type + ' · ' + fmtInt(opts[nm].distinct_posts) + ' posts';
+        dl.appendChild(o);
+      });
+      var ent = h('input', { type: 'text', class: 'ex-q', placeholder: 'Entity (type to pick)…' });
+      ent.setAttribute('list', 'ex-ent-list'); ent.value = EX.entityName;
+      function applyEnt() {
+        var r = opts[ent.value.trim()];
+        EX.entityName = r ? r.canonical_name : ''; EX.entityUid = r ? r.entity_uid : '';
+        EX.viral = null; render();
+      }
+      ent.addEventListener('change', applyEnt);
+      row2.appendChild(ent); row2.appendChild(dl);
+    }
+    var sel = h('select', { class: 'ex-top' });
+    [10, 25, 50].forEach(function (v) {
+      var o = h('option', { text: 'Show ' + v, value: String(v) }); if (EX.top === v) { o.selected = true; } sel.appendChild(o);
+    });
+    sel.addEventListener('change', function () { EX.top = parseInt(sel.value, 10); EX.viral = null; render(); });
+    row2.appendChild(sel);
+    var go = h('button', { type: 'button', class: 'df-preset-btn', text: 'Search' });
+    go.addEventListener('click', applyQ);
+    var rs = h('button', { type: 'button', class: 'df-preset-btn', text: 'Reset' });
+    rs.addEventListener('click', function () { EX.platforms = {}; EX.q = ''; EX.entityUid = ''; EX.entityName = ''; EX.viral = null; render(); });
+    row2.appendChild(go); row2.appendChild(rs);
+    card.appendChild(row2);
+    host.appendChild(card);
+  };
+
+  P.explore_view = function (host) {
+    var t = EX_TILES.filter(function (x) { return x.k === EX.tile; })[0] || EX_TILES[0];
+    var card = h('div', { class: 'card' });
+    card.appendChild(h('div', { class: 'ct', text: t.t }));
+    host.appendChild(card);
+    if (EX.tile === 'topics') { exTopicsView(card); }
+    else if (EX.tile === 'viral') { exViralView(card); }
+    else if (EX.tile === 'spread') { exSpreadView(card); }
+    else { exLifeView(card); }
+  };
+
   function initModeToggle() {
     var basicBtn = document.getElementById('mode-basic-btn');
     var advBtn = document.getElementById('mode-advanced-btn');
+    var expBtn = document.getElementById('mode-explore-btn');
     var basicView = document.getElementById('basic-view');
     var advView = document.getElementById('advanced-view');
+    var expView = document.getElementById('explore-view');
     var link = document.getElementById('basic-to-advanced-link');
     if (!basicBtn || !advBtn || !basicView || !advView) { return; }
     function setMode(mode) {
-      var isBasic = mode !== 'advanced';
-      document.body.setAttribute('data-mode', isBasic ? 'basic' : 'advanced');
-      basicView.style.display = isBasic ? '' : 'none';
-      advView.style.display = isBasic ? 'none' : '';
-      basicBtn.setAttribute('aria-pressed', isBasic ? 'true' : 'false');
-      advBtn.setAttribute('aria-pressed', isBasic ? 'false' : 'true');
-      try { localStorage.setItem('z-mode', isBasic ? 'basic' : 'advanced'); } catch (e) { /* file:// */ }
+      var m = (mode === 'advanced' || mode === 'explore') ? mode : 'basic';
+      if (m === 'explore' && !expView) { m = 'basic'; }
+      document.body.setAttribute('data-mode', m);
+      basicView.style.display = m === 'basic' ? '' : 'none';
+      advView.style.display = m === 'advanced' ? '' : 'none';
+      if (expView) { expView.style.display = m === 'explore' ? '' : 'none'; }
+      var mv = document.getElementById('military-view');
+      if (mv) { mv.style.display = 'none'; }
+      basicBtn.setAttribute('aria-pressed', m === 'basic' ? 'true' : 'false');
+      advBtn.setAttribute('aria-pressed', m === 'advanced' ? 'true' : 'false');
+      if (expBtn) { expBtn.setAttribute('aria-pressed', m === 'explore' ? 'true' : 'false'); }
+      var mb = document.getElementById('mode-military-btn');
+      if (mb) { mb.setAttribute('aria-pressed', 'false'); }
+      try { localStorage.setItem('z-mode', m); } catch (e) { /* file:// */ }
       render();
     }
     var stored = null;
     try { stored = localStorage.getItem('z-mode'); } catch (e) { stored = null; }
-    setMode(stored === 'advanced' ? 'advanced' : 'basic');
+    setMode(stored === 'advanced' || stored === 'explore' ? stored : 'basic');
     basicBtn.addEventListener('click', function () { setMode('basic'); });
     advBtn.addEventListener('click', function () { setMode('advanced'); });
+    if (expBtn) { expBtn.addEventListener('click', function () { setMode('explore'); }); }
     if (link) { link.addEventListener('click', function (e) { e.preventDefault(); setMode('advanced'); }); }
   }
 
@@ -5916,7 +6271,7 @@
     applyFilters();
     updateFilterChrome();
     var mode = (document.body && document.body.getAttribute('data-mode')) || 'basic';
-    var selector = (mode === 'basic') ? '#basic-view [data-panel]' : '#advanced-view [data-panel]';
+    var selector = (mode === 'basic') ? '#basic-view [data-panel]' : (mode === 'explore' ? '#explore-view [data-panel]' : '#advanced-view [data-panel]');
 
     document.querySelectorAll(selector).forEach(function (host) {
       var sec = host.closest ? host.closest('section.sec') : null;

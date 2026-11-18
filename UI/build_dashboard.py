@@ -1715,6 +1715,7 @@ silently vanishing from every denominator.</div>
     <div class="mode-toggle" role="tablist" aria-label="Dashboard mode">
       <button type="button" id="mode-basic-btn" aria-pressed="true">Overview</button>
       <button type="button" id="mode-advanced-btn" aria-pressed="false">Detailed</button>
+      <button type="button" id="mode-explore-btn" aria-pressed="false">Explore</button>
       <button type="button" id="mode-military-btn" aria-pressed="false">Military</button>
     </div>
     <div class="top-right">
@@ -1729,6 +1730,13 @@ silently vanishing from every denominator.</div>
   <div class="filters-in" id="filters-in"></div>
 </div>
 <div id="basic-view">{basic_view_html}</div>
+<div class="wrap" id="explore-view" style="display:none">
+  <div data-panel="explore_attention"></div>
+  <div data-panel="explore_tiles"></div>
+  <div data-panel="explore_controls"></div>
+  <div data-panel="explore_view"></div>
+  <div class="basic-panel" data-panel="explore_alerts"></div>
+</div>
 <div class="wrap" id="advanced-view" style="display:none">
   {fixture_banner}
   <nav class="toc" aria-label="Sections">{toc}</nav>
@@ -1783,6 +1791,7 @@ silently vanishing from every denominator.</div>
     <div class="mode-toggle" role="tablist" aria-label="Dashboard mode">
       <button type="button" id="mode-basic-btn" aria-pressed="true">Overview</button>
       <button type="button" id="mode-advanced-btn" aria-pressed="false">Detailed</button>
+      <button type="button" id="mode-explore-btn" aria-pressed="false">Explore</button>
       <button type="button" id="mode-military-btn" aria-pressed="false">Military</button>
     </div>
     <div class="top-right">
@@ -1797,6 +1806,13 @@ silently vanishing from every denominator.</div>
   <div class="filters-in" id="filters-in"></div>
 </div>
 <div id="basic-view">{basic_view_html}</div>
+<div class="wrap" id="explore-view" style="display:none">
+  <div data-panel="explore_attention"></div>
+  <div data-panel="explore_tiles"></div>
+  <div data-panel="explore_controls"></div>
+  <div data-panel="explore_view"></div>
+  <div class="basic-panel" data-panel="explore_alerts"></div>
+</div>
 <div class="wrap" id="advanced-view" style="display:none">
   {fixture_banner}
   <nav class="toc" aria-label="Sections">{toc}</nav>

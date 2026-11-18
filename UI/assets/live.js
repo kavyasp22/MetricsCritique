@@ -188,6 +188,29 @@
 
   /* ------------------------------------------------- overview live topics */
 
+  function appendDetailLink(host, sectionId, label) {
+    if (window.basicDetailLink) {
+      window.basicDetailLink(host, sectionId, label);
+      return;
+    }
+    var footer = h('div', { class: 'bvn-footer' });
+    var link = h('a', { class: 'bvn-see-all', href: '#' });
+    link.textContent = 'See ' + (label || 'full detail') + ' in Detailed view →';
+    link.addEventListener('click', function (e) {
+      e.preventDefault();
+      var advBtn = document.getElementById('mode-advanced-btn');
+      if (advBtn) {
+        advBtn.click();
+        setTimeout(function () {
+          var sec = document.getElementById(sectionId);
+          if (sec) { sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+        }, 150);
+      }
+    });
+    footer.appendChild(link);
+    host.appendChild(footer);
+  }
+
   function renderOverviewCard() {
     var host = document.getElementById('lv-overview');
     var wrap = document.querySelector('#basic-view .basic-wrap');
@@ -209,16 +232,19 @@
     host.appendChild(presets);
     if (!d && L.data && L.data.available) {
       host.appendChild(h('div', { class: 'fnote', text: 'Loading…' }));
+      appendDetailLink(host, 'livener', 'Live Named Entity Recognition');
       return;
     }
     if (!d || !d.available || !d.domains) {
       host.appendChild(h('div', { class: 'fnote', text: 'Live topics appear when the server is running with routing data.' }));
+      appendDetailLink(host, 'livener', 'Live Named Entity Recognition');
       return;
     }
     host.appendChild(windowBanner(d));
     host.appendChild(domainBars(d, null));
     host.appendChild(h('div', { class: 'fnote', text: 'Gemma domain routing, ' + pct((d.coverage || {}).share) +
       ' of posts in the window routed so far · provisional' }));
+    appendDetailLink(host, 'livener', 'Live Named Entity Recognition');
   }
 
   /* ------------------------------------------------------------- plumbing */
@@ -262,6 +288,9 @@
     if (mil) {
       document.body.setAttribute('data-mode', 'military');   // hides the shared date-range bar (CSS)
       basic.style.display = 'none'; adv.style.display = 'none';
+      var ev = document.getElementById('explore-view'), eb = document.getElementById('mode-explore-btn');
+      if (ev) { ev.style.display = 'none'; }
+      if (eb) { eb.setAttribute('aria-pressed', 'false'); }
       bb.setAttribute('aria-pressed', 'false'); ab.setAttribute('aria-pressed', 'false');
       store('z-mode', 'military');
       renderMilitary(mv);
@@ -284,7 +313,7 @@
     adv.parentNode.insertBefore(mv, adv.nextSibling);
 
     mb.addEventListener('click', function () { setMode('military'); });
-    ['mode-basic-btn', 'mode-advanced-btn', 'basic-to-advanced-link'].forEach(function (id) {
+    ['mode-basic-btn', 'mode-advanced-btn', 'mode-explore-btn', 'basic-to-advanced-link'].forEach(function (id) {
       var b = document.getElementById(id);
       if (b) { b.addEventListener('click', function () { setMode('other'); }); }
     });
