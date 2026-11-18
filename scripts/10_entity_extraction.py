@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
 """
+LEGACY (since 2026-11-18): the entity layer now comes from the entities the trained model already stored in
+production, read by stages 21 (read), 22 (merge variants) and 23 (load into geo_ontology.duckdb). This script is the
+earlier Babelscape wikineural + gazetteer extraction. It is not part of the current run order and `run_rebuild.sh`
+does not call it. It is kept as a working fallback; the Babelscape output it produced is kept in
+`entity_dim_babelscape` / `entity_mentions_babelscape` for rollback. Re-running it with --replace would overwrite
+`entity_dim` / `entity_mentions`, i.e. the production-entity tables from stage 23: do not, unless you intend to go back.
+
 Entity extraction — hybrid NER + gazetteer, full corpus.
 
 Prototyped on a 216-post reservoir sample (lang mix: 102 en, 9 ru, 9 zh-cn, 6 bn,

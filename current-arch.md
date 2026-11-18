@@ -132,8 +132,8 @@ reruns are deterministic.
 |-------|--------|---------------|
 | Topics v2 | `09_ontology_v2_cluster_fix.py` | `topic_dim_v2`, `post_topic_v2` (fixed absolute `min_cluster_size`) |
 | Topics v4 | `15_topic_clustering_v4.py` | Rebuilds `topic_dim_v3` / `post_topic_v3` with parent + sub-topics (GPU) |
-| Entities | `10_entity_extraction.py` | `entity_dim`, `entity_mentions` (wikineural multilingual NER + `data/gazetteer.json`) |
-| Entity subtypes | `13_entity_subtype_resolution.py` | Zero-shot subtype fallback; fixes PERSON/ORG mistyping of known leaders |
+| Entities | `21_prod_entities.py` → `22_entity_alias_merge.py` → `23_load_prod_entities.py` | `entity_dim`, `entity_mentions` from the production `entities` column (trained NER model, 25 subtypes); earlier Babelscape output kept as `entity_*_babelscape`. `10_entity_extraction.py` is the legacy path |
+| Entity subtypes | `13_entity_subtype_resolution.py` (legacy path) | Zero-shot subtype fallback for the Babelscape entities; production entities already carry the 25 subtypes |
 | Risk / theme | `12_risk_theme_classification.py` | `risk_labels`, `theme_labels` (bi-encoder recall net → mDeBERTa NLI, threshold 0.22) |
 | CAMEO | `14_cameo_event_coding.py` | Two-axis codes (theme / action), taxonomy in `data/taxonomy_cameo.json`, thresholds in `data/thresholds_cameo.json` |
 | Timeline | `11_geo_timeline_metrics.py` | `entity_metrics_daily`, `risk_metrics_daily`, `theme_metrics_daily`, `geo_alert_candidates` |

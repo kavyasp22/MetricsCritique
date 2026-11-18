@@ -38,6 +38,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from lib.pg import read_only_snapshot  # noqa: E402
+from lib.prod_entity_taxonomy import PROD_ENTITY_TAXONOMY  # noqa: E402
 
 SRC_DB = ROOT / "data" / "analytics.duckdb"
 OUT_DB = ROOT / "data" / "prod_entities.duckdb"
@@ -65,13 +66,9 @@ def source_specs(extract) -> dict[str, tuple[str, str]]:
     return out
 
 
-def parent_type_map(ent10) -> dict[str, str]:
-    """subtype label -> PERSON/LOCATION/ORG/EVENT, from the taxonomy in script 10."""
-    m = {}
-    for parent, subs in ent10.PROD_ENTITY_TAXONOMY.items():
-        for sub in subs:
-            m[sub] = parent
-    return m
+def parent_type_map() -> dict[str, str]:
+    """subtype label -> PERSON/LOCATION/ORG/EVENT, from scripts/lib/prod_entity_taxonomy.py."""
+    return {sub: parent for parent, subs in PROD_ENTITY_TAXONOMY.items() for sub in subs}
 
 
 def slug(s: str) -> str:
@@ -80,8 +77,7 @@ def slug(s: str) -> str:
 
 def main() -> int:
     extract = _load(ROOT / "scripts" / "01_extract_base.py", "extract01")
-    ent10 = _load(ROOT / "scripts" / "10_entity_extraction.py", "entity10")
-    parent = parent_type_map(ent10)
+    parent = parent_type_map()
     specs = source_specs(extract)
 
     src = duckdb.connect(str(SRC_DB), read_only=True)

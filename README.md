@@ -62,12 +62,15 @@ posts) into **statistically gated OSINT signal metrics**, a **geopolitical ontol
 │   ├── 07_metrics_v2.py     Layer 4 v2 — authoritative metrics build
 │   ├── 08_metrics_db.py     Layer 4 v2 — publish to metrics.duckdb
 │   ├── 09_ontology_v2_cluster_fix.py  Topic clustering v2 (fixed min_cluster_size)
-│   ├── 10_entity_extraction.py        NER + gazetteer
+│   ├── 10_entity_extraction.py        LEGACY Babelscape NER + gazetteer (not in the current run order)
 │   ├── 11_geo_timeline_metrics.py     Entity / risk / theme timeline metrics + alerts
 │   ├── 12_risk_theme_classification.py Bi-encoder + NLI risk/theme labels
 │   ├── 13_entity_subtype_resolution.py Zero-shot entity subtyping + type fix
 │   ├── 14_cameo_event_coding.py       CAMEO two-axis event coding
 │   ├── 15_topic_clustering_v4.py      GPU hierarchical topics (rebuilds topic_dim_v3)
+│   ├── 21_prod_entities.py            Read production `entities` (read-only) -> data/prod_entities.duckdb
+│   ├── 22_entity_alias_merge.py       Merge spelling variants of one entity (audit table entity_alias)
+│   ├── 23_load_prod_entities.py       Load production entities into geo_ontology.duckdb (Babelscape kept as *_babelscape)
 │   ├── notify_poller.py     Reference alert poller (log-only; no channel wired)
 │   ├── audit_restatement.py "Is this metric just volume?" audit
 │   ├── eval_risk_theme_sample.py  Draws hand-judging samples
@@ -160,8 +163,11 @@ python scripts/review/stat_review.py --json reports/stat_review_results.json
 
 ```bash
 python scripts/15_topic_clustering_v4.py          # hierarchical topics (GPU)
-python scripts/10_entity_extraction.py            # NER + gazetteer
-python scripts/13_entity_subtype_resolution.py    # zero-shot subtypes
+python scripts/21_prod_entities.py                # entities already extracted in production (read-only)
+python scripts/22_entity_alias_merge.py           # merge spelling variants
+# stop the dashboard container first: 23 writes geo_ontology.duckdb
+python scripts/23_load_prod_entities.py           # make them the live entity layer
+# (10_entity_extraction.py / 13_entity_subtype_resolution.py = legacy Babelscape path, not needed any more)
 python scripts/12_risk_theme_classification.py    # risk / theme labels
 python scripts/14_cameo_event_coding.py           # CAMEO coding
 python scripts/11_geo_timeline_metrics.py         # timeline metrics + geo alerts
