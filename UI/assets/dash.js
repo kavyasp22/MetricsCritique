@@ -5747,18 +5747,27 @@
     }).filter(function (r) { return r.posts > 0 && exTextOk(r.topic) && (EX.unclass || r.topic !== 'Unclassified'); });
   }
 
+  /* the "how to read this" text of each Explore card sits behind a heading, closed until clicked */
+  function exExplain(host, title, text) {
+    var det = h('details', { class: 'ex-explain' });
+    det.appendChild(h('summary', null, [h('b', { text: title }), h('span', { class: 'ex-explain-hint', text: ' \u2014 click to see explanation' })]));
+    det.appendChild(h('p', { class: 'cs', text: text }));
+    host.appendChild(det);
+    return det;
+  }
+
   function exTopicsView(host) {
     var rows = exTopicRows().sort(function (a, b) {
       var ea = a.emergence == null ? -1 : a.emergence, eb = b.emergence == null ? -1 : b.emergence;
       return eb - ea || b.posts - a.posts;
     }).slice(0, EX.top);
-    host.appendChild(h('p', { class: 'cs', text: 'Ranked by Emergence score, the pipeline’s single "popping up" number (blend of volume surprise, ' +
+    exExplain(host, 'Trending topics', 'Ranked by Emergence score, the pipeline’s single "popping up" number (blend of volume surprise, ' +
       'acceleration, semantic novelty and days-to-threshold; relative to this run’s panel, so read it as a ranking, not a probability). ' +
       'Alert days = days the volume jump was statistically significant (Benjamini–Hochberg q < 0.05); only cells with enough support are counted. ' +
       'Growth compares the selected days with the same number of days just before them (shown only with at least 10 earlier and 20 current posts). ' +
       'Momentum is the recent direction of volume, not a forecast. Stage compares the last 3 days with the 3 before, as posts per active channel ' +
       '(starting / rising / peak / steady / declining; "too little data" under 20 posts in the last 6 days). ' +
-      '"Unclassified" (posts not assigned to a topic) is left out unless you tick the box. Click a row to open its posts.' }));
+      '"Unclassified" (posts not assigned to a topic) is left out unless you tick the box. Click a row to open its posts.' );
     tableView(host, [
       { k: 'topic', label: 'Topic' },
       { k: 'posts', label: 'Posts', num: true, fmt: function (v) { return fmtInt(v); } },
@@ -5772,7 +5781,7 @@
       { k: 'platforms', label: 'Platforms', num: true },
       { k: 'stage', label: 'Stage' }
     ], rows, {
-      open: true, label: 'Trending topics (' + rows.length + ')',
+      label: 'Trending topics (' + rows.length + ')',
       rowDrill: function (r) { return { view: 'topic', params: exDrillParams({ topic_id: r.topic_id }, true), title: r.topic, subtitle: S.from + ' \u2192 ' + S.to }; }
     });
     exWhyCards(host, rows);
@@ -5855,10 +5864,10 @@
       };
     }).sort(function (a, b) { return b.peak < a.peak ? -1 : (b.peak > a.peak ? 1 : 0); }).slice(0, EX.top * 4);
     var cnt = {}; rows.forEach(function (r) { cnt[r.stage] = (cnt[r.stage] || 0) + 1; });
-    host.appendChild(h('p', { class: 'cs', text: 'Each row is one burst of activity (Kleinberg or CUSUM detector) for a topic on a platform. Stage is judged at the end ' +
+    exExplain(host, 'Trend lifecycle', 'Each row is one burst of activity (Kleinberg or CUSUM detector) for a topic on a platform. Stage is judged at the end ' +
       'of the selected range: starting, rising, peak, declining, or steady (no active burst). Onset slope = how fast it built up (log-linear); ' +
       'half-life = how fast it faded, shown with whether the decay curve fit well. ' +
-      Object.keys(cnt).map(function (k) { return cnt[k] + ' ' + k; }).join(' · ') }));
+      Object.keys(cnt).map(function (k) { return cnt[k] + ' ' + k; }).join(' · ') );
     tableView(host, [
       { k: 'topic', label: 'Topic' }, { k: 'platform', label: 'Platform' }, { k: 'stage', label: 'Stage' },
       { k: 'start', label: 'Started' }, { k: 'peak', label: 'Peak day' }, { k: 'end', label: 'Ended' },
@@ -5868,7 +5877,7 @@
       { k: 'half_life', label: 'Half-life (d)', num: true, fmt: function (v) { return v == null ? '\u2014' : Number(v).toFixed(1); } },
       { k: 'decay', label: 'Decay fit' }
     ], rows, {
-      open: true, label: 'Burst episodes in the selected range (' + rows.length + ')',
+      label: 'Burst episodes in the selected range (' + rows.length + ')',
       rowDrill: function (r) {
         return { view: 'topic', params: { topic_id: r.topic_id, platform: r.platform, day: r.peak },
                  title: r.topic + ' · ' + r.platform, subtitle: 'peak day ' + r.peak };
@@ -5881,8 +5890,8 @@
         half_life: r.half_life_days, mean_rev: r.mean_reverting === true ? 'yes' : (r.mean_reverting === false ? 'no' : '—'),
         n: r.n_obs, total: r.total_V };
     }).sort(function (a, b) { return (b.total || 0) - (a.total || 0); }).slice(0, EX.top * 2);
-    host.appendChild(h('p', { class: 'cs', text: 'How long attention tends to last, over the whole collection window (persistence: AR(1) half-life of the daily series). ' +
-      'This describes the past pattern of each topic on a platform; it does not predict the next days.' }));
+    exExplain(host, 'Typical duration', 'How long attention tends to last, over the whole collection window (persistence: AR(1) half-life of the daily series). ' +
+      'This describes the past pattern of each topic on a platform; it does not predict the next days.' );
     tableView(host, [
       { k: 'topic', label: 'Topic' }, { k: 'platform', label: 'Platform' },
       { k: 'half_life', label: 'Typical half-life (d)', num: true, fmt: function (v) { return v == null ? '\u2014' : Number(v).toFixed(1); } },
@@ -5924,8 +5933,8 @@
     var note = { stories: 'Groups of near-identical posts on different platforms (exact text match: high precision, misses paraphrases and translations).',
       links: 'Posts sharing the same link. High = full article link seen within 21 days; medium = shortened link; low = the link is spread over more than 21 days. App deep links are excluded.',
       events: 'Posts that say nearly the same thing in different words (bge-m3 similarity of at least 0.85 within 3 days). Preliminary: not yet hand-judged.' }[sub];
-    host.appendChild(h('p', { class: 'cs', text: note + ' "Earliest observed" is the first post we saw, not the confirmed origin. ' +
-      'Views are observed counts only (no estimates); posts on platforms with no view count are not added in. Click a row to see every post.' }));
+    exExplain(host, 'Cross-platform spread', note + ' "Earliest observed" is the first post we saw, not the confirmed origin. ' +
+      'Views are observed counts only (no estimates); posts on platforms with no view count are not added in. Click a row to see every post.' );
     var rows = exSpreadRows(sub).sort(function (a, b) { return (b.views + b.eng) - (a.views + a.eng); }).slice(0, EX.top * 4);
     var modeBar = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'VIEW' })]);
     [['cards', 'Cards'], ['table', 'Table']].forEach(function (x) {
@@ -6094,12 +6103,12 @@
   }
 
   function exSentView(host) {
-    host.appendChild(h('p', { class: 'cs', text: 'Tone of the posts’ wording, from the stored tone scores (multilingual model). ' +
+    exExplain(host, 'Sentiment analysis', 'Tone of the posts’ wording, from the stored tone scores (multilingual model). ' +
       'It measures the language of the post, not the poster’s attitude: a factual report of an attack or accident reads as negative. ' +
       'Positive / negative = tone above +0.15 / below −0.15 (a provisional cut-off, not validated per language). ' +
       'Net sentiment score (NSS) = 100 × (positive share − negative share) and is compared within one platform only, ' +
       'because platform levels differ widely (about −70 to +60). Shares are shown only with at least 20 scored posts. ' +
-      'Tone is provisional: it has only been checked against a draft labelling, not yet confirmed by a human reviewer.' }));
+      'Tone is provisional: it has only been checked against a draft labelling, not yet confirmed by a human reviewer.' );
     var fmtPct = function (v) { return v == null ? '—' : Math.round(v * 100) + '%'; };
     var plat = exSentRows('platform').sort(function (a, b) { return b.n - a.n; });
     tableView(host, [
@@ -6112,13 +6121,13 @@
       { k: 'tone', label: 'Mean tone', num: true, fmt: function (v) { return v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(2); } },
       { k: 'drops', label: 'Tone-drop days', num: true }
     ], plat, {
-      open: true, label: 'Tone by platform (' + plat.length + ')',
+      label: 'Tone by platform (' + plat.length + ')',
       rowDrill: function (r) { return { view: 'platform', params: exDrillParams({ platform: r.key }), title: r.name + ' \u2014 posts', subtitle: S.from + ' \u2192 ' + S.to }; }
     });
     var top = exSentRows('topic').sort(function (a, b) { return b.n - a.n; }).slice(0, EX.top);
-    host.appendChild(h('p', { class: 'cs', text: 'By topic, all selected platforms together. Shares come from summed counts; the topic NSS is not shown ' +
+    exExplain(host, 'Tone by topic', 'By topic, all selected platforms together. Shares come from summed counts; the topic NSS is not shown ' +
       'because it would mix platforms with different levels. Tone-drop days = days the tone fell significantly below its own previous 14 days ' +
-      '(Benjamini–Hochberg q < 0.05; a monitor, not an alert).' }));
+      '(Benjamini–Hochberg q < 0.05; a monitor, not an alert).' );
     tableView(host, [
       { k: 'name', label: 'Topic' },
       { k: 'n', label: 'Posts scored', num: true, fmt: fmtInt },
@@ -6128,7 +6137,7 @@
       { k: 'tone', label: 'Mean tone', num: true, fmt: function (v) { return v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(2); } },
       { k: 'drops', label: 'Tone-drop days', num: true }
     ], top, {
-      open: true, label: 'Tone by topic (' + top.length + ')',
+      label: 'Tone by topic (' + top.length + ')',
       rowDrill: function (r) { return { view: 'topic', params: exDrillParams({ topic_id: r.key }, true), title: r.name, subtitle: S.from + ' \u2192 ' + S.to }; }
     });
     var cur = exSet(exDays());
@@ -6138,8 +6147,8 @@
       return { topic_id: exTid(r.topic_id), topic: topicLabel(exTid(r.topic_id)), platform: r.platform, day: day(r.day),
         z: r.tone_drift_z, tone: r.tone_mean, n: r.tone_n };
     }).sort(function (a, b) { return a.z - b.z; }).slice(0, EX.top);
-    host.appendChild(h('p', { class: 'cs', text: 'Significant tone drops in the selected range (tone clearly below the topic’s own recent level). ' +
-      'z = how many standard deviations below the previous 14 days. Click a row to open that day’s posts.' }));
+    exExplain(host, 'Tone drops', 'Significant tone drops in the selected range (tone clearly below the topic’s own recent level). ' +
+      'z = how many standard deviations below the previous 14 days. Click a row to open that day’s posts.' );
     tableView(host, [
       { k: 'day', label: 'Day' }, { k: 'topic', label: 'Topic' }, { k: 'platform', label: 'Platform' },
       { k: 'z', label: 'Drop (z)', num: true, fmt: function (v) { return v == null ? '—' : Number(v).toFixed(1); } },
@@ -6213,11 +6222,11 @@
 
   function exViralView(host) {
     var br = exBreakoutRows().sort(function (a, b) { return b.pct - a.pct || b.posts - a.posts; }).slice(0, EX.top);
-    host.appendChild(h('p', { class: 'cs', text: 'Where posts are performing above their peers, from the stored metrics. Virality percentile = how a post\u2019s ' +
+    exExplain(host, 'Viral posts', 'Where posts are performing above their peers, from the stored metrics. Virality percentile = how a post\u2019s ' +
       'amplification ratio (engagement relative to exposure) ranks against posts of the same platform and age (0.5 = typical, higher = stronger), averaged over the group\u2019s ' +
       'rated posts; shown only with at least 20 rated posts. Audience-normalised reach = views relative to the same author\u2019s other posts (1.0 = their usual). ' +
       'Observed views are the counter values we saw, not audience size. Engagement activity is a different unit and is not added to views. ' +
-      'These are group averages (topic \u00d7 platform): the per-post percentile is not stored yet. Click a row to open its posts.' }));
+      'These are group averages (topic \u00d7 platform): the per-post percentile is not stored yet. Click a row to open its posts.' );
     tableView(host, [
       { k: 'topic', label: 'Topic' }, { k: 'platform', label: 'Platform' },
       { k: 'posts', label: 'Posts', num: true, fmt: fmtInt },
@@ -6227,7 +6236,7 @@
       { k: 'views', label: 'Observed views', num: true, fmt: function (v) { return v == null ? '\u2014' : fmtCompact(v); } },
       { k: 'eng', label: 'Engagement (log)', num: true, fmt: function (v) { return v == null ? '\u2014' : Number(v).toFixed(1); } }
     ], br, {
-      open: true, label: 'Breakout groups by virality percentile (' + br.length + ')',
+      label: 'Breakout groups by virality percentile (' + br.length + ')',
       rowDrill: function (r) {
         var pp = exDrillParams({ topic_id: r.topic_id, platform: r.platform });
         // views where the platform has a view counter, else engagement; if it has neither (some platforms
@@ -6239,9 +6248,9 @@
     host.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Top individual posts' }));
     var plats = PLATFORMS.filter(exPlatOk).join(',');
     var key = [S.from, S.to, plats, EX.q, EX.entityUid, EX.top].join('|');
-    host.appendChild(h('p', { class: 'cs', text: 'Posts ranked by observed views. Platforms that give no view count are listed separately, ' +
+    exExplain(host, 'Most viewed posts', 'Posts ranked by observed views. Platforms that give no view count are listed separately, ' +
       'ranked by likes + comments + shares, and are never ranked as zero views. Views are observed counts, not estimates; ' +
-      'a post with the most views is not necessarily the most influential.' + (EX.entityName ? ' Filtered to posts naming ' + EX.entityName + '.' : '') }));
+      'a post with the most views is not necessarily the most influential.' + (EX.entityName ? ' Filtered to posts naming ' + EX.entityName + '.' : '') );
     var body = h('div', { class: 'ex-viral' });
     host.appendChild(body);
     function paint(d) {

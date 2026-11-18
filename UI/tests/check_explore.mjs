@@ -147,6 +147,16 @@ await rows('topics');
 const q2 = doc.querySelector('.ex-q'); q2.value = 'zzzzqqq'; q2.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter' }));
 await wait(600);
 check('a search with no match empties Trending Topics', view().querySelectorAll('.tv table tbody tr').length === 0);
+// every card: tables closed (+ to open), explanation closed behind a heading
+for (const k of ['topics', 'viral', 'spread', 'life', 'sent']) {
+  [...doc.querySelectorAll('.ex-tile')].find((x) => x.dataset.tile === k).click(); await wait(500);
+  const v = view();
+  const ex = [...v.querySelectorAll('details.ex-explain')];
+  check(`${k}: explanation is collapsed behind a heading with "click to see explanation"`,
+    ex.length > 0 && ex.every((d) => !d.open && /click to see explanation/.test(d.querySelector('summary').textContent)), String(ex.length));
+  const tv = [...v.querySelectorAll('details.tv')];
+  check(`${k}: tables are closed by default`, tv.every((d) => !d.open || (k === 'spread' && d.querySelector('summary').textContent.includes('Cross-platform spread'))), String(tv.length));
+}
 doc.getElementById('mode-basic-btn').click(); await wait(500);
 check('Overview range is still the last 7 days after using Explore (not changed to 1 day)',
   (() => { const i = doc.querySelectorAll('#basic-date-strip .bds-date-input'); return i[0].value === '2026-10-20' && i[1].value === '2026-10-26'; })(),

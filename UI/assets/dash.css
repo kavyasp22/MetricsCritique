@@ -2926,3 +2926,12 @@ body[data-mode="explore"] #global-filters { display: none !important; }
 .ex-post-text mark { background: rgba(227, 188, 75, 0.35); color: inherit; border-radius: 3px; padding: 0 0.1rem; }
 .ex-date-err { color: #ff8a8a; font-size: 0.78rem; }
 .ex-row .bds-label { margin-right: 0.4rem; }
+
+/* Explore: explanation text is collapsed behind a heading */
+.ex-explain { margin: 0.3rem 0 0.6rem; }
+.ex-explain > summary { cursor: pointer; list-style: none; font-size: 0.85rem; color: var(--ink-2); }
+.ex-explain > summary::-webkit-details-marker { display: none; }
+.ex-explain > summary::before { content: "+ "; color: var(--gold); }
+.ex-explain[open] > summary::before { content: "\2212 "; }
+.ex-explain-hint { color: var(--gold); font-weight: 400; }
+.ex-explain > p { margin: 0.4rem 0 0; }
