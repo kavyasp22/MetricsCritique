@@ -1423,10 +1423,11 @@ silently vanishing from every denominator.</div>
   <p style="margin:0 0 0.4rem">Labels come from a two-step method: a bge-m3 similarity
   screen proposes candidates, then a multilingual NLI model (mDeBERTa) decides each
   (post, category) pair with <b>one global threshold of 0.22</b> shared by all 9 risk and
-  12 theme categories — there is no per-category calibration. On a hand-judged
-  105-post stratified sample this gave about <b>72% precision / 46% recall (lenient)</b>
-  and 61% / 65% (strict). It replaced an earlier flat-cosine version (0.45) that
-  measured 29% / 45% precision and is no longer in use.</p>
+  12 theme categories — there is no per-category calibration. The script's own
+  105-post calibration claimed about 72% precision, but a later hand check of the
+  assigned labels found only about <b>40% (risk) and 31% (theme) clearly right, and
+  70% / 55% counting loose matches</b>. It replaced an earlier flat-cosine version
+  (0.45) that measured 29% / 45% precision and is no longer in use.</p>
   <p style="margin:0">Only {label_cov_s} of the corpus ({posts_labelled:,} of
   {corpus_size:,} posts) carries any risk or theme label, and recall is still
   limited. <b>Treat <code>risk_labels</code>/<code>theme_labels</code> as a screening
@@ -1530,8 +1531,9 @@ silently vanishing from every denominator.</div>
          "figure exists for this table yet; code-review-only risks are noted in §16."),
         ("Risk / theme labels", "PARTIAL",
          "Bge-m3 screen + mDeBERTa NLI decision, one global 0.22 threshold across all "
-         "21 categories. Measured on 105 hand-judged posts: ~72% precision / 46% recall "
-         "(lenient), 61% / 65% (strict). Per-category calibration still needed. Detail in §17."),
+         "21 categories. Hand check of assigned labels: about 40% (risk) / 31% (theme) "
+         "clearly right, 70% / 55% counting loose matches; the script's own 72% claim "
+         "is not borne out. Per-category calibration still needed. Detail in §17."),
         ("Timeline metrics (entity/risk/theme)", "SOUND",
          "stats_v2 self-checks pass; an earlier independent recomputation of NB "
          "baselines, p-values and BH q-values matched stored values. Re-run it after "

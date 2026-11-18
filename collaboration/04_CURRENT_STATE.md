@@ -274,3 +274,17 @@ Verdicts and what changed (full table: Metrics_Finalisation_Two_Day_Action_Plan.
 - **Geo panels** now use `posted_at`, falling back to `scraped_at` like the topic panels (`11`).
 - **Risk / theme labels — PARTIAL.** Hand check: ~40% / 31% clearly right (70% / 55% loose), below the script's 72% claim. CAMEO event codes still unpopulated.
 - Known open: `check_taxonomy` 7/9 (theme/subtype cards not found in the rendered page); same-topic chain linking needs a decision (`test_chains_build_and_types` is xfail); `test_id_column_types.py` needs a DB with `topic_code_crosswalk`; fresh prod extract + GPU stages + rebuild pending.
+
+## 2026-11-18 — production entities become the entity layer (data to 2026-10-26)
+- Stage 21 reads the production `entities` jsonb (read-only snapshot) into `data/prod_entities.duckdb` (958,536 mentions, 153,116 of 497,530 posts = 30.8%; Instagram 4.5%, Reddit 2.8%, Telegram 16.9%, Twitter 26.3%; ~63K production rows not in our extract are not loaded). Stage 22 merges spelling variants (normalise / gazetteer / surname / acronym; titles stripped for PERSON only; audit table `entity_alias`). Stage 23 loads the result into `geo_ontology.duckdb` `entity_dim` / `entity_mentions`; the Babelscape tables are kept as `*_babelscape` (plus file backup `data/geo_ontology.backup_before_prod_entities_20261118.duckdb`). Script 11 re-run: entity alerts 2,467 -> 2,546 (3,525 entities with >= 20 in-window posts, was 5,397).
+- Script 10 (Babelscape NER) is switched off in the working tree; production entities are the source.
+- **Verdict: PARTIAL.** Alias merge precision not yet judged (sheet `reports/Entity_Alias_Review.xlsx`, generated, not committed). Generic words typed as PERSON ("President", "soldiers") are not filtered.
+
+### Pending (agreed to do later)
+1. **Fix `compute_related` memory failure (`UI/api_server.py`).** For large entities (Putin, NATO) the "appears with / similar posts" block returns empty: the similar-posts query scans all 497K embeddings and hashes their text inside the container's 4.7 GiB DuckDB limit ("Out of Memory Error"). Plan: return the entity chips even if similar posts fails; take the nearest ~200 posts first, then fetch text and dedupe; add a test on a large entity. Blocks the Explore page and entity use-case step 3.
+2. Judge the alias review sheet; fix rules behind any N rows.
+3. `UI/tests/check_metrics_panel.mjs` hard-codes 44 alerts for 1 week; now 25 after the entity swap — compute the expected value from the data.
+4. Filter generic PERSON entities ("President", "soldiers", "police") from lists shown to customers.
+5. Explore page (user-driven search over our entity list + keyword) — test version; per `Trending_Topics_and_Viral_Posts_Customer_Dashboard_Review.docx` section 9.
+6. Fresh production extract (01, 21, 22, 23, 11) when ready; script 01 not run (hard-coded output paths overwrite `analytics.duckdb`; estimated 20-25 GB peak, unmeasured).
+7. Entity use-case steps 2-3 (top posts by views, grouped co-mentions) and later step 10 ("about" filter); see `Final-docs/Entity_Led_Use_Cases_and_Implementation_Plan.docx`.
