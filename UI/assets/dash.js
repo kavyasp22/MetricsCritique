@@ -5603,7 +5603,7 @@
 
   /* Stage of a topic from its own daily series (effort-normalised: posts per active channel, so a
      collector ramp-up does not look like a surge). Compares the last 3 days with the 3 before them:
-       starting  = clearly up and the earlier period (same length, just before) was under 30% as large;  rising = up by 25% or more;
+       starting  = clearly up and the earlier period (same length, just before) was under 30% as large (ranges up to 30 days only);  rising = up by 25% or more;
        declining = down by 20% or more;  peak = flat and within 10% of the best 3-day level in the range;
        steady = flat, below that level.  Needs 6+ days and 20+ posts in them, otherwise "too little data". */
   function exSeriesStage(daily, days, prevTotal) {
@@ -5619,7 +5619,7 @@
     var best = m3;
     for (var i = 3; i <= n; i++) { best = Math.max(best, mean(r, i - 3, i)); }
     var curTotal = 0; days.forEach(function (d) { curTotal += posts(d); });
-    if (p3 > 0 && m3 >= 1.25 * p3) { return (prevTotal > 0 && prevTotal < 0.3 * curTotal) ? 'starting' : 'rising'; }   // no earlier period (full window) cannot be "starting"
+    if (p3 > 0 && m3 >= 1.25 * p3) { return (days.length <= 30 && prevTotal > 0 && prevTotal < 0.3 * curTotal) ? 'starting' : 'rising'; }   // no earlier period (full window) cannot be "starting"
     if (p3 > 0 && m3 <= 0.8 * p3) { return 'declining'; }
     return m3 >= 0.9 * best ? 'peak' : 'steady';
   }
