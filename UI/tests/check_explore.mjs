@@ -53,6 +53,10 @@ check('four tiles', tiles.length === 4, String(tiles.length));
 check('tile titles', ['Trending Topics', 'Viral Posts', 'Cross-Platform Spread', 'Trend Lifecycle']
   .every((t) => [...tiles].some((x) => x.textContent.includes(t))));
 check('Needs attention / status panel rendered', !!doc.querySelector('#explore-view .attn-box'));
+check('alerts show entity names, not raw keys like person:xyz', !/\b(person|org|location|event):[a-z_]/i.test(doc.querySelector('#explore-view').textContent.split('Social Signal Monitor')[0]) &&
+  !/\b(person|org|location|event):[a-z_]/i.test(doc.querySelector('#explore-view [data-panel="explore_alerts"]').textContent),
+  (doc.querySelector('#explore-view .attn-box')?.textContent || '').slice(0, 90));
+check('Recommended alerts list has entity names (e.g. Barack Obama) not keys', /Barack Obama|Australian Strategic|Bolsonaro/.test(doc.querySelector('#explore-view [data-panel="explore_alerts"]').textContent));
 check('Recommended alerts panel rendered', (doc.querySelector('#explore-view [data-panel="explore_alerts"]')?.textContent || '').length > 20);
 check('Trending Topics table has rows', doc.querySelectorAll('#explore-view [data-panel="explore_view"] table tbody tr').length > 0,
   String(doc.querySelectorAll('#explore-view [data-panel="explore_view"] table tbody tr').length));
@@ -61,7 +65,7 @@ const view = () => doc.querySelector('#explore-view [data-panel="explore_view"]'
 const rows = (k) => { [...doc.querySelectorAll('.ex-tile')].find((x) => x.dataset.tile === k).click(); return wait(500).then(() => view().querySelectorAll('table tbody tr').length); };
 const topicHead = [...view().querySelectorAll('table thead th')].map((x) => x.textContent);
 check('Trending Topics uses the stored metrics (emergence, q-value, alert days, momentum)',
-  ['Emergence score', 'Lowest q-value', 'Alert days', 'Burst days', 'Momentum'].every((c) => topicHead.some((h) => h.includes(c))), topicHead.join(' | '));
+  ['Emergence', 'Min q', 'Alert days', 'Burst days', 'Momentum'].every((c) => topicHead.some((h) => h.includes(c))), topicHead.join(' | '));
 const lifeRows = await rows('life');
 check('Lifecycle has onset slope, half-life and persistence table',
   /Onset slope/.test(view().textContent) && /Persistence by topic and platform/.test(view().textContent));
@@ -72,13 +76,19 @@ check('Spread has three evidence tiers', ['Same text', 'Shared links', 'Similar 
 [...view().querySelectorAll('.df-preset-btn')].find((x) => x.textContent.includes('Shared links')).click(); await wait(500);
 check('no shared link starts in the last 7 days: explicit empty state, not a blank', /No rows/.test(view().textContent));
 [...doc.querySelectorAll('#explore-view .df-preset-btn')].find((x) => x.textContent === 'Full window').click(); await wait(600);
-check('Shared links tier renders with match confidence column', /Match confidence/.test(view().textContent));
+check('Shared links tier renders with match confidence column', /Match/.test([...view().querySelectorAll('table thead th')].map((x) => x.textContent).join(' ')));
 [...view().querySelectorAll('.df-preset-btn')].find((x) => x.textContent.includes('Similar meaning')).click(); await wait(500);
 check('Similar-meaning tier is labelled preliminary', /Preliminary/.test(view().textContent));
 check('Cross-Platform Spread shows rows or an explicit empty state', spreadRows > 0 || /No rows/.test(view().textContent), String(spreadRows));
 await rows('viral'); await wait(500);
 const vtext = view().textContent;
-check('Viral card shows stored virality percentile + audience-normalised reach groups', /Virality percentile/.test(vtext) && /Audience-normalised reach/.test(vtext));
+{
+  const heads = [...view().querySelectorAll('table thead th')].map((x) => x.textContent);
+  const iv = heads.findIndex((x) => x.includes('Observed views')), ir = heads.findIndex((x) => x.includes('Reach vs author norm'));
+  const bad = [...view().querySelectorAll('table tbody tr')].filter((tr) => tr.children[iv]?.textContent.trim() === '\u2014' && tr.children[ir]?.textContent.trim() !== '\u2014');
+  check('a group with no observed views shows reach as a dash, never 0.0x', iv > 0 && ir > 0 && bad.length === 0, String(bad.length));
+}
+check('Viral card shows stored virality percentile + audience-normalised reach groups', /Virality pct/.test(vtext) && /Reach vs author norm/.test(vtext));
 check('Breakout groups table has rows', view().querySelectorAll('table tbody tr').length > 0, String(view().querySelectorAll('table tbody tr').length));
 check('Viral Posts calls the API', calls.length >= 1, calls[0] || '');
 check('Viral Posts shows two lists', view().querySelectorAll('.ex-col').length === 2);

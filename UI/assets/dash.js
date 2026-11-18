@@ -3833,7 +3833,18 @@
     var d = DIM_AXIS[dimType];
     if (d) { return TAX.name(d.axis, key); }
     if (dimType === 'topic') { return topicLabel(key); }
+    if (dimType === 'entity') { return entName(key); }
     return key;
+  }
+
+  /* entity_uid -> readable name (entity_dim carries the canonical name; the raw key is only the fallback) */
+  var _entNames = null;
+  function entName(uid) {
+    if (!_entNames) {
+      _entNames = {};
+      T('entity_dim').forEach(function (r) { _entNames[r.entity_uid] = r.canonical_name; });
+    }
+    return _entNames[uid] || uid;
   }
 
   /* The drill param differs by axis (category vs code); sending the wrong one
@@ -5385,7 +5396,8 @@
     }
     geo.forEach(function (a) {
       var name = a.dimension_type === 'risk' ? riskName(a.dimension_key)
-        : a.dimension_type === 'theme' ? themeName(a.dimension_key) : a.dimension_key;
+        : a.dimension_type === 'theme' ? themeName(a.dimension_key)
+        : a.dimension_type === 'entity' ? entName(a.dimension_key) : a.dimension_key;
       consider('geo|' + a.dimension_type + '|' + a.dimension_key, {
         day: a.day, severity: a.severity, q: a.q_value, name: name, dimType: a.dimension_type,
         drill: {
@@ -5635,13 +5647,13 @@
     tableView(host, [
       { k: 'topic', label: 'Topic' },
       { k: 'posts', label: 'Posts', num: true, fmt: function (v) { return fmtInt(v); } },
-      { k: 'growth', label: 'Growth vs earlier period', num: true,
-        fmt: function (v) { return (v >= 0 ? '+' : '') + Math.round(v * 100) + '%'; } },
-      { k: 'emergence', label: 'Emergence score (0–1)', num: true, fmt: function (v) { return Number(v).toFixed(2); } },
-      { k: 'minq', label: 'Lowest q-value', num: true, fmt: function (v) { return v < 0.001 ? '<0.001' : Number(v).toFixed(3); } },
+      { k: 'growth', label: 'Growth', num: true,
+        fmt: function (v) { return v == null ? '\u2014' : (v >= 0 ? '+' : '') + Math.round(v * 100) + '%'; } },
+      { k: 'emergence', label: 'Emergence', num: true, fmt: function (v) { return v == null ? '\u2014' : Number(v).toFixed(2); } },
+      { k: 'minq', label: 'Min q', num: true, fmt: function (v) { return v == null ? '\u2014' : (v < 0.001 ? '<0.001' : Number(v).toFixed(3)); } },
       { k: 'alert_days', label: 'Alert days', num: true },
       { k: 'burst_days', label: 'Burst days', num: true },
-      { k: 'momentum', label: 'Momentum', num: true, fmt: function (v) { return (v >= 0 ? '+' : '') + Number(v).toFixed(2); } },
+      { k: 'momentum', label: 'Momentum', num: true, fmt: function (v) { return v == null ? '\u2014' : (v >= 0 ? '+' : '') + Number(v).toFixed(2); } },
       { k: 'platforms', label: 'Platforms', num: true },
       { k: 'stage', label: 'Stage' }
     ], rows, {
@@ -5674,10 +5686,9 @@
       { k: 'topic', label: 'Topic' }, { k: 'platform', label: 'Platform' }, { k: 'stage', label: 'Stage' },
       { k: 'start', label: 'Started' }, { k: 'peak', label: 'Peak day' }, { k: 'end', label: 'Ended' },
       { k: 'n_days', label: 'Days', num: true },
-      { k: 'peak_V', label: 'Peak posts/day', num: true },
-      { k: 'total_V', label: 'Total posts', num: true },
-      { k: 'onset', label: 'Onset slope', num: true, fmt: function (v) { return Number(v).toFixed(2); } },
-      { k: 'half_life', label: 'Half-life (days)', num: true, fmt: function (v) { return Number(v).toFixed(1); } },
+      { k: 'peak_V', label: 'Peak/day', num: true },
+      { k: 'onset', label: 'Onset slope', num: true, fmt: function (v) { return v == null ? '\u2014' : Number(v).toFixed(2); } },
+      { k: 'half_life', label: 'Half-life (d)', num: true, fmt: function (v) { return v == null ? '\u2014' : Number(v).toFixed(1); } },
       { k: 'decay', label: 'Decay fit' }
     ], rows, {
       open: true, label: 'Burst episodes in the selected range (' + rows.length + ')',
@@ -5697,7 +5708,7 @@
       'This describes the past pattern of each topic on a platform; it does not predict the next days.' }));
     tableView(host, [
       { k: 'topic', label: 'Topic' }, { k: 'platform', label: 'Platform' },
-      { k: 'half_life', label: 'Typical half-life (days)', num: true, fmt: function (v) { return Number(v).toFixed(1); } },
+      { k: 'half_life', label: 'Typical half-life (d)', num: true, fmt: function (v) { return v == null ? '\u2014' : Number(v).toFixed(1); } },
       { k: 'mean_rev', label: 'Returns to normal' },
       { k: 'n', label: 'Days observed', num: true }, { k: 'total', label: 'Total posts', num: true, fmt: fmtInt }
     ], pers, { open: false, label: 'Persistence by topic and platform (' + pers.length + ')' });
@@ -5708,18 +5719,18 @@
     function inRange(s) { var d = s.origin_time ? day(s.origin_time) : null; return d && d >= S.from && d <= S.to; }
     if (sub === 'links') {
       return T('cross_platform_url_links').filter(function (s) { return inRange(s) && plOf(s).some(exPlatOk) && exTextOk(s.url); })
-        .map(function (s) { return { id: s.link_id, text: s.url, conf: s.match_confidence, origin: s.origin_platform,
+        .map(function (s) { return { id: s.link_id, text: String(s.url || '').slice(0, 70), conf: s.match_confidence, origin: s.origin_platform,
           platforms: plOf(s).join(', '), posts: s.n_unique_posts != null ? s.n_unique_posts : s.n_posts,
           spread_h: s.spread_duration_hours, views: s.observed_views || 0, eng: 0, first: day(s.origin_time) }; });
     }
     if (sub === 'events') {
       return T('cross_platform_semantic_events').filter(function (s) { return inRange(s) && plOf(s).some(exPlatOk) && exTextOk(s.snippet); })
-        .map(function (s) { return { id: s.event_id, text: (s.large_event ? '[large event] ' : '') + (s.snippet || ''), conf: s.match_confidence,
+        .map(function (s) { return { id: s.event_id, text: ((s.large_event ? '[large event] ' : '') + (s.snippet || '')).slice(0, 70), conf: s.match_confidence,
           origin: s.origin_platform, platforms: plOf(s).join(', '), posts: s.n_unique_posts,
           spread_h: s.spread_duration_hours, views: s.observed_views || 0, eng: s.total_engagement || 0, first: day(s.origin_time) }; });
     }
     return T('cross_platform_stories').filter(function (s) { return inRange(s) && plOf(s).some(exPlatOk) && exTextOk(s.snippet); })
-      .map(function (s) { return { id: s.story_id, text: s.snippet, conf: 'exact text', origin: s.origin_platform,
+      .map(function (s) { return { id: s.story_id, text: String(s.snippet || '').slice(0, 70), conf: 'exact text', origin: s.origin_platform,
         platforms: plOf(s).join(', '), posts: s.n_posts, spread_h: s.spread_duration_hours,
         views: s.observed_views || 0, eng: s.viewless_engagement || 0, first: day(s.origin_time) }; });
   }
@@ -5741,14 +5752,14 @@
     var rows = exSpreadRows(sub).sort(function (a, b) { return (b.views + b.eng) - (a.views + a.eng); }).slice(0, EX.top * 4);
     var drillView = { stories: ['cross_platform', 'story_id'], links: ['cross_platform_url', 'link_id'], events: ['cross_platform_event', 'event_id'] }[sub];
     tableView(host, [
-      { k: 'text', label: sub === 'links' ? 'Shared link' : 'Sample text', wrap: true },
-      { k: 'conf', label: 'Match confidence' },
-      { k: 'origin', label: 'Earliest observed on' },
+      { k: 'text', label: sub === 'links' ? 'Shared link' : 'Sample text' },
+      { k: 'conf', label: 'Match' },
+      { k: 'origin', label: 'First seen on' },
       { k: 'platforms', label: 'Platforms' },
       { k: 'posts', label: 'Posts', num: true, fmt: fmtInt },
-      { k: 'spread_h', label: 'Observed spread (h)', num: true, fmt: function (v) { return Number(v).toFixed(1); } },
-      { k: 'views', label: 'Observed views', num: true, fmt: function (v) { return fmtCompact(v); } },
-      { k: 'first', label: 'First seen' }
+      { k: 'spread_h', label: 'Spread (h)', num: true, fmt: function (v) { return v == null ? '\u2014' : Number(v).toFixed(1); } },
+      { k: 'views', label: 'Views', num: true, fmt: function (v) { return v == null ? '\u2014' : fmtCompact(v); } },
+      { k: 'first', label: 'Date' }
     ], rows, {
       open: true, label: 'Cross-platform spread (' + rows.length + ')',
       rowDrill: function (r) {
@@ -5809,11 +5820,11 @@
     tableView(host, [
       { k: 'topic', label: 'Topic' }, { k: 'platform', label: 'Platform' },
       { k: 'posts', label: 'Posts', num: true, fmt: fmtInt },
-      { k: 'pct', label: 'Virality percentile', num: true, fmt: function (v) { return Number(v).toFixed(2); } },
+      { k: 'pct', label: 'Virality pct', num: true, fmt: function (v) { return v == null ? '\u2014' : Number(v).toFixed(2); } },
       { k: 'n_rated', label: 'Rated posts', num: true, fmt: fmtInt },
-      { k: 'reach', label: 'Audience-normalised reach', num: true, fmt: function (v) { return Number(v).toFixed(1) + '\u00d7'; } },
-      { k: 'views', label: 'Observed views', num: true, fmt: function (v) { return fmtCompact(v); } },
-      { k: 'eng', label: 'Engagement activity (log, daily mean)', num: true, fmt: function (v) { return Number(v).toFixed(1); } }
+      { k: 'reach', label: 'Reach vs author norm', num: true, fmt: function (v) { return v == null ? '\u2014' : Number(v).toFixed(1) + '\u00d7'; } },
+      { k: 'views', label: 'Observed views', num: true, fmt: function (v) { return v == null ? '\u2014' : fmtCompact(v); } },
+      { k: 'eng', label: 'Engagement (log)', num: true, fmt: function (v) { return v == null ? '\u2014' : Number(v).toFixed(1); } }
     ], br, {
       open: true, label: 'Breakout groups by virality percentile (' + br.length + ')',
       rowDrill: function (r) { return { view: 'topic', params: { topic_id: r.topic_id, platform: r.platform }, title: r.topic + ' \u00b7 ' + r.platform }; }

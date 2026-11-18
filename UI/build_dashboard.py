@@ -2007,6 +2007,13 @@ def main() -> int:
         f"geo-alerts={gk.get('alerts_total', 0)} {gk.get('alerts_by_dim', {})}")
     log(f"wrote           : {out_html}  ({out_html.stat().st_size / 1024:.0f} KB)")
     log(f"wrote           : {out_json}  ({out_json.stat().st_size / 1024:.0f} KB)")
+    # api_server.py serves data/metrics.json.gz to any browser that accepts gzip. A gzip left over
+    # from an earlier build is silently preferred over the fresh JSON, so always rewrite it here.
+    import gzip
+    out_gz = out_json.with_name(out_json.name + ".gz")
+    with open(out_json, "rb") as f_in, gzip.open(out_gz, "wb", compresslevel=6) as f_out:
+        f_out.write(f_in.read())
+    log(f"wrote           : {out_gz}  ({out_gz.stat().st_size / 1024:.0f} KB)")
     log("UI mode         : " + (
         "static-embed (file:// ok)" if args.static_embed
         else "dynamic shell → fetch data/metrics.json (serve UI/ over HTTP)"

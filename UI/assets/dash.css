@@ -2882,3 +2882,5 @@ body[data-mode="explore"] #global-filters { display: none !important; }
 .ex-post-text { margin-top: 0.25rem; overflow-wrap: anywhere; }
 .ex-post-link { margin-top: 0.25rem; }
 @media (max-width: 760px) { .ex-tiles, .ex-cols { grid-template-columns: 1fr; } }
+/* wide metric tables scroll inside their card instead of being cut off */
+#explore-view details.tv, #explore-view .tv-raw-wrap { overflow-x: auto; max-width: 100%; }
