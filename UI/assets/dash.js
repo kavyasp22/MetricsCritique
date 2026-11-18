@@ -5573,35 +5573,50 @@
     return 'declining';
   }
 
-  function exTopicRows() {
+  /* group the stored daily metric cells (topic x platform x day) over the selected range */
+  function exCells() {
     var days = exDays(), prev = exPrevDays(days);
     var cur = exSet(days), pre = exSet(prev), win = exSet(WINDAYS);
-    var by = {};
+    var out = [];
     T('metrics_daily').forEach(function (r) {
       var d = day(r.day);
       if (!exPlatOk(r.platform)) { return; }
       var inCur = cur[d] && (!S.windowOnly || win[d]), inPrev = pre[d];
-      if (!inCur && !inPrev) { return; }
-      var tid = exTid(r.topic_id);
-      var o = by[tid] || (by[tid] = { topic_id: tid, cur: 0, prev: 0, plats: {}, alerts: 0 });
-      if (inCur) { o.cur += (r.V || 0); if ((r.V || 0) > 0) { o.plats[r.platform] = true; } }
-      if (inPrev) { o.prev += (r.V || 0); }
+      if (inCur || inPrev) { out.push({ r: r, d: d, inCur: !!inCur, inPrev: !!inPrev }); }
     });
-    T('alert_candidates').forEach(function (a) {
-      if (!cur[day(a.day)]) { return; }
-      if (a.platform != null && !exPlatOk(a.platform)) { return; }
-      var tid = exTid(a.topic_id);
-      if (by[tid]) { by[tid].alerts++; }
+    return { cells: out, cur: cur, days: days };
+  }
+  function exMax(a, v) { return (isNum(v) && (a == null || v > a)) ? v : a; }
+  function exMin(a, v) { return (isNum(v) && (a == null || v < a)) ? v : a; }
+
+  function exTopicRows() {
+    var g = exCells(), by = {};
+    g.cells.forEach(function (c) {
+      var r = c.r, tid = exTid(r.topic_id);
+      var o = by[tid] || (by[tid] = { topic_id: tid, cur: 0, prev: 0, plats: {}, alertDays: {}, emer: null, minq: null,
+        mom: null, momDay: '', burstDays: {} });
+      if (c.inPrev) { o.prev += (r.V || 0); }
+      if (!c.inCur) { return; }
+      o.cur += (r.V || 0);
+      if ((r.V || 0) > 0) { o.plats[r.platform] = true; }
+      if (r.support_ok) {
+        if (r.alert_flag) { o.alertDays[c.d] = true; }
+        o.emer = exMax(o.emer, r.emergence_score);
+        o.minq = exMin(o.minq, r.surprise_q);
+        if (r.burst_state === 1 || r.burst_state === true) { o.burstDays[c.d] = true; }
+      }
+      if (isNum(r.momentum) && c.d >= o.momDay) { o.mom = r.momentum; o.momDay = c.d; }
     });
-    var toDay = days[days.length - 1] || S.to;
+    var toDay = g.days[g.days.length - 1] || S.to;
     var eps = T('burst_episodes').filter(function (e) { return exPlatOk(e.platform); });
     return Object.keys(by).map(function (tid) {
-      var o = by[tid];
-      var ok = o.prev >= 10 && o.cur >= 20;
+      var o = by[tid], ok = o.prev >= 10 && o.cur >= 20;
       return {
-        topic_id: tid, topic: topicLabel(tid), posts: o.cur, prev: o.prev,
+        topic_id: tid, topic: topicLabel(tid), posts: o.cur,
         growth: ok ? (o.cur - o.prev) / o.prev : null,
-        platforms: Object.keys(o.plats).length, alerts: o.alerts,
+        emergence: o.emer, minq: o.minq,
+        alert_days: Object.keys(o.alertDays).length, burst_days: Object.keys(o.burstDays).length,
+        momentum: o.mom, platforms: Object.keys(o.plats).length,
         stage: exStage(eps.filter(function (e) { return exTid(e.topic_id) === tid; }), toDay)
       };
     }).filter(function (r) { return r.posts > 0 && exTextOk(r.topic); });
@@ -5609,20 +5624,26 @@
 
   function exTopicsView(host) {
     var rows = exTopicRows().sort(function (a, b) {
-      var ga = a.growth == null ? -Infinity : a.growth, gb = b.growth == null ? -Infinity : b.growth;
-      return gb - ga || b.posts - a.posts;
+      var ea = a.emergence == null ? -1 : a.emergence, eb = b.emergence == null ? -1 : b.emergence;
+      return eb - ea || b.posts - a.posts;
     }).slice(0, EX.top);
-    host.appendChild(h('p', { class: 'cs', text: 'Growth compares the selected days with the same number of days just before them. ' +
-      'Shown only where the earlier period had at least 10 posts and this one at least 20 (otherwise "—"). ' +
-      'Click a row to open its posts.' }));
+    host.appendChild(h('p', { class: 'cs', text: 'Ranked by Emergence score, the pipeline’s single "popping up" number (blend of volume surprise, ' +
+      'acceleration, semantic novelty and days-to-threshold; relative to this run’s panel, so read it as a ranking, not a probability). ' +
+      'Alert days = days the volume jump was statistically significant (Benjamini–Hochberg q < 0.05); only cells with enough support are counted. ' +
+      'Growth compares the selected days with the same number of days just before them (shown only with at least 10 earlier and 20 current posts). ' +
+      'Momentum is the recent direction of volume, not a forecast. Click a row to open its posts.' }));
     tableView(host, [
       { k: 'topic', label: 'Topic' },
       { k: 'posts', label: 'Posts', num: true, fmt: function (v) { return fmtInt(v); } },
       { k: 'growth', label: 'Growth vs earlier period', num: true,
         fmt: function (v) { return (v >= 0 ? '+' : '') + Math.round(v * 100) + '%'; } },
+      { k: 'emergence', label: 'Emergence score (0–1)', num: true, fmt: function (v) { return Number(v).toFixed(2); } },
+      { k: 'minq', label: 'Lowest q-value', num: true, fmt: function (v) { return v < 0.001 ? '<0.001' : Number(v).toFixed(3); } },
+      { k: 'alert_days', label: 'Alert days', num: true },
+      { k: 'burst_days', label: 'Burst days', num: true },
+      { k: 'momentum', label: 'Momentum', num: true, fmt: function (v) { return (v >= 0 ? '+' : '') + Number(v).toFixed(2); } },
       { k: 'platforms', label: 'Platforms', num: true },
-      { k: 'stage', label: 'Stage' },
-      { k: 'alerts', label: 'Alerts', num: true }
+      { k: 'stage', label: 'Stage' }
     ], rows, {
       open: true, label: 'Trending topics (' + rows.length + ')',
       rowDrill: function (r) { return { view: 'topic', params: { topic_id: r.topic_id }, title: r.topic }; }
@@ -5639,13 +5660,15 @@
       return {
         topic_id: exTid(e.topic_id), topic: topicLabel(exTid(e.topic_id)), platform: e.platform,
         start: day(e.start_day), peak: day(e.peak_day), end: day(e.end_day), n_days: e.n_days,
-        peak_V: e.peak_V, total_V: e.total_V, half_life: e.half_life_days,
+        peak_V: e.peak_V, total_V: e.total_V, onset: e.onset_slope, half_life: e.half_life_days,
+        decay: e.decay_ok === true ? 'good fit' : (e.decay_ok === false ? 'weak fit' : '—'),
         stage: exStage([e], toDay)
       };
     }).sort(function (a, b) { return b.peak < a.peak ? -1 : (b.peak > a.peak ? 1 : 0); }).slice(0, EX.top * 4);
     var cnt = {}; rows.forEach(function (r) { cnt[r.stage] = (cnt[r.stage] || 0) + 1; });
-    host.appendChild(h('p', { class: 'cs', text: 'Each row is one burst of activity for a topic on a platform. Stage is judged at the end of the selected range: ' +
-      'starting, rising, peak, declining, or steady (no active burst). ' +
+    host.appendChild(h('p', { class: 'cs', text: 'Each row is one burst of activity (Kleinberg or CUSUM detector) for a topic on a platform. Stage is judged at the end ' +
+      'of the selected range: starting, rising, peak, declining, or steady (no active burst). Onset slope = how fast it built up (log-linear); ' +
+      'half-life = how fast it faded, shown with whether the decay curve fit well. ' +
       Object.keys(cnt).map(function (k) { return cnt[k] + ' ' + k; }).join(' · ') }));
     tableView(host, [
       { k: 'topic', label: 'Topic' }, { k: 'platform', label: 'Platform' }, { k: 'stage', label: 'Stage' },
@@ -5653,7 +5676,9 @@
       { k: 'n_days', label: 'Days', num: true },
       { k: 'peak_V', label: 'Peak posts/day', num: true },
       { k: 'total_V', label: 'Total posts', num: true },
-      { k: 'half_life', label: 'Half-life (days)', num: true, fmt: function (v) { return Number(v).toFixed(1); } }
+      { k: 'onset', label: 'Onset slope', num: true, fmt: function (v) { return Number(v).toFixed(2); } },
+      { k: 'half_life', label: 'Half-life (days)', num: true, fmt: function (v) { return Number(v).toFixed(1); } },
+      { k: 'decay', label: 'Decay fit' }
     ], rows, {
       open: true, label: 'Burst episodes in the selected range (' + rows.length + ')',
       rowDrill: function (r) {
@@ -5661,39 +5686,78 @@
                  title: r.topic + ' · ' + r.platform, subtitle: 'peak day ' + r.peak };
       }
     });
+    var pers = T('persistence').filter(function (r) {
+      return r.fit_ok && exPlatOk(r.platform) && exTextOk(topicLabel(exTid(r.topic_id)));
+    }).map(function (r) {
+      return { topic_id: exTid(r.topic_id), topic: topicLabel(exTid(r.topic_id)), platform: r.platform,
+        half_life: r.half_life_days, mean_rev: r.mean_reverting === true ? 'yes' : (r.mean_reverting === false ? 'no' : '—'),
+        n: r.n_obs, total: r.total_V };
+    }).sort(function (a, b) { return (b.total || 0) - (a.total || 0); }).slice(0, EX.top * 2);
+    host.appendChild(h('p', { class: 'cs', text: 'How long attention tends to last, over the whole collection window (persistence: AR(1) half-life of the daily series). ' +
+      'This describes the past pattern of each topic on a platform; it does not predict the next days.' }));
+    tableView(host, [
+      { k: 'topic', label: 'Topic' }, { k: 'platform', label: 'Platform' },
+      { k: 'half_life', label: 'Typical half-life (days)', num: true, fmt: function (v) { return Number(v).toFixed(1); } },
+      { k: 'mean_rev', label: 'Returns to normal' },
+      { k: 'n', label: 'Days observed', num: true }, { k: 'total', label: 'Total posts', num: true, fmt: fmtInt }
+    ], pers, { open: false, label: 'Persistence by topic and platform (' + pers.length + ')' });
+  }
+
+  function exSpreadRows(sub) {
+    function plOf(s) { return Array.isArray(s.platforms) ? s.platforms : [s.platforms]; }
+    function inRange(s) { var d = s.origin_time ? day(s.origin_time) : null; return d && d >= S.from && d <= S.to; }
+    if (sub === 'links') {
+      return T('cross_platform_url_links').filter(function (s) { return inRange(s) && plOf(s).some(exPlatOk) && exTextOk(s.url); })
+        .map(function (s) { return { id: s.link_id, text: s.url, conf: s.match_confidence, origin: s.origin_platform,
+          platforms: plOf(s).join(', '), posts: s.n_unique_posts != null ? s.n_unique_posts : s.n_posts,
+          spread_h: s.spread_duration_hours, views: s.observed_views || 0, eng: 0, first: day(s.origin_time) }; });
+    }
+    if (sub === 'events') {
+      return T('cross_platform_semantic_events').filter(function (s) { return inRange(s) && plOf(s).some(exPlatOk) && exTextOk(s.snippet); })
+        .map(function (s) { return { id: s.event_id, text: (s.large_event ? '[large event] ' : '') + (s.snippet || ''), conf: s.match_confidence,
+          origin: s.origin_platform, platforms: plOf(s).join(', '), posts: s.n_unique_posts,
+          spread_h: s.spread_duration_hours, views: s.observed_views || 0, eng: s.total_engagement || 0, first: day(s.origin_time) }; });
+    }
+    return T('cross_platform_stories').filter(function (s) { return inRange(s) && plOf(s).some(exPlatOk) && exTextOk(s.snippet); })
+      .map(function (s) { return { id: s.story_id, text: s.snippet, conf: 'exact text', origin: s.origin_platform,
+        platforms: plOf(s).join(', '), posts: s.n_posts, spread_h: s.spread_duration_hours,
+        views: s.observed_views || 0, eng: s.viewless_engagement || 0, first: day(s.origin_time) }; });
   }
 
   function exSpreadView(host) {
-    var rows = T('cross_platform_stories').filter(function (s) {
-      var d = s.origin_time ? day(s.origin_time) : null;
-      var pl = Array.isArray(s.platforms) ? s.platforms : [s.platforms];
-      return d && d >= S.from && d <= S.to && pl.some(exPlatOk) && exTextOk(s.snippet);
-    }).map(function (s) {
-      var pl = Array.isArray(s.platforms) ? s.platforms : [s.platforms];
-      return {
-        story_id: s.story_id, snippet: s.snippet, origin: s.origin_platform, platforms: pl.join(', '),
-        n_platforms: s.n_platforms, posts: s.n_posts, spread_h: s.spread_duration_hours,
-        views: s.observed_views || 0, eng: s.viewless_engagement || 0, first: day(s.origin_time)
-      };
-    }).sort(function (a, b) { return (b.views + b.eng) - (a.views + a.eng); }).slice(0, EX.top * 4);
-    host.appendChild(h('p', { class: 'cs', text: 'Stories are groups of near-identical posts on different platforms. "Earliest observed" is ' +
-      'the first post we saw, not the confirmed origin. Views are observed counts only (no estimates). Click a row to see every post.' }));
+    var sub = EX.sub || 'stories';
+    var bar = h('div', { class: 'ex-row' });
+    [['stories', 'Same text'], ['links', 'Shared links'], ['events', 'Similar meaning (preliminary)']].forEach(function (x) {
+      var b = h('button', { type: 'button', class: 'df-preset-btn' + (sub === x[0] ? ' active' : ''), text: x[1] });
+      b.addEventListener('click', function () { EX.sub = x[0]; render(); });
+      bar.appendChild(b);
+    });
+    host.appendChild(bar);
+    var note = { stories: 'Groups of near-identical posts on different platforms (exact text match: high precision, misses paraphrases and translations).',
+      links: 'Posts sharing the same link. High = full article link seen within 21 days; medium = shortened link; low = the link is spread over more than 21 days. App deep links are excluded.',
+      events: 'Posts that say nearly the same thing in different words (bge-m3 similarity of at least 0.85 within 3 days). Preliminary: not yet hand-judged.' }[sub];
+    host.appendChild(h('p', { class: 'cs', text: note + ' "Earliest observed" is the first post we saw, not the confirmed origin. ' +
+      'Views are observed counts only (no estimates); posts on platforms with no view count are not added in. Click a row to see every post.' }));
+    var rows = exSpreadRows(sub).sort(function (a, b) { return (b.views + b.eng) - (a.views + a.eng); }).slice(0, EX.top * 4);
+    var drillView = { stories: ['cross_platform', 'story_id'], links: ['cross_platform_url', 'link_id'], events: ['cross_platform_event', 'event_id'] }[sub];
     tableView(host, [
-      { k: 'snippet', label: 'Story (sample text)', wrap: true },
+      { k: 'text', label: sub === 'links' ? 'Shared link' : 'Sample text', wrap: true },
+      { k: 'conf', label: 'Match confidence' },
       { k: 'origin', label: 'Earliest observed on' },
       { k: 'platforms', label: 'Platforms' },
-      { k: 'posts', label: 'Posts', num: true },
+      { k: 'posts', label: 'Posts', num: true, fmt: fmtInt },
       { k: 'spread_h', label: 'Observed spread (h)', num: true, fmt: function (v) { return Number(v).toFixed(1); } },
       { k: 'views', label: 'Observed views', num: true, fmt: function (v) { return fmtCompact(v); } },
       { k: 'first', label: 'First seen' }
     ], rows, {
-      open: true, label: 'Cross-platform stories (' + rows.length + ')',
+      open: true, label: 'Cross-platform spread (' + rows.length + ')',
       rowDrill: function (r) {
-        return { view: 'cross_platform', params: { story_id: r.story_id },
-                 title: 'Story spread (earliest observed: ' + r.origin + ')' };
+        var params = {}; params[drillView[1]] = r.id;
+        return { view: drillView[0], params: params, title: 'Spread (earliest observed: ' + r.origin + ')' };
       }
     });
   }
+
 
   function exPostCard(p, byViews) {
     var when = p.posted_at ? day(p.posted_at) : '';
@@ -5713,7 +5777,48 @@
     return h('div', { class: 'ex-post' }, kids);
   }
 
+  function exBreakoutRows() {
+    var g = exCells(), by = {};
+    g.cells.forEach(function (c) {
+      if (!c.inCur) { return; }
+      var r = c.r, key = exTid(r.topic_id) + '|' + r.platform;
+      var o = by[key] || (by[key] = { topic_id: exTid(r.topic_id), platform: r.platform, V: 0, vn: 0, vs: 0, rn: 0, rs: 0,
+        views: 0, hasViews: false, eng: 0, engN: 0 });
+      o.V += (r.V || 0);
+      if (isNum(r.virality_pct) && (r.virality_n || 0) > 0) { o.vs += r.virality_pct * r.virality_n; o.vn += r.virality_n; }
+      if (isNum(r.reach_audience_norm) && (r.V || 0) > 0) { o.rs += r.reach_audience_norm * r.V; o.rn += r.V; }
+      if (isNum(r.observed_views)) { o.views += r.observed_views; o.hasViews = true; }
+      if (isNum(r.engagement_proxy)) { o.eng += r.engagement_proxy; o.engN++; }
+    });
+    return Object.keys(by).map(function (k) {
+      var o = by[k];
+      return { topic_id: o.topic_id, topic: topicLabel(o.topic_id), platform: o.platform, posts: o.V,
+        pct: o.vn >= 20 ? o.vs / o.vn : null, n_rated: o.vn,
+        reach: o.rn >= 20 ? o.rs / o.rn : null,
+        views: o.hasViews ? o.views : null, eng: o.engN ? o.eng / o.engN : null };
+    }).filter(function (r) { return r.pct != null && exTextOk(r.topic); });
+  }
+
   function exViralView(host) {
+    var br = exBreakoutRows().sort(function (a, b) { return b.pct - a.pct || b.posts - a.posts; }).slice(0, EX.top);
+    host.appendChild(h('p', { class: 'cs', text: 'Where posts are performing above their peers, from the stored metrics. Virality percentile = how a post\u2019s ' +
+      'amplification ratio (engagement relative to exposure) ranks against posts of the same platform and age (0.5 = typical, higher = stronger), averaged over the group\u2019s ' +
+      'rated posts; shown only with at least 20 rated posts. Audience-normalised reach = views relative to the same author\u2019s other posts (1.0 = their usual). ' +
+      'Observed views are the counter values we saw, not audience size. Engagement activity is a different unit and is not added to views. ' +
+      'These are group averages (topic \u00d7 platform): the per-post percentile is not stored yet. Click a row to open its posts.' }));
+    tableView(host, [
+      { k: 'topic', label: 'Topic' }, { k: 'platform', label: 'Platform' },
+      { k: 'posts', label: 'Posts', num: true, fmt: fmtInt },
+      { k: 'pct', label: 'Virality percentile', num: true, fmt: function (v) { return Number(v).toFixed(2); } },
+      { k: 'n_rated', label: 'Rated posts', num: true, fmt: fmtInt },
+      { k: 'reach', label: 'Audience-normalised reach', num: true, fmt: function (v) { return Number(v).toFixed(1) + '\u00d7'; } },
+      { k: 'views', label: 'Observed views', num: true, fmt: function (v) { return fmtCompact(v); } },
+      { k: 'eng', label: 'Engagement activity (log, daily mean)', num: true, fmt: function (v) { return Number(v).toFixed(1); } }
+    ], br, {
+      open: true, label: 'Breakout groups by virality percentile (' + br.length + ')',
+      rowDrill: function (r) { return { view: 'topic', params: { topic_id: r.topic_id, platform: r.platform }, title: r.topic + ' \u00b7 ' + r.platform }; }
+    });
+    host.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Top individual posts' }));
     var plats = PLATFORMS.filter(exPlatOk).join(',');
     var key = [S.from, S.to, plats, EX.q, EX.entityUid, EX.top].join('|');
     host.appendChild(h('p', { class: 'cs', text: 'Posts ranked by observed views. Platforms that give no view count are listed separately, ' +

@@ -59,11 +59,27 @@ check('Trending Topics table has rows', doc.querySelectorAll('#explore-view [dat
 
 const view = () => doc.querySelector('#explore-view [data-panel="explore_view"]');
 const rows = (k) => { [...doc.querySelectorAll('.ex-tile')].find((x) => x.dataset.tile === k).click(); return wait(500).then(() => view().querySelectorAll('table tbody tr').length); };
+const topicHead = [...view().querySelectorAll('table thead th')].map((x) => x.textContent);
+check('Trending Topics uses the stored metrics (emergence, q-value, alert days, momentum)',
+  ['Emergence score', 'Lowest q-value', 'Alert days', 'Burst days', 'Momentum'].every((c) => topicHead.some((h) => h.includes(c))), topicHead.join(' | '));
 const lifeRows = await rows('life');
+check('Lifecycle has onset slope, half-life and persistence table',
+  /Onset slope/.test(view().textContent) && /Persistence by topic and platform/.test(view().textContent));
 check('Trend Lifecycle shows rows or an explicit empty state', lifeRows > 0 || /No rows/.test(view().textContent), String(lifeRows));
 const spreadRows = await rows('spread');
+const subBtns = [...view().querySelectorAll('.df-preset-btn')].map((x) => x.textContent);
+check('Spread has three evidence tiers', ['Same text', 'Shared links', 'Similar meaning'].every((c) => subBtns.some((b) => b.includes(c))), subBtns.join(' | '));
+[...view().querySelectorAll('.df-preset-btn')].find((x) => x.textContent.includes('Shared links')).click(); await wait(500);
+check('no shared link starts in the last 7 days: explicit empty state, not a blank', /No rows/.test(view().textContent));
+[...doc.querySelectorAll('#explore-view .df-preset-btn')].find((x) => x.textContent === 'Full window').click(); await wait(600);
+check('Shared links tier renders with match confidence column', /Match confidence/.test(view().textContent));
+[...view().querySelectorAll('.df-preset-btn')].find((x) => x.textContent.includes('Similar meaning')).click(); await wait(500);
+check('Similar-meaning tier is labelled preliminary', /Preliminary/.test(view().textContent));
 check('Cross-Platform Spread shows rows or an explicit empty state', spreadRows > 0 || /No rows/.test(view().textContent), String(spreadRows));
 await rows('viral'); await wait(500);
+const vtext = view().textContent;
+check('Viral card shows stored virality percentile + audience-normalised reach groups', /Virality percentile/.test(vtext) && /Audience-normalised reach/.test(vtext));
+check('Breakout groups table has rows', view().querySelectorAll('table tbody tr').length > 0, String(view().querySelectorAll('table tbody tr').length));
 check('Viral Posts calls the API', calls.length >= 1, calls[0] || '');
 check('Viral Posts shows two lists', view().querySelectorAll('.ex-col').length === 2);
 check('post without views is in the engagement list, not ranked by views',
