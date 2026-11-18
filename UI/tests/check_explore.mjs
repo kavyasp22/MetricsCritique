@@ -67,20 +67,20 @@ check('Trending Topics table has rows', doc.querySelectorAll('#explore-view [dat
   String(doc.querySelectorAll('#explore-view [data-panel="explore_view"] table tbody tr').length));
 
 const view = () => doc.querySelector('#explore-view [data-panel="explore_view"]');
-const rows = (k) => { [...doc.querySelectorAll('.ex-tile')].find((x) => x.dataset.tile === k).click(); return wait(500).then(() => view().querySelectorAll('table tbody tr').length); };
-const topicHead = [...view().querySelectorAll('table thead th')].map((x) => x.textContent);
+const rows = (k) => { [...doc.querySelectorAll('.ex-tile')].find((x) => x.dataset.tile === k).click(); return wait(500).then(() => view().querySelectorAll('.tv table tbody tr').length); };
+const topicHead = [...view().querySelectorAll('.tv table thead th')].map((x) => x.textContent);
 check('Trending Topics uses the stored metrics (emergence, q-value, alert days, momentum)',
   ['Emergence', 'Min q', 'Alert days', 'Burst days', 'Momentum'].every((c) => topicHead.some((h) => h.includes(c))), topicHead.join(' | '));
-const topicNames = [...view().querySelectorAll('table tbody tr')].map((tr) => tr.children[0].textContent.trim());
+const topicNames = [...view().querySelectorAll('.tv table tbody tr')].map((tr) => tr.children[0].textContent.trim());
 check('Unclassified is left out of Trending Topics by default', !topicNames.includes('Unclassified'), topicNames.join(', '));
-const stages = [...view().querySelectorAll('table tbody tr')].map((tr) => tr.children[topicHead.findIndex((x) => x.includes('Stage'))].textContent.trim());
+const stages = [...view().querySelectorAll('.tv table tbody tr')].map((tr) => tr.children[topicHead.findIndex((x) => x.includes('Stage'))].textContent.trim());
 check('stage is one of the defined labels', stages.every((s) => ['starting', 'rising', 'peak', 'steady', 'declining', 'too little data'].includes(s)), [...new Set(stages)].join(', '));
 const cb = doc.getElementById('ex-unclass'); cb.checked = true; cb.dispatchEvent(new dom.window.Event('change')); await wait(500);
 check('ticking Include Unclassified brings it back',
-  [...view().querySelectorAll('table tbody tr')].some((tr) => tr.children[0].textContent.trim() === 'Unclassified'));
+  [...view().querySelectorAll('.tv table tbody tr')].some((tr) => tr.children[0].textContent.trim() === 'Unclassified'));
 const cb2 = doc.getElementById('ex-unclass'); cb2.checked = false; cb2.dispatchEvent(new dom.window.Event('change')); await wait(400);
 {
-  const row = view().querySelector('table tbody tr');
+  const row = view().querySelector('.tv table tbody tr');
   drillCalls.length = 0; row.click(); await wait(500);
   const u = drillCalls[0] || '';
   check('clicking a Trending Topics row opens the drill-down with the selected dates', /from=2026-10-20/.test(u) && /to=2026-10-26/.test(u) && /topic_id=/.test(u), u);
@@ -89,13 +89,17 @@ const lifeRows = await rows('life');
 check('Lifecycle has onset slope, half-life and persistence table',
   /Onset slope/.test(view().textContent) && /Persistence by topic and platform/.test(view().textContent));
 check('Trend Lifecycle shows rows or an explicit empty state', lifeRows > 0 || /No rows/.test(view().textContent), String(lifeRows));
-const spreadRows = await rows('spread');
+await rows('spread');
+const storyCards = view().querySelectorAll('.ex-story').length;
+check('Spread opens as story cards by default', storyCards > 0, String(storyCards));
+[...view().querySelectorAll('.df-preset-btn')].find((x) => x.textContent === 'Table').click(); await wait(400);
+const spreadRows = view().querySelectorAll('.tv table tbody tr').length;
 const subBtns = [...view().querySelectorAll('.df-preset-btn')].map((x) => x.textContent);
 check('Spread has three evidence tiers', ['Same text', 'Shared links', 'Similar meaning'].every((c) => subBtns.some((b) => b.includes(c))), subBtns.join(' | '));
 [...view().querySelectorAll('.df-preset-btn')].find((x) => x.textContent.includes('Shared links')).click(); await wait(500);
 check('no shared link starts in the last 7 days: explicit empty state, not a blank', /No rows/.test(view().textContent));
 [...doc.querySelectorAll('#explore-view .df-preset-btn')].find((x) => x.textContent === 'Full window').click(); await wait(600);
-check('Shared links tier renders with match confidence column', /Match/.test([...view().querySelectorAll('table thead th')].map((x) => x.textContent).join(' ')));
+check('Shared links tier renders with match confidence column', /Match/.test([...view().querySelectorAll('.tv table thead th')].map((x) => x.textContent).join(' ')));
 [...view().querySelectorAll('.df-preset-btn')].find((x) => x.textContent.includes('Similar meaning')).click(); await wait(500);
 check('Similar-meaning tier is labelled preliminary', /Preliminary/.test(view().textContent));
 check('Cross-Platform Spread shows rows or an explicit empty state', spreadRows > 0 || /No rows/.test(view().textContent), String(spreadRows));
@@ -108,21 +112,21 @@ check('Sentiment card does not show hate scores', !/hate/i.test(stext));
 await rows('viral'); await wait(500);
 const vtext = view().textContent;
 {
-  const heads = [...view().querySelectorAll('table thead th')].map((x) => x.textContent);
+  const heads = [...view().querySelectorAll('.tv table thead th')].map((x) => x.textContent);
   const iv = heads.findIndex((x) => x.includes('Observed views')), ir = heads.findIndex((x) => x.includes('Reach vs author norm'));
-  const bad = [...view().querySelectorAll('table tbody tr')].filter((tr) => tr.children[iv]?.textContent.trim() === '\u2014' && tr.children[ir]?.textContent.trim() !== '\u2014');
+  const bad = [...view().querySelectorAll('.tv table tbody tr')].filter((tr) => tr.children[iv]?.textContent.trim() === '\u2014' && tr.children[ir]?.textContent.trim() !== '\u2014');
   check('a group with no observed views shows reach as a dash, never 0.0x', iv > 0 && ir > 0 && bad.length === 0, String(bad.length));
 }
 {
-  const row = view().querySelector('table tbody tr');
+  const row = view().querySelector('.tv table tbody tr');
   drillCalls.length = 0; row.click(); await wait(500);
   const u = drillCalls[0] || '';
   check('clicking a breakout row opens the drill-down with the selected dates, its platform and a views/engagement ranking',
-    (() => { const m = doc.querySelector('.ex-ctl .cs')?.textContent.match(/(\d{4}-\d{2}-\d{2}) \u2192 (\d{4}-\d{2}-\d{2})/);
-      return !!m && u.includes('from=' + m[1]) && u.includes('to=' + m[2]) && /platform=/.test(u) && /topic_id=/.test(u) && /sort=(views|engagement)/.test(u); })(), u);
+    (() => { const f = doc.getElementById('ex-date-from').value, e = doc.getElementById('ex-date-to').value;
+      return !!f && !!e && u.includes('from=' + f) && u.includes('to=' + e) && /platform=/.test(u) && /topic_id=/.test(u) && /sort=(views|engagement)/.test(u); })(), u);
 }
 check('Viral card shows stored virality percentile + audience-normalised reach groups', /Virality pct/.test(vtext) && /Reach vs author norm/.test(vtext));
-check('Breakout groups table has rows', view().querySelectorAll('table tbody tr').length > 0, String(view().querySelectorAll('table tbody tr').length));
+check('Breakout groups table has rows', view().querySelectorAll('.tv table tbody tr').length > 0, String(view().querySelectorAll('.tv table tbody tr').length));
 check('Viral Posts calls the API', calls.length >= 1, calls[0] || '');
 check('Viral Posts shows two lists', view().querySelectorAll('.ex-col').length === 2);
 check('post without views is in the engagement list, not ranked by views',
@@ -136,7 +140,7 @@ check('search sends q to the API', calls.some((c) => c.includes('q=zzzzqqq')));
 await rows('topics');
 const q2 = doc.querySelector('.ex-q'); q2.value = 'zzzzqqq'; q2.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter' }));
 await wait(600);
-check('a search with no match empties Trending Topics', view().querySelectorAll('table tbody tr').length === 0);
+check('a search with no match empties Trending Topics', view().querySelectorAll('.tv table tbody tr').length === 0);
 doc.getElementById('mode-basic-btn').click(); await wait(500);
 check('switching back to Overview hides Explore', doc.getElementById('explore-view').style.display === 'none' &&
   doc.getElementById('basic-view').style.display !== 'none');

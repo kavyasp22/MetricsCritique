@@ -20,12 +20,16 @@ Usage:
 from __future__ import annotations
 
 import json
+import re
 import sys
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 import duckdb
+
+import keyword_query as KQ
+from feedback_store import FeedbackError, FeedbackStore
 
 from gemma_live import gemma_status
 from live_view import live_overview, DEFAULT_MILITARY
@@ -41,6 +45,7 @@ _main_con = duckdb.connect(database=":memory:", read_only=False)
 _main_con.execute(f"ATTACH '{DATA / 'analytics.duckdb'}' AS analytics (READ_ONLY)")
 _main_con.execute(f"ATTACH '{DATA / 'metrics.duckdb'}' AS metrics (READ_ONLY)")
 _main_con.execute(f"ATTACH '{DATA / 'geo_ontology.duckdb'}' AS geo (READ_ONLY)")
+FEEDBACK = FeedbackStore()   # reader votes: its own SQLite file, never the metrics DB or production
 
 POST_COLS = "p.post_uid, p.platform, p.posted_at, p.author_name, left(coalesce(p.text,''), 500) AS text, p.url"
 
@@ -684,6 +689,19 @@ def _per_axis_cap(n_axes: int) -> int:
     return max(RELATED_MIN_PER_AXIS, -(-RELATED_LIMIT // n_axes))
 
 
+def _snippet(text: str, words: list, width: int = 320) -> str:
+    """First `width` characters, or - when searching - a window around the first matching word so the match is visible."""
+    if len(text) <= width:
+        return text
+    if words:
+        alts = "|".join(re.escape(w).replace("\\ ", r"\s+") for w in sorted(words, key=len, reverse=True))
+        m = re.search(r"(?<![\w])(" + alts + r")(?![\w])", text, re.IGNORECASE)
+        if m and m.start() > width - 60:
+            start = max(0, m.start() - width // 3)
+            return "\u2026" + text[start:start + width]
+    return text[:width]
+
+
 def explore_viral(qs: dict) -> dict:
     """Explore page: posts ranked by observed views (and, separately, engagement for platforms
     that give no view count). Read-only. Filters: from/to (day), platforms (csv), q (text),
@@ -698,8 +716,12 @@ def explore_viral(qs: dict) -> dict:
     if plats:
         where.append("p.platform IN (" + ",".join("?" * len(plats)) + ")"); params += plats
     q = qs.get("q", [""])[0].strip()
+    terms = []
     if q:
-        where.append("p.text ILIKE ?"); params.append("%" + q.replace("%", "") + "%")
+        kq = KQ.parse(q)                       # raises KeywordError -> 400 with a readable message
+        cond, cp = KQ.to_sql(kq, "p.text")
+        where.append(cond); params.extend(cp)
+        terms = kq.words()
     ent = qs.get("entity_uid", [""])[0].strip()
     join = ""
     if ent:
@@ -708,7 +730,9 @@ def explore_viral(qs: dict) -> dict:
     else:
         params_join = []
     limit = _limit(qs)
-    base = (f"SELECT {POST_COLS}, p.views, p.likes, p.comments, p.shares, "
+    # the text column is read long (100000 chars) so a snippet can be cut around the first match; it is shortened below
+    cols = "p.post_uid, p.platform, p.posted_at, p.author_name, left(coalesce(p.text,''), 100000) AS text, p.url"
+    base = (f"SELECT {cols}, p.views, p.likes, p.comments, p.shares, "
             f"coalesce(p.likes,0)+coalesce(p.comments,0)+coalesce(p.shares,0) AS engagement "
             f"FROM analytics.post_facts p {join} WHERE {' AND '.join(where)}")
     cur = _main_con.cursor()
@@ -724,11 +748,16 @@ def explore_viral(qs: dict) -> dict:
     finally:
         cur.close()
     def clean(rows):
-        # missing counts come back from pandas as NaN, which is not valid JSON (a browser's
-        # JSON.parse rejects the whole response); send null instead
-        return [{k: (None if isinstance(v, float) and v != v else v) for k, v in r.items()} for r in rows]
+        # missing counts come back from pandas as NaN, which is not valid JSON (a browser's JSON.parse rejects the whole
+        # response); send null instead. The text is cut to a short snippet, centred on the first match when searching.
+        out = []
+        for r in rows:
+            r = {k: (None if isinstance(v, float) and v != v else v) for k, v in r.items()}
+            r["text"] = _snippet(r.get("text") or "", terms)
+            out.append(r)
+        return out
 
-    return {"total_posts": int(total), "with_views": clean(with_views), "without_views": clean(no_views)}
+    return {"total_posts": int(total), "with_views": clean(with_views), "without_views": clean(no_views), "terms": terms}
 
 
 def compute_related(cur, view: str, qs: dict, seed_post_uid):
@@ -926,6 +955,22 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/feedback":
+            self._json({"error": "not found"}, status=404)
+            return
+        try:
+            n = int(self.headers.get("Content-Length", "0"))
+            if n <= 0 or n > 4096:
+                raise FeedbackError("body must be 1 to 4096 bytes of JSON")
+            body = json.loads(self.rfile.read(n).decode("utf-8"))
+            self._json(FEEDBACK.vote(body))
+        except (FeedbackError, json.JSONDecodeError, UnicodeDecodeError) as e:
+            self._json({"error": str(e)}, status=400)
+        except Exception as e:
+            self._json({"error": f"could not save: {e}"}, status=500)
+
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/api/health":
@@ -962,8 +1007,18 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/explore/viral":
             try:
                 self._json(explore_viral(parse_qs(parsed.query)))
+            except KQ.KeywordError as e:
+                self._json({"error": str(e)}, status=400)
             except Exception as e:
                 self._json({"error": f"query failed: {e}"}, status=500)
+            return
+        if parsed.path == "/api/feedback/votes":
+            q = parse_qs(parsed.query)
+            self._json({"votes": FEEDBACK.votes_for(q.get("user", [""])[0], q.get("type", [""])[0],
+                                                    [x for x in q.get("ids", [""])[0].split(",") if x], q.get("day", [""])[0])})
+            return
+        if parsed.path == "/api/feedback/summary":
+            self._json(FEEDBACK.summary())
             return
         if parsed.path == "/api/drill":
             qs = parse_qs(parsed.query)
@@ -973,7 +1028,11 @@ class Handler(SimpleHTTPRequestHandler):
                 sql, params = build_query(view, qs)
                 cur = _main_con.cursor()
                 try:
-                    rows = cur.execute(sql + " LIMIT ?", params + [limit]).fetchdf()
+                    try:
+                        offset = max(0, int(qs.get("offset", [0])[0]))
+                    except (ValueError, TypeError):
+                        offset = 0
+                    rows = cur.execute(sql + " LIMIT ? OFFSET ?", params + [limit, offset]).fetchdf()
                     total = int(rows["total_rows"].iloc[0]) if len(rows) else 0
                     cols = [c for c in rows.columns if c != "total_rows"]
                     records = rows[cols].to_dict(orient="records")
@@ -991,7 +1050,7 @@ class Handler(SimpleHTTPRequestHandler):
                                   f"{type(e).__name__}: {e}", file=sys.stderr, flush=True)
                 finally:
                     cur.close()
-                resp = {"view": view, "shown": len(records), "total": total, "rows": records}
+                resp = {"view": view, "shown": len(records), "total": total, "offset": offset, "rows": records}
                 if related is not None:
                     resp["related"] = related
                 self._json(resp)

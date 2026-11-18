@@ -293,3 +293,10 @@ Verdicts and what changed (full table: Metrics_Finalisation_Two_Day_Action_Plan.
 - Done: Explore drill-down ranks a group's posts by views / engagement / shares / likes within the selected dates (`/api/drill` `sort`, `from`/`to`, `platforms`); counts now match the card; NaN sent as null; ranked drills skip the slow related scan (commit 60525dc).
 - Later (not started): save the per-post virality percentile from script 07 (`virality_pct_post`, `virality_ref_n` are computed per post and discarded; add a `post_virality` table), re-run 07 and 08 (~45-60 min, 6-8 GB), then rank viral posts across platforms by it. Validate with a hand-judged sample before any "Breakout" label.
 - Pending: default drill-down (no sort) took ~34 s because `compute_related` scans all embeddings; cap it (see item 1 of the 2026-11-18 pending list).
+
+### Added 2026-11-18 (evening): Explore page features taken from the news-trending UI (branch new-push)
+- Keyword search with a small query language (words, "phrase", OR, -exclude, word forms + short related list) on post text: `UI/keyword_query.py`, `/api/explore/viral?q=`; snippet cut around the first match; matches highlighted. Searches take ~3-7 s over ~500K posts.
+- "Show more" paging in the drill-down (`offset`), custom date boxes, entity cascade (type -> subtype -> entity, incl. countries = posts naming the country), "why it is trending" cards + "How this ranking is decided" panel (thresholds in one `EX_RULES` object), cross-platform story cards with Cards/Table switch.
+- Reader feedback: thumbs up/down with reasons on alerts, topic "why" cards and story cards. Own SQLite file `data/feedback.sqlite` (git-ignored; never production, never the metrics DB). Read results: `GET /api/feedback/summary`. Votes are opinions from whoever clicks; collect from several readers before reading a rate.
+- Tests: `UI/tests/check_explore_features.mjs` (32), `check_explore.mjs` (39), `scripts/tests/test_keyword_query.py`, `test_feedback_store.py`; live API smoke 14 checks.
+- Not done (excluded on purpose): data-freshness panel (needs the production connection for "last ingest / lag").

@@ -2888,3 +2888,41 @@ body[data-mode="explore"] #global-filters { display: none !important; }
 .dr-sort { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: 0.78rem; margin: 0.4rem 0 0.6rem; }
 .dr-sort select { background: transparent; color: inherit; border: 1px solid rgba(143, 163, 191, 0.4); border-radius: 6px; padding: 0.15rem 0.4rem; font: inherit; }
 .dr-sort-note { color: var(--ink-3, #8fa3bf); }
+
+/* ---- reader feedback (thumbs) ---- */
+.fb { position: relative; display: inline-flex; align-items: center; gap: 0.25rem; margin-left: 0.5rem; vertical-align: middle; }
+.fb-b { background: transparent; border: 1px solid rgba(143, 163, 191, 0.35); border-radius: 6px; padding: 0.1rem 0.4rem; cursor: pointer; font-size: 0.85rem; color: inherit; opacity: 0.75; }
+.fb-b:hover { opacity: 1; background: rgba(143, 163, 191, 0.12); }
+.fb-b.on { opacity: 1; border-color: var(--gold, #e3bc4b); background: rgba(227, 188, 75, 0.15); }
+.fb-note { font-size: 0.72rem; color: var(--ink-3, #8fa3bf); }
+.fb-panel { position: absolute; z-index: 40; top: 100%; right: 0; margin-top: 0.25rem; min-width: 14rem; padding: 0.5rem; border-radius: 8px;
+  background: var(--surface, #0f1830); border: 1px solid rgba(143, 163, 191, 0.4); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4); text-align: left; }
+.fb-reason { display: block; font-size: 0.78rem; padding: 0.1rem 0; }
+.fb-other { width: 100%; box-sizing: border-box; min-width: 0; margin: 0.35rem 0; }
+.attn-vote { margin-top: 0.4rem; font-size: 0.78rem; display: flex; align-items: center; gap: 0.2rem; }
+.alert-row { flex-wrap: wrap; }
+/* ---- drill: show more ---- */
+.dr-more { display: block; width: 100%; margin: 0.6rem 0; padding: 0.4rem; border-radius: 8px; border: 1px solid rgba(143, 163, 191, 0.4); background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: 0.82rem; }
+.dr-more:hover { background: rgba(143, 163, 191, 0.12); }
+/* ---- Explore: why cards, methodology, story cards, highlight ---- */
+.ex-why { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 0.7rem; margin-top: 0.4rem; }
+.ex-why-card, .ex-story { border: 1px solid rgba(143, 163, 191, 0.25); border-radius: 10px; padding: 0.65rem 0.8rem; font-size: 0.82rem; }
+.ex-why-hd { display: flex; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.3rem; }
+.ex-why-st { color: var(--gold, #e3bc4b); font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.ex-why-ul { margin: 0.2rem 0 0.4rem 1rem; padding: 0; color: var(--ink-2, inherit); }
+.ex-why-act { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; }
+.ex-method { margin-top: 1rem; border: 1px solid rgba(143, 163, 191, 0.25); border-radius: 8px; padding: 0.4rem 0.7rem; }
+.ex-method summary { cursor: pointer; font-size: 0.85rem; font-weight: 600; }
+.ex-method-t { border-collapse: collapse; width: 100%; margin: 0.5rem 0; font-size: 0.78rem; }
+.ex-method-t th, .ex-method-t td { text-align: left; vertical-align: top; padding: 0.3rem 0.5rem; border-bottom: 1px solid rgba(143, 163, 191, 0.18); }
+.ex-stories { display: flex; flex-direction: column; gap: 0.6rem; margin: 0.5rem 0; }
+.ex-story { display: flex; gap: 0.8rem; }
+.ex-story-rank { font-size: 1.2rem; font-weight: 700; color: var(--gold, #e3bc4b); min-width: 1.6rem; }
+.ex-story-main { flex: 1; min-width: 0; }
+.ex-story-title { font-weight: 600; margin-bottom: 0.3rem; overflow-wrap: anywhere; }
+.ex-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.3rem; }
+.ex-chip { border: 1px solid rgba(143, 163, 191, 0.35); border-radius: 999px; padding: 0.05rem 0.55rem; font-size: 0.72rem; color: var(--ink-2, inherit); }
+.ex-story-stats { color: var(--ink-3, #8fa3bf); margin-bottom: 0.4rem; }
+.ex-post-text mark { background: rgba(227, 188, 75, 0.35); color: inherit; border-radius: 3px; padding: 0 0.1rem; }
+.ex-date-err { color: #ff8a8a; font-size: 0.78rem; }
+.ex-row .bds-label { margin-right: 0.4rem; }

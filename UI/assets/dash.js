@@ -344,6 +344,29 @@
       var list = h('div', { class: 'drill-list' });
       data.rows.forEach(function (row) { list.appendChild(drillRowNode(row)); });
       bodyEl.appendChild(list);
+      /* "Show more": the next page of the same ranked list, appended in place (50 per page after the first 60) */
+      var shown = data.rows.length, total = data.total, moreBtn = null;
+      function syncMore() {
+        if (shown >= total) { if (moreBtn) { moreBtn.remove(); moreBtn = null; } return; }
+        if (!moreBtn) {
+          moreBtn = h('button', { type: 'button', class: 'dr-more' });
+          moreBtn.addEventListener('click', function () {
+            moreBtn.disabled = true;
+            fetch(url + '&offset=' + shown).then(function (r) { return r.json(); }).then(function (d2) {
+              if (mySeq !== DRILL.seq) { return; }
+              if (d2.error) { throw new Error(d2.error); }
+              d2.rows.forEach(function (row) { list.appendChild(drillRowNode(row)); });
+              shown += d2.rows.length;
+              if (!d2.rows.length) { total = shown; }
+              subEl.textContent = subEl.textContent.replace(/Showing \d+ of/, 'Showing ' + shown + ' of');
+              moreBtn.disabled = false; syncMore();
+            }).catch(function (e) { moreBtn.disabled = false; moreBtn.textContent = 'Retry (' + e.message + ')'; });
+          });
+          list.after ? list.after(moreBtn) : bodyEl.appendChild(moreBtn);
+        }
+        moreBtn.textContent = 'Show more (' + fmtInt(total - shown) + ' remaining)';
+      }
+      syncMore();
       if (data.related) { renderRelated(bodyEl, data.related); }
     }).catch(function (e) {
       if (mySeq !== DRILL.seq) { return; }
@@ -5158,6 +5181,7 @@
     var body = h('div');
     body.appendChild(h('div', { class: 'attn-hd', text: 'Needs attention' }));
     body.appendChild(h('div', { class: 'attn-body' }, [txt('Unusual activity in '), h('b', { text: name }), txt(' on ' + fmtDayFull(top.day) + '.')]));
+    body.appendChild(h('div', { class: 'attn-vote' }, [h('span', { class: 'cs', text: 'Is this useful? ' }), FB.buttons('alert', top.dimType + '|' + top.key, name, day(top.day))]));
     body.appendChild(h('div', { class: 'attn-note', text: alerts.length + ' alert' + (alerts.length === 1 ? '' : 's') + ' flagged in the selected window.' + (top.rationale ? ' ' + top.rationale : '') }));
     box.appendChild(body);
 
@@ -5414,6 +5438,7 @@
 
     var byKey = {};
     function consider(key, item) {
+      item.fbId = key;
       var ago = daysAgo(item.day, maxDay);
       var score = sevWeight(item.severity) * (0.5 + 0.5 * (1 - (isNum(item.q) ? Math.min(1, item.q) : 1))) / (1 + ago);
       item.score = score;
@@ -5457,7 +5482,8 @@
         h('span', { class: 'ar-body' }, [
           h('b', { text: a.name }),
           txt(' — ' + magnitudeText(a.q) + ' · ' + recencyText(a.ago))
-        ])
+        ]),
+        FB.buttons('alert', a.fbId, a.name, day(a.day))
       ]);
       attachDrill(row, a.drill);
       list.appendChild(row);
@@ -5568,7 +5594,7 @@
      (topics, bursts, shared stories) and, for Viral Posts, the read-only /api/explore/viral.
      Nothing here writes anywhere. The date range is the shared S.from / S.to. */
 
-  var EX = { tile: 'topics', platforms: {}, q: '', entityUid: '', entityName: '', top: 25, unclass: false,
+  var EX = { tile: 'topics', platforms: {}, q: '', entityUid: '', entityName: '', entType: '', entSub: '', terms: [], spreadMode: 'cards', spreadLimit: 10, top: 25, unclass: false,
              viral: null, viralKey: '' };
   var EX_TILES = [
     { k: 'topics', t: 'Trending Topics', s: "What's gaining attention?",
@@ -5635,40 +5661,46 @@
   function exMax(a, v) { return (isNum(v) && (a == null || v > a)) ? v : a; }
   function exMin(a, v) { return (isNum(v) && (a == null || v < a)) ? v : a; }
 
-  /* Stage of a topic from its own daily series (effort-normalised: posts per active channel, so a
-     collector ramp-up does not look like a surge). Compares the last 3 days with the 3 before them:
-       starting  = clearly up and the earlier period (same length, just before) was under 30% as large (ranges up to 30 days only);  rising = up by 25% or more;
-       declining = down by 20% or more;  peak = flat and within 10% of the best 3-day level in the range;
-       steady = flat, below that level.  Needs 6+ days and 20+ posts in them, otherwise "too little data". */
-  function exSeriesStage(daily, days, prevTotal) {
-    if (days.length < 6) { return 'too little data'; }
+  /* The thresholds behind the Trending Topics ranking. ONE place: the code below and the "How this is decided" panel both read it. */
+  var EX_RULES = { stageDays: 6, stageMinPosts: 20, rise: 1.25, fall: 0.8, peakBand: 0.9, startPrev: 0.3, startMaxDays: 30,
+                   growthMinPrev: 10, growthMinCur: 20, alpha: 0.05, tonePosNeg: 0.15 };
+
+  /* Stage of a topic from its own daily series (effort-normalised: posts per active channel, so a collector ramp-up does not
+     look like a surge). Compares the last 3 days with the 3 before them. Returns {stage, change} where change = last 3 / previous 3 - 1. */
+  function exStageDetail(daily, days, prevTotal) {
+    var R = EX_RULES;
+    if (days.length < R.stageDays) { return { stage: 'too little data', change: null }; }
     function rate(d) { var o = daily[d]; return o && o.eff > 0 ? o.V / o.eff : 0; }
     function posts(d) { return daily[d] ? daily[d].V : 0; }
-    var last6 = days.slice(-6), tot = 0;
+    var last6 = days.slice(-R.stageDays), tot = 0;
     last6.forEach(function (d) { tot += posts(d); });
-    if (tot < 20) { return 'too little data'; }
+    if (tot < R.stageMinPosts) { return { stage: 'too little data', change: null }; }
     var r = days.map(rate), n = r.length;
     function mean(a, i, j) { var x = 0; for (var k = i; k < j; k++) { x += a[k]; } return x / Math.max(1, j - i); }
-    var m3 = mean(r, n - 3, n), p3 = mean(r, n - 6, n - 3);
-    var best = m3;
+    var m3 = mean(r, n - 3, n), p3 = mean(r, n - 6, n - 3), best = m3;
     for (var i = 3; i <= n; i++) { best = Math.max(best, mean(r, i - 3, i)); }
     var curTotal = 0; days.forEach(function (d) { curTotal += posts(d); });
-    if (p3 > 0 && m3 >= 1.25 * p3) { return (days.length <= 30 && prevTotal > 0 && prevTotal < 0.3 * curTotal) ? 'starting' : 'rising'; }   // no earlier period (full window) cannot be "starting"
-    if (p3 > 0 && m3 <= 0.8 * p3) { return 'declining'; }
-    return m3 >= 0.9 * best ? 'peak' : 'steady';
+    var change = p3 > 0 ? m3 / p3 - 1 : null;
+    if (p3 > 0 && m3 >= R.rise * p3) {
+      return { stage: (days.length <= R.startMaxDays && prevTotal > 0 && prevTotal < R.startPrev * curTotal) ? 'starting' : 'rising', change: change };   // no earlier period (full window) cannot be "starting"
+    }
+    if (p3 > 0 && m3 <= R.fall * p3) { return { stage: 'declining', change: change }; }
+    return { stage: m3 >= R.peakBand * best ? 'peak' : 'steady', change: change };
   }
+  function exSeriesStage(daily, days, prevTotal) { return exStageDetail(daily, days, prevTotal).stage; }
 
   function exTopicRows() {
     var g = exCells(), by = {};
     g.cells.forEach(function (c) {
       var r = c.r, tid = exTid(r.topic_id);
       var o = by[tid] || (by[tid] = { topic_id: tid, cur: 0, prev: 0, plats: {}, alertDays: {}, emer: null, minq: null,
-        mom: null, momDay: '', burstDays: {}, daily: {} });
+        mom: null, momDay: '', burstDays: {}, daily: {}, platV: {} });
       if (c.inPrev) { o.prev += (r.V || 0); }
       if (!c.inCur) { return; }
       var dd = o.daily[c.d] || (o.daily[c.d] = { V: 0, eff: 0 });
       dd.V += (r.V || 0); dd.eff += (isNum(r.effort) ? r.effort : 0);
       o.cur += (r.V || 0);
+      o.platV[r.platform] = (o.platV[r.platform] || 0) + (r.V || 0);
       if ((r.V || 0) > 0) { o.plats[r.platform] = true; }
       if (r.support_ok) {
         if (r.alert_flag) { o.alertDays[c.d] = true; }
@@ -5681,14 +5713,18 @@
     var toDay = g.days[g.days.length - 1] || S.to;
     var eps = T('burst_episodes').filter(function (e) { return exPlatOk(e.platform); });
     return Object.keys(by).map(function (tid) {
-      var o = by[tid], ok = o.prev >= 10 && o.cur >= 20;
+      var o = by[tid], ok = o.prev >= EX_RULES.growthMinPrev && o.cur >= EX_RULES.growthMinCur;
+      var sd = exStageDetail(o.daily, g.days, o.prev);
+      var topP = Object.keys(o.platV).sort(function (x, y) { return o.platV[y] - o.platV[x]; })[0];
       return {
         topic_id: tid, topic: topicLabel(tid), posts: o.cur,
         growth: ok ? (o.cur - o.prev) / o.prev : null,
         emergence: o.emer, minq: o.minq,
         alert_days: Object.keys(o.alertDays).length, burst_days: Object.keys(o.burstDays).length,
         momentum: o.mom, platforms: Object.keys(o.plats).length,
-        stage: exSeriesStage(o.daily, g.days, o.prev)
+        stage: sd.stage, stage_change: sd.change, prev: o.prev,
+        top_platform: topP || null, top_share: topP && o.cur ? o.platV[topP] / o.cur : null,
+        plat_names: Object.keys(o.plats)
       };
     }).filter(function (r) { return r.posts > 0 && exTextOk(r.topic) && (EX.unclass || r.topic !== 'Unclassified'); });
   }
@@ -5721,6 +5757,68 @@
       open: true, label: 'Trending topics (' + rows.length + ')',
       rowDrill: function (r) { return { view: 'topic', params: exDrillParams({ topic_id: r.topic_id }, true), title: r.topic, subtitle: S.from + ' \u2192 ' + S.to }; }
     });
+    exWhyCards(host, rows);
+    exMethodology(host);
+  }
+
+  /* plain-language reasons, each one a number the table already shows */
+  function exWhyBullets(r, rank, n) {
+    var b = [], nd = exDays().length;
+    b.push(fmtInt(r.posts) + ' posts between ' + S.from + ' and ' + S.to + (r.growth != null
+      ? ' \u2014 ' + (r.growth >= 0 ? '+' : '') + Math.round(r.growth * 100) + '% against the previous ' + nd + ' days (' + fmtInt(r.prev) + ' posts).'
+      : ' \u2014 too few posts in one of the two periods to compare growth.'));
+    if (r.emergence != null) { b.push('Emergence score ' + Number(r.emergence).toFixed(2) + ', rank ' + rank + ' of ' + n + ' topics in this view.'); }
+    b.push(r.alert_days > 0 ? r.alert_days + ' day' + (r.alert_days === 1 ? '' : 's') + ' where the jump in volume was statistically significant (q < ' + EX_RULES.alpha + ').'
+      : 'No day with a statistically significant jump.');
+    b.push('Stage ' + r.stage + (r.stage_change != null ? ': the last 3 days are ' + (r.stage_change >= 0 ? '+' : '') + Math.round(r.stage_change * 100) + '% against the 3 before (posts per active channel).' : '.'));
+    if (r.top_platform) { b.push('Seen on ' + r.platforms + ' platform' + (r.platforms === 1 ? '' : 's') + '; the largest is ' + r.top_platform + ' (' + Math.round(100 * r.top_share) + '% of the posts).'); }
+    return b;
+  }
+  function exWhyCards(host, rows) {
+    var top = rows.slice(0, 5);
+    if (!top.length) { return; }
+    host.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Why these are trending (top ' + top.length + ')' }));
+    var list = h('div', { class: 'ex-why' });
+    top.forEach(function (r, i) {
+      var card = h('article', { class: 'ex-why-card' });
+      card.appendChild(h('div', { class: 'ex-why-hd' }, [h('b', { text: (i + 1) + '. ' + r.topic }), h('span', { class: 'ex-why-st', text: r.stage })]));
+      var ul = h('ul', { class: 'ex-why-ul' });
+      exWhyBullets(r, i + 1, rows.length).forEach(function (t) { ul.appendChild(h('li', { text: t })); });
+      card.appendChild(ul);
+      var act = h('div', { class: 'ex-why-act' });
+      var vb = h('button', { type: 'button', class: 'df-preset-btn', text: 'View posts' });
+      vb.addEventListener('click', function () { DRILL.open({ view: 'topic', params: exDrillParams({ topic_id: r.topic_id }, true), title: r.topic, subtitle: S.from + ' \u2192 ' + S.to }); });
+      act.appendChild(vb);
+      act.appendChild(FB.buttons('topic', r.topic_id, r.topic, S.to));
+      card.appendChild(act);
+      list.appendChild(card);
+    });
+    host.appendChild(list);
+  }
+
+  /* "How this is decided": formulas come from the stored metric definitions; thresholds from EX_RULES (the same numbers the code uses) */
+  function exMethodology(host) {
+    var det = h('details', { class: 'ex-method' });
+    det.appendChild(h('summary', { text: 'How this ranking is decided' }));
+    var meta = {};
+    T('metric_meta').forEach(function (m) { meta[m.metric_key] = m; });
+    var R = EX_RULES;
+    var rows = [
+      ['Ranking', (meta.emergence_score ? meta.emergence_score.formula : 'Emergence score'), 'Topics are sorted by emergence score, then by posts. The score is relative to this run\u2019s panel: a ranking, not a probability.'],
+      ['Alert day', (meta.surprise ? meta.surprise.formula : 'Volume surprise'), 'A day counts when its jump is significant after Benjamini\u2013Hochberg correction (q < ' + R.alpha + ') and the cell has enough support.'],
+      ['Growth', 'posts in the selected days \u00f7 posts in the same number of days just before, minus 1', 'Shown only with at least ' + R.growthMinPrev + ' earlier and ' + R.growthMinCur + ' current posts; otherwise \u201c\u2014\u201d.'],
+      ['Momentum', (meta.momentum ? meta.momentum.formula : 'EMA7 \u2212 EMA21 of growth'), 'Describes the recent direction of volume; it is not a forecast.'],
+      ['Stage', 'last 3 days vs the 3 before, as posts per active channel', 'rising \u2265 +' + Math.round((R.rise - 1) * 100) + '%; declining \u2264 \u2212' + Math.round((1 - R.fall) * 100) + '%; peak = flat and within ' + Math.round((1 - R.peakBand) * 100) + '% of the best 3-day level; steady = flat below it; starting = rising and the earlier period was under ' + Math.round(R.startPrev * 100) + '% as large (ranges up to ' + R.startMaxDays + ' days). Needs ' + R.stageDays + '+ days and ' + R.stageMinPosts + '+ posts in the last ' + R.stageDays + '.'],
+      ['Left out', 'Unclassified', 'Posts not assigned to a topic are excluded unless \u201cInclude Unclassified\u201d is ticked.']
+    ];
+    var tb = h('table', { class: 'ex-method-t' });
+    tb.appendChild(h('thead', {}, [h('tr', {}, ['Item', 'Definition', 'Rule'].map(function (x) { return h('th', { text: x }); }))]));
+    var body = h('tbody');
+    rows.forEach(function (r) { body.appendChild(h('tr', {}, r.map(function (x) { return h('td', { text: x }); }))); });
+    tb.appendChild(body);
+    det.appendChild(tb);
+    det.appendChild(h('p', { class: 'cs', text: 'Limits: the thresholds (25%, 20%, 10%) are chosen, not tuned, and should be hand-checked before customers rely on a stage. Counts are posts and comments in the collected corpus, not all activity on a platform.' }));
+    host.appendChild(det);
   }
 
   function exLifeView(host) {
@@ -5780,18 +5878,18 @@
     function inRange(s) { var d = s.origin_time ? day(s.origin_time) : null; return d && d >= S.from && d <= S.to; }
     if (sub === 'links') {
       return T('cross_platform_url_links').filter(function (s) { return inRange(s) && plOf(s).some(exPlatOk) && exTextOk(s.url); })
-        .map(function (s) { return { id: s.link_id, text: String(s.url || '').slice(0, 70), conf: s.match_confidence, origin: s.origin_platform,
+        .map(function (s) { return { id: s.link_id, text: String(s.url || '').slice(0, 220), conf: s.match_confidence, origin: s.origin_platform,
           platforms: plOf(s).join(', '), posts: s.n_unique_posts != null ? s.n_unique_posts : s.n_posts,
           spread_h: s.spread_duration_hours, views: s.observed_views || 0, eng: 0, first: day(s.origin_time) }; });
     }
     if (sub === 'events') {
       return T('cross_platform_semantic_events').filter(function (s) { return inRange(s) && plOf(s).some(exPlatOk) && exTextOk(s.snippet); })
-        .map(function (s) { return { id: s.event_id, text: ((s.large_event ? '[large event] ' : '') + (s.snippet || '')).slice(0, 70), conf: s.match_confidence,
+        .map(function (s) { return { id: s.event_id, text: ((s.large_event ? '[large event] ' : '') + (s.snippet || '')).slice(0, 220), conf: s.match_confidence,
           origin: s.origin_platform, platforms: plOf(s).join(', '), posts: s.n_unique_posts,
           spread_h: s.spread_duration_hours, views: s.observed_views || 0, eng: s.total_engagement || 0, first: day(s.origin_time) }; });
     }
     return T('cross_platform_stories').filter(function (s) { return inRange(s) && plOf(s).some(exPlatOk) && exTextOk(s.snippet); })
-      .map(function (s) { return { id: s.story_id, text: String(s.snippet || '').slice(0, 70), conf: 'exact text', origin: s.origin_platform,
+      .map(function (s) { return { id: s.story_id, text: String(s.snippet || '').slice(0, 220), conf: 'exact text', origin: s.origin_platform,
         platforms: plOf(s).join(', '), posts: s.n_posts, spread_h: s.spread_duration_hours,
         views: s.observed_views || 0, eng: s.viewless_engagement || 0, first: day(s.origin_time) }; });
   }
@@ -5811,9 +5909,51 @@
     host.appendChild(h('p', { class: 'cs', text: note + ' "Earliest observed" is the first post we saw, not the confirmed origin. ' +
       'Views are observed counts only (no estimates); posts on platforms with no view count are not added in. Click a row to see every post.' }));
     var rows = exSpreadRows(sub).sort(function (a, b) { return (b.views + b.eng) - (a.views + a.eng); }).slice(0, EX.top * 4);
+    var modeBar = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'VIEW' })]);
+    [['cards', 'Cards'], ['table', 'Table']].forEach(function (x) {
+      var b = h('button', { type: 'button', class: 'df-preset-btn' + (EX.spreadMode === x[0] ? ' active' : ''), text: x[1] });
+      b.addEventListener('click', function () { EX.spreadMode = x[0]; render(); });
+      modeBar.appendChild(b);
+    });
+    host.appendChild(modeBar);
     var drillView = { stories: ['cross_platform', 'story_id'], links: ['cross_platform_url', 'link_id'], events: ['cross_platform_event', 'event_id'] }[sub];
+    if (EX.spreadMode === 'cards') {
+      var shownN = Math.min(EX.spreadLimit, rows.length), list = h('div', { class: 'ex-stories' });
+      rows.slice(0, shownN).forEach(function (r, i) {
+        var params = {}; params[drillView[1]] = r.id;
+        var card = h('article', { class: 'ex-story' });
+        card.appendChild(h('div', { class: 'ex-story-rank', text: String(i + 1) }));
+        var main = h('div', { class: 'ex-story-main' });
+        main.appendChild(h('div', { class: 'ex-story-title', text: r.text }));
+        main.appendChild(h('div', { class: 'ex-chips' }, [
+          h('span', { class: 'ex-chip', text: 'match: ' + r.conf }),
+          h('span', { class: 'ex-chip', text: 'earliest observed: ' + r.origin }),
+          h('span', { class: 'ex-chip', text: r.platforms })]));
+        main.appendChild(h('div', { class: 'ex-story-stats' }, [
+          h('b', { text: fmtInt(r.posts) }), txt(' posts \u00b7 '),
+          h('b', { text: Number(r.spread_h || 0).toFixed(1) }), txt(' h observed spread \u00b7 '),
+          h('b', { text: fmtCompact(r.views) }), txt(' observed views \u00b7 first seen ' + r.first)]));
+        var act = h('div', { class: 'ex-why-act' });
+        var vb = h('button', { type: 'button', class: 'df-preset-btn', text: 'View posts' });
+        vb.addEventListener('click', function () { DRILL.open({ view: drillView[0], params: params, title: 'Spread (earliest observed: ' + r.origin + ')' }); });
+        act.appendChild(vb);
+        act.appendChild(FB.buttons('story', sub + ':' + r.id, r.text, r.first));
+        main.appendChild(act);
+        card.appendChild(main);
+        list.appendChild(card);
+      });
+      host.appendChild(h('div', { class: 'ct', text: 'Cross-platform spread (' + rows.length + ')' }));
+      host.appendChild(list);
+      if (!rows.length) { empty(host, 'No stories in this range and platform selection.'); }
+      if (rows.length > shownN) {
+        var more = h('button', { type: 'button', class: 'dr-more', text: 'Show more stories (' + (rows.length - shownN) + ' remaining)' });
+        more.addEventListener('click', function () { EX.spreadLimit += 10; render(); });
+        host.appendChild(more);
+      }
+      return;
+    }
     tableView(host, [
-      { k: 'text', label: sub === 'links' ? 'Shared link' : 'Sample text' },
+      { k: 'text', label: sub === 'links' ? 'Shared link' : 'Sample text', fmt: function (v) { var t = String(v); return t.length > 70 ? t.slice(0, 70) + '\u2026' : t; } },
       { k: 'conf', label: 'Match' },
       { k: 'origin', label: 'First seen on' },
       { k: 'platforms', label: 'Platforms' },
@@ -5830,6 +5970,85 @@
     });
   }
 
+
+  /* =============================================================== reader feedback (thumbs up / down with reasons)
+     Votes go to /api/feedback (its own SQLite file on the server, never production). Each reader is an anonymous id kept in this
+     browser. Down opens a small list of reasons; voting again replaces the vote; clicking the same thumb withdraws it. */
+  var FB = { user: null, pending: {}, timer: null };
+  var FB_REASONS = [['not_a_real_spike', 'Not a real spike'], ['routine_volume', 'Routine volume'], ['duplicate', 'Same as another'],
+                    ['wrong_topic', 'Wrong topic'], ['wrong_name', 'Wrong name'], ['bad_text', 'Bad text'], ['other', 'Something else…']];
+  FB.uid = function () {
+    if (FB.user) { return FB.user; }
+    try { FB.user = localStorage.getItem('fb_uid'); } catch (e) { FB.user = null; }
+    if (!FB.user) {
+      FB.user = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+      try { localStorage.setItem('fb_uid', FB.user); } catch (e) { /* kept for this page only */ }
+    }
+    return FB.user;
+  };
+  FB.post = function (body) {
+    return fetch('/api/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) { throw new Error(j && j.error ? j.error : 'HTTP ' + r.status); } return j; }); });
+  };
+  FB.want = function (type, id, dayStr, cb) {            // batch the "what did I already vote" lookups of everything on screen
+    var k = type + '|' + (dayStr || '');
+    var g = FB.pending[k] || (FB.pending[k] = { type: type, day: dayStr || '', ids: [], cbs: {} });
+    if (g.ids.indexOf(id) < 0) { g.ids.push(id); }
+    (g.cbs[id] = g.cbs[id] || []).push(cb);
+    if (FB.timer) { return; }
+    FB.timer = setTimeout(function () {
+      var groups = FB.pending; FB.pending = {}; FB.timer = null;
+      Object.keys(groups).forEach(function (key) {
+        var gr = groups[key];
+        fetch('/api/feedback/votes?user=' + encodeURIComponent(FB.uid()) + '&type=' + encodeURIComponent(gr.type) + '&day=' + encodeURIComponent(gr.day) +
+          '&ids=' + encodeURIComponent(gr.ids.join(',')))
+          .then(function (r) { return r.json(); })
+          .then(function (j) { gr.ids.forEach(function (i) { (gr.cbs[i] || []).forEach(function (f) { f((j.votes || {})[i]); }); }); })
+          .catch(function () { /* static snapshot or API down: the buttons still render, they just start unselected */ });
+      });
+    }, 40);
+  };
+  FB.buttons = function (type, id, label, dayStr) {
+    var wrap = h('span', { class: 'fb', 'data-fb': type + ':' + id });
+    var up = h('button', { type: 'button', class: 'fb-b fb-up', title: 'Useful and real', text: '\u{1F44D}' });
+    var down = h('button', { type: 'button', class: 'fb-b fb-down', title: 'Not useful or not real', text: '\u{1F44E}' });
+    up.setAttribute('aria-label', 'Thumbs up'); down.setAttribute('aria-label', 'Thumbs down');
+    var note = h('span', { class: 'fb-note', role: 'status' }), panel = null, state = { vote: 0 };
+    function paint() {
+      up.classList.toggle('on', state.vote === 1); down.classList.toggle('on', state.vote === -1);
+      up.setAttribute('aria-pressed', state.vote === 1 ? 'true' : 'false'); down.setAttribute('aria-pressed', state.vote === -1 ? 'true' : 'false');
+    }
+    function closePanel() { if (panel) { panel.remove(); panel = null; } }
+    function send(vote, reasons, other) {
+      return FB.post({ user: FB.uid(), item_type: type, item_id: id, day: dayStr || '', label: String(label || '').slice(0, 200), vote: vote, reasons: reasons || [], other_text: other || '' })
+        .then(function () { state.vote = vote; paint(); note.textContent = vote ? 'Thanks' : ''; })
+        .catch(function (e) { note.textContent = 'Could not save (' + e.message + ')'; });
+    }
+    function openPanel() {
+      closePanel();
+      panel = h('div', { class: 'fb-panel' });
+      panel.addEventListener('click', function (e) { e.stopPropagation(); });
+      var checks = [];
+      FB_REASONS.forEach(function (r) {
+        var cb = h('input', { type: 'checkbox', value: r[0] });
+        checks.push(cb);
+        panel.appendChild(h('label', { class: 'fb-reason' }, [cb, h('span', { text: ' ' + r[1] })]));
+      });
+      var other = h('input', { type: 'text', class: 'ex-q fb-other', maxlength: '300', placeholder: 'Tell us more (optional)' });
+      var submit = h('button', { type: 'button', class: 'df-preset-btn', text: 'Send' });
+      submit.addEventListener('click', function () {
+        var rs = checks.filter(function (c) { return c.checked; }).map(function (c) { return c.value; });
+        send(-1, rs, other.value).then(closePanel);
+      });
+      panel.appendChild(other); panel.appendChild(submit);
+      wrap.appendChild(panel);
+    }
+    up.addEventListener('click', function (e) { e.stopPropagation(); closePanel(); send(state.vote === 1 ? 0 : 1); });
+    down.addEventListener('click', function (e) { e.stopPropagation(); if (state.vote === -1) { closePanel(); send(0); } else { openPanel(); } });
+    wrap.appendChild(up); wrap.appendChild(down); wrap.appendChild(note);
+    FB.want(type, id, dayStr, function (v) { if (v) { state = v; paint(); } });
+    return wrap;
+  };
 
   /* ---- Sentiment Analysis card: stored tone metrics only (counts are summed before shares are taken) ---- */
   function exSentRows(groupBy) {
@@ -5914,6 +6133,26 @@
     });
   }
 
+  /* highlight the searched words (whole words, any script) inside a post; text is only ever inserted as text */
+  function exHl(text, terms) {
+    var t = String(text || '');
+    if (!terms || !terms.length) { return [txt(t)]; }
+    var alts = terms.slice().sort(function (a, b) { return b.length - a.length; })
+      .map(function (w) { return w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'); }).join('|');
+    var re;
+    try { re = new RegExp('(^|[^\\p{L}\\p{N}])(' + alts + ')(?![\\p{L}\\p{N}])', 'giu'); } catch (e) { return [txt(t)]; }
+    var out = [], last = 0, m;
+    while ((m = re.exec(t)) !== null) {
+      var start = m.index + m[1].length;
+      if (start > last) { out.push(txt(t.slice(last, start))); }
+      out.push(h('mark', { text: m[2] }));
+      last = start + m[2].length;
+      if (m[0].length === 0) { re.lastIndex++; }
+    }
+    if (last < t.length) { out.push(txt(t.slice(last))); }
+    return out;
+  }
+
   function exPostCard(p, byViews) {
     var when = p.posted_at ? day(p.posted_at) : '';
     var metric = byViews ? (fmtCompact(p.views || 0) + ' views') : ('engagement ' + fmtCompact(p.engagement || 0));
@@ -5923,7 +6162,7 @@
       h('span', { text: ' · ' + (p.likes != null ? fmtCompact(p.likes) + ' likes' : '') +
         (p.shares != null ? ' · ' + fmtCompact(p.shares) + ' shares' : '') })
     ]);
-    var kids = [title, h('div', { class: 'ex-post-text', text: String(p.text || '').slice(0, 300) })];
+    var kids = [title, h('div', { class: 'ex-post-text' }, exHl(String(p.text || '').slice(0, 400), EX.terms))];
     if (p.url && /^https?:/i.test(p.url)) {
       var a = h('a', { text: 'source post', href: p.url });
       a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer');
@@ -5951,7 +6190,7 @@
         pct: o.vn >= 20 ? o.vs / o.vn : null, n_rated: o.vn,
         reach: o.rn >= 20 ? o.rs / o.rn : null,
         views: o.hasViews ? o.views : null, eng: o.engN ? o.eng / o.engN : null };
-    }).filter(function (r) { return r.pct != null && exTextOk(r.topic) && (EX.unclass || r.topic !== 'Unclassified'); });
+    }).filter(function (r) { return r.pct != null && (EX.unclass || r.topic !== 'Unclassified'); });   // the search box here searches POST TEXT (below), not topic names
   }
 
   function exViralView(host) {
@@ -5998,21 +6237,20 @@
       if (!d.without_views.length) { empty(b, 'None.'); }
       body.appendChild(h('div', { class: 'ex-cols' }, [a, b]));
     }
-    if (EX.viral && EX.viralKey === key) { paint(EX.viral); return; }
+    if (EX.viral && EX.viralKey === key) { EX.terms = EX.viral.terms || []; paint(EX.viral); return; }
     body.appendChild(h('div', { class: 'empty', text: 'Loading…' }));
     var url = '/api/explore/viral?from=' + encodeURIComponent(S.from) + '&to=' + encodeURIComponent(S.to) +
       '&platforms=' + encodeURIComponent(plats) + '&q=' + encodeURIComponent(EX.q) +
       '&entity_uid=' + encodeURIComponent(EX.entityUid) + '&limit=' + EX.top;
     fetch(url, { cache: 'no-store' }).then(function (r) {
-      if (!r.ok) { throw new Error('HTTP ' + r.status); }
-      return r.json();
+      return r.json().then(function (j) { if (!r.ok) { throw new Error(j && j.error ? j.error : 'HTTP ' + r.status); } return j; });
     }).then(function (d) {
       if (d.error) { throw new Error(d.error); }
-      EX.viral = d; EX.viralKey = key;
+      EX.viral = d; EX.viralKey = key; EX.terms = d.terms || [];
       if (body.isConnected !== false) { paint(d); }
     }).catch(function (err) {
       body.textContent = '';
-      empty(body, 'Viral posts need the API server (' + err.message + '). The static snapshot has no post-level data.');
+      empty(body, /^HTTP|Failed|fetch|NetworkError/i.test(err.message) ? 'Viral posts need the API server (' + err.message + '). The static snapshot has no post-level data.' : 'Search problem: ' + err.message);
     });
   }
 
@@ -6062,7 +6300,22 @@
       });
       row1.appendChild(b);
     });
-    row1.appendChild(h('span', { class: 'cs', text: S.from + ' → ' + S.to }));
+    var dFrom = h('input', { type: 'date', class: 'bds-date-input', id: 'ex-date-from', 'aria-label': 'Start date' }), dTo = h('input', { type: 'date', class: 'bds-date-input', id: 'ex-date-to', 'aria-label': 'End date' });
+    dFrom.value = S.from; dTo.value = S.to;
+    var dErr = h('span', { class: 'ex-date-err', role: 'status' });
+    var dApply = h('button', { type: 'button', class: 'df-preset-btn', id: 'ex-date-apply', text: 'Apply dates' });
+    dApply.addEventListener('click', function () {
+      var f = dFrom.value, t = dTo.value, lo = ALLDAYS[0], hi = ALLDAYS[ALLDAYS.length - 1];
+      if (!f || !t) { dErr.textContent = 'Pick both dates.'; return; }
+      if (f > t) { dErr.textContent = 'The start date is after the end date.'; return; }
+      if (t < lo || f > hi) { dErr.textContent = 'No data between ' + lo + ' and ' + hi + ' overlaps that range.'; return; }
+      S.from = f < lo ? lo : f; S.to = t > hi ? hi : t;
+      var W0 = WINDAYS[0], W1 = WINDAYS[WINDAYS.length - 1];
+      S.windowOnly = !!(W0 && S.from >= W0 && S.to <= W1);
+      EX.viral = null; render();
+    });
+    row1.appendChild(dFrom); row1.appendChild(h('span', { class: 'bds-arrow', text: '\u2192' })); row1.appendChild(dTo);
+    row1.appendChild(dApply); row1.appendChild(dErr);
     card.appendChild(row1);
 
     var row2 = h('div', { class: 'ex-row' });
@@ -6086,20 +6339,39 @@
     menu.appendChild(ap);
     det.appendChild(menu); row2.appendChild(det);
 
-    var q = h('input', { type: 'text', class: 'ex-q', placeholder: EX.tile === 'viral' ? 'Search post text…' : 'Search topic or text…' });
+    var q = h('input', { type: 'text', class: 'ex-q', placeholder: EX.tile === 'viral' ? 'Search post text\u2026' : 'Search topic or text\u2026' });
+    if (EX.tile === 'viral') { q.title = 'flood = any form of the word (floods, flooding\u2026) \u00b7 flood relief = both words \u00b7 "flash flood" = exact phrase \u00b7 flood OR landslide = either \u00b7 flood -dam = without dam'; }
     q.value = EX.q;
     function applyQ() { EX.q = q.value.trim(); EX.viral = null; render(); }
     q.addEventListener('keydown', function (e) { if (e.key === 'Enter') { applyQ(); } });
     row2.appendChild(q);
     if (EX.tile === 'viral') {
-      var opts = exEntityOptions();
+      var TYPES = [['', 'Any type'], ['PERSON', 'People'], ['ORG', 'Organisations'], ['LOCATION', 'Places (incl. countries)'], ['EVENT', 'Events']];
+      var tsel = h('select', { class: 'ex-top', id: 'ex-ent-type', 'aria-label': 'Entity type' });
+      TYPES.forEach(function (x) { var o = h('option', { text: x[1], value: x[0] }); if (EX.entType === x[0]) { o.selected = true; } tsel.appendChild(o); });
+      tsel.addEventListener('change', function () { EX.entType = tsel.value; EX.entSub = ''; EX.entityUid = ''; EX.entityName = ''; EX.viral = null; render(); });
+      var subs = {};
+      T('entity_dim').forEach(function (r) { if ((!EX.entType || r.entity_type === EX.entType) && r.entity_subtype) { subs[r.entity_subtype] = true; } });
+      var ssel = h('select', { class: 'ex-top', id: 'ex-ent-sub', 'aria-label': 'Entity subtype' });
+      ssel.disabled = !EX.entType;
+      [''].concat(Object.keys(subs).sort()).forEach(function (k) {
+        var o = h('option', { text: k ? subtypeName(k) : 'Any subtype', value: k }); if (EX.entSub === k) { o.selected = true; } ssel.appendChild(o);
+      });
+      ssel.addEventListener('change', function () { EX.entSub = ssel.value; EX.entityUid = ''; EX.entityName = ''; EX.viral = null; render(); });
+      var opts = {}, cnt = 0;
+      T('entity_dim').forEach(function (r) {
+        if (cnt >= 400) { return; }
+        if (EX.entType && r.entity_type !== EX.entType) { return; }
+        if (EX.entSub && r.entity_subtype !== EX.entSub) { return; }
+        if (!opts[r.canonical_name]) { opts[r.canonical_name] = r; cnt++; }
+      });
       var dl = h('datalist', { id: 'ex-ent-list' });
       Object.keys(opts).forEach(function (nm) {
         var o = document.createElement('option'); o.value = nm;
-        o.label = opts[nm].entity_type + ' · ' + fmtInt(opts[nm].distinct_posts) + ' posts';
+        o.label = opts[nm].entity_type + ' \u00b7 ' + fmtInt(opts[nm].distinct_posts) + ' posts';
         dl.appendChild(o);
       });
-      var ent = h('input', { type: 'text', class: 'ex-q', placeholder: 'Entity (type to pick)…' });
+      var ent = h('input', { type: 'text', class: 'ex-q', id: 'ex-ent', placeholder: 'Posts naming\u2026 (type to pick)', title: 'Pick a person, organisation, place or country; only posts that name it are listed. A country here means the post names it, not that the event happened there.' });
       ent.setAttribute('list', 'ex-ent-list'); ent.value = EX.entityName;
       function applyEnt() {
         var r = opts[ent.value.trim()];
@@ -6107,7 +6379,7 @@
         EX.viral = null; render();
       }
       ent.addEventListener('change', applyEnt);
-      row2.appendChild(ent); row2.appendChild(dl);
+      row2.appendChild(tsel); row2.appendChild(ssel); row2.appendChild(ent); row2.appendChild(dl);
     }
     if (EX.tile === 'topics' || EX.tile === 'life' || EX.tile === 'viral' || EX.tile === 'sent') {
       var ub = h('input', { type: 'checkbox', id: 'ex-unclass' });
@@ -6124,7 +6396,7 @@
     var go = h('button', { type: 'button', class: 'df-preset-btn', text: 'Search' });
     go.addEventListener('click', applyQ);
     var rs = h('button', { type: 'button', class: 'df-preset-btn', text: 'Reset' });
-    rs.addEventListener('click', function () { EX.platforms = {}; EX.q = ''; EX.entityUid = ''; EX.entityName = ''; EX.viral = null; render(); });
+    rs.addEventListener('click', function () { EX.platforms = {}; EX.q = ''; EX.entityUid = ''; EX.entityName = ''; EX.entType = ''; EX.entSub = ''; EX.viral = null; render(); });
     row2.appendChild(go); row2.appendChild(rs);
     card.appendChild(row2);
     host.appendChild(card);
