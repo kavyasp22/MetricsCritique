@@ -288,3 +288,8 @@ Verdicts and what changed (full table: Metrics_Finalisation_Two_Day_Action_Plan.
 5. Explore page (user-driven search over our entity list + keyword) — test version; per `Trending_Topics_and_Viral_Posts_Customer_Dashboard_Review.docx` section 9.
 6. Fresh production extract (01, 21, 22, 23, 11) when ready; script 01 not run (hard-coded output paths overwrite `analytics.duckdb`; estimated 20-25 GB peak, unmeasured).
 7. Entity use-case steps 2-3 (top posts by views, grouped co-mentions) and later step 10 ("about" filter); see `Final-docs/Entity_Led_Use_Cases_and_Implementation_Plan.docx`.
+
+### Added 2026-11-18 (later): viral posts ranking
+- Done: Explore drill-down ranks a group's posts by views / engagement / shares / likes within the selected dates (`/api/drill` `sort`, `from`/`to`, `platforms`); counts now match the card; NaN sent as null; ranked drills skip the slow related scan (commit 60525dc).
+- Later (not started): save the per-post virality percentile from script 07 (`virality_pct_post`, `virality_ref_n` are computed per post and discarded; add a `post_virality` table), re-run 07 and 08 (~45-60 min, 6-8 GB), then rank viral posts across platforms by it. Validate with a hand-judged sample before any "Breakout" label.
+- Pending: default drill-down (no sort) took ~34 s because `compute_related` scans all embeddings; cap it (see item 1 of the 2026-11-18 pending list).
