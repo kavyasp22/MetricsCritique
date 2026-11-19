@@ -944,6 +944,19 @@ class Handler(SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # quiet; avoid growing a log file for a local dev server
 
+    def send_header(self, keyword, value):
+        if keyword.lower() == "cache-control":
+            self._cc_sent = True
+        super().send_header(keyword, value)
+
+    def end_headers(self):
+        # Static files (index.html, assets/*.js, *.css) carried only Last-Modified, so a browser may keep using a copy it
+        # fetched earlier and not show a rebuild. "no-cache" = ask the server every time; an unchanged file costs a 304.
+        if not getattr(self, "_cc_sent", False):
+            super().send_header("Cache-Control", "no-cache")
+        self._cc_sent = False
+        super().end_headers()
+
     def _json(self, obj, status=200):
         # NaN / Infinity are not valid JSON: a browser's JSON.parse rejects the whole response, so
         # missing numbers (for example a platform with no view counter) are sent as null.
@@ -979,12 +992,21 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/data/metrics.json" and "gzip" in self.headers.get("Accept-Encoding", ""):
             gz_file = HERE / "data" / "metrics.json.gz"
             if gz_file.exists():
+                st = gz_file.stat()
+                etag = '"%x-%x"' % (st.st_mtime_ns, st.st_size)
+                if self.headers.get("If-None-Match") == etag:        # unchanged since the browser last fetched it
+                    self.send_response(304)
+                    self.send_header("ETag", etag)
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    return
                 content = gz_file.read_bytes()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Encoding", "gzip")
                 self.send_header("Content-Length", str(len(content)))
-                self.send_header("Cache-Control", "public, max-age=3600")
+                self.send_header("ETag", etag)
+                self.send_header("Cache-Control", "no-cache")
                 self.end_headers()
                 self.wfile.write(content)
                 return
