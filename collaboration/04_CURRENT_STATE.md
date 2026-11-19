@@ -311,3 +311,10 @@ Verdicts and what changed (full table: Metrics_Finalisation_Two_Day_Action_Plan.
 - Explore: tables closed by default behind "+", explanations behind "click to see explanation"; Last 1d default (Explore only).
 - Tests: `UI/tests/check_explore_api.py` (20, new), `check_explore.mjs` (61), `check_explore_features.mjs` (41), `check_api_dimensions.py` (9).
 - Not changed on purpose: the emergence formula (cross-platform presence is only a filter), growth velocity (needs repeated counter snapshots; not confirmed to exist), author stance / comment tone for sentiment (not built).
+
+### Added 2026-11-19 (later): minimum-activity floor on the virality ranking
+- Problem (measured): the percentile ranks a RATIO, so tiny counts win. Among posts at percentile >= 0.99, 88% of Telegram, 89% of TikTok, 87% of YouTube and (on the first, mixed-basis cut) 98% of Snapchat posts were below their own platform's median activity; the top of the list showed posts with 4 views and 1 share.
+- Fix (relative, no fixed number): stage 24 now also saves `activity` (views if > 0, else likes + comments + shares), `activity_basis`, `activity_floor` (median of rated posts of the same platform AND basis) and `activity_ok`. `/api/explore/viral?rank=virality` hides posts with `activity_ok = false` unless `floor=off`; the page has MIN ACTIVITY: "Platform median or more" (default) | Off, and states how many ranked posts it hides (2026-06-14..10-26: 118,305 kept of 237,783 rated).
+- Effect at percentile >= 0.99 (share kept): Telegram 12%, TikTok 11%, Facebook 32%, Instagram 32%, LinkedIn 43%, Twitter 60%, Truth Social 60%; Snapchat, Mastodon, YouTube comments 100% (their top posts already have real activity within their own basis).
+- Still true: retweets (tagged) keep high scores because their share counts are large; use the RETWEETS switch.
+- Tests: `UI/tests/check_explore_api.py` 31/31, `check_explore.mjs` 69/69.

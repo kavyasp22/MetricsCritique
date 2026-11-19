@@ -118,6 +118,20 @@ def main() -> int:
         all("flood" in (p["text"] or "").lower() or "flooding" in (p["text"] or "").lower() or "floods" in (p["text"] or "").lower() for p in kw["by_virality"]) and kw["terms"],
         f"{len(kw['by_virality'])} posts")
 
+    # ---------------- minimum-activity floor
+    chk("the parquet carries the activity columns (re-run scripts/24_post_virality.py)", a._pv_has_floor())
+    on = a.explore_viral(q(rank="virality", limit=300, **{"from": "2026-06-14", "to": TO}))
+    off = a.explore_viral(q(rank="virality", limit=300, floor="off", **{"from": "2026-06-14", "to": TO}))
+    chk("floor is on by default and reports how many rated posts it hides", on["floor_on"] and on["below_floor"] > 0 and not off["floor_on"] and off["below_floor"] == 0,
+        f"hidden {on['below_floor']:,} of {on['rated_posts'] + on['below_floor']:,}")
+    chk("floor off ranks a superset (more rated posts)", off["rated_posts"] == on["rated_posts"] + on["below_floor"], f"{off['rated_posts']:,} = {on['rated_posts']:,} + {on['below_floor']:,}")
+    fl = a._main_con.execute(f"SELECT post_uid, activity, activity_floor, activity_ok FROM read_parquet('{a.POST_VIRALITY.as_posix()}')").fetchdf().set_index("post_uid")
+    got = fl.loc[[p["post_uid"] for p in on["by_virality"]]]
+    chk("every post in the floored ranking has at least its platform+basis median activity", bool((got["activity"] >= got["activity_floor"]).all() and got["activity_ok"].all()))
+    chk("without the floor, low-activity posts reach the top (that is why the floor exists)", bool((fl.loc[[p["post_uid"] for p in off["by_virality"]]]["activity_ok"] == False).any()))  # noqa: E712
+    perfl = a.explore_viral(q(rank="virality", per_platform=3, **{"from": FROM, "to": TO}))["by_virality"]
+    chk("per-platform view respects the floor", all(fl.loc[p["post_uid"], "activity_ok"] for p in perfl), f"{len(perfl)} posts")
+
     # ---------------- retweets
     wide = {"from": "2026-06-14", "to": TO}
     inc = a.explore_viral(q(rank="virality", limit=300, **wide))

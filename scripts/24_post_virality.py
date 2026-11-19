@@ -15,6 +15,13 @@ day cells and then drops it. This stage runs the SAME two functions of script 07
         virality_ratio    the amplification ratio the percentile ranks
         virality_ref_n    posts in the reference set the percentile was ranked against
         scrape_lag_days   age at scrape, used to pick the age band
+        activity          the post's raw attention: views when it has any, else likes + comments + shares
+        activity_basis    'views' or 'engagement' (the two are never compared with each other)
+        activity_floor    the median activity of rated posts of the same platform AND basis
+        activity_ok       activity >= activity_floor. The percentile ranks a RATIO, so a post with 4 views and
+                          1 share can sit at 1.00; at the 99th percentile and above, 88% of Telegram and 98% of
+                          Snapchat posts were below their own platform's median activity. The floor is relative
+                          to the platform (no fixed number), and the page lets the reader switch it off.
 
 Why a separate stage: re-running 07 takes 45-60 min and rewrites every metric; this reads only
 (READ-ONLY open of data/analytics.duckdb) and writes one new file, so nothing existing changes and
@@ -57,13 +64,22 @@ def main() -> int:
     ts_posts = posts_all[~posts_all["platform"].isin(m.TS_PLATFORMS_EXCLUDE)].copy()
     m.log(f"posts total={len(posts_all):,} in scope={len(ts_posts):,}")
     p = m.enrich_posts(ts_posts, P)
+    views = p["views"].astype("float64")
+    eng = p["eng_sum"].astype("float64")
+    activity = views.where(views > 0, eng)
+    basis = np.where(views > 0, "views", "engagement")
     out = pd.DataFrame({
         "post_uid": p["post_uid"], "platform": p["platform"],
         "virality_pct": p["virality_pct_post"].astype("float32"),
         "virality_ratio": p["virality_ratio"].astype("float64"),
         "virality_ref_n": p["virality_ref_n"],
         "scrape_lag_days": p["scrape_lag_days"].astype("float32"),
+        "activity": activity.astype("float64"), "activity_basis": basis,
     })
+    rated = out["virality_pct"].notna() & out["activity"].notna()
+    floor = out[rated].groupby(["platform", "activity_basis"])["activity"].median().rename("activity_floor")
+    out = out.merge(floor, on=["platform", "activity_basis"], how="left")
+    out["activity_ok"] = (out["activity"] >= out["activity_floor"]) & out["activity"].notna()
     assert out["post_uid"].is_unique, "duplicate post_uid"
     ok = out["virality_pct"].between(0, 1) | out["virality_pct"].isna()
     assert ok.all(), "percentile outside 0..1"
@@ -72,6 +88,10 @@ def main() -> int:
     g = out.groupby("platform")["virality_pct"].agg(n="size", rated=lambda s: int(s.notna().sum()),
                                                       median="median")
     print(g.sort_values("n", ascending=False).to_string())
+    top = out[out["virality_pct"] >= 0.99]
+    print("\nposts at percentile >= 0.99 that pass the activity floor, by platform:")
+    print(top.groupby("platform")["activity_ok"].agg(n="size", kept="sum").assign(
+        kept_share=lambda d: (d["kept"] / d["n"]).round(2)).to_string())
     return 0
 
 

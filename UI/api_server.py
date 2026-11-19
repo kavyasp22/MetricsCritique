@@ -725,16 +725,35 @@ def _clean_posts(rows, terms):
     return out
 
 
+_PV_FLOOR = None
+
+
+def _pv_has_floor() -> bool:
+    """True when data/post_virality.parquet carries the activity columns (stage 24 of 2026-11-19 or later)."""
+    global _PV_FLOOR
+    if _PV_FLOOR is not True:                    # re-check until the new file is there; a regenerated file needs no restart
+        cols = {r[0] for r in _main_con.execute(f"DESCRIBE SELECT * FROM read_parquet('{POST_VIRALITY.as_posix()}')").fetchall()}
+        _PV_FLOOR = "activity_ok" in cols
+    return _PV_FLOOR
+
+
 def explore_virality(qs, where, params, join, params_join, terms, limit):
     """Viral Posts ranked by the per-post virality percentile (stage 24): where a post sits among posts of the SAME platform and
     age band (0.5 typical, 1.0 top). It is comparable across platforms, unlike raw views. Only posts with a usable ratio and a
     reference set of at least VIRALITY_MIN_REF posts are ranked. `per_platform=N` returns the top N of every platform instead of one
-    mixed list. Ties are broken by engagement, so the order is stable."""
+    mixed list. Ties are broken by engagement, so the order is stable.
+    The percentile ranks a RATIO, so a post with 4 views and 1 share can reach 1.00. Unless `floor=off`, a post must also have at
+    least the median activity (views, else likes + comments + shares) of rated posts of its own platform and basis: a relative
+    floor, not a fixed number."""
+    floor_on = qs.get("floor", ["on"])[0] != "off" and _pv_has_floor()
     cols = "p.post_uid, p.platform, p.posted_at, p.author_name, left(coalesce(p.text,''), 100000) AS text, p.url"
     inner = (f"SELECT {cols}, p.views, p.likes, p.comments, p.shares, "
              f"coalesce(p.likes,0)+coalesce(p.comments,0)+coalesce(p.shares,0) AS engagement, {RETWEET_SQL} AS is_retweet, v.virality_pct, v.virality_ref_n "
              f"FROM analytics.post_facts p {join} JOIN read_parquet('{POST_VIRALITY.as_posix()}') v ON v.post_uid = p.post_uid "
              f"WHERE {' AND '.join(where)} AND v.virality_pct IS NOT NULL AND v.virality_ref_n >= {VIRALITY_MIN_REF}")
+    inner_all = inner
+    if floor_on:
+        inner = inner + " AND v.activity_ok"
     try:
         per = int(qs.get("per_platform", ["0"])[0])
     except ValueError:
@@ -750,11 +769,13 @@ def explore_virality(qs, where, params, join, params_join, terms, limit):
             rows = cur.execute(f"SELECT * FROM ({inner}) t ORDER BY virality_pct DESC, engagement DESC, post_uid LIMIT ?",
                                params_join + params + [limit]).fetchdf().to_dict(orient="records")
         rated = cur.execute(f"SELECT count(*) FROM ({inner}) t", params_join + params).fetchall()[0][0]
+        rated_all = cur.execute(f"SELECT count(*) FROM ({inner_all}) t", params_join + params).fetchall()[0][0] if floor_on else rated
         total = cur.execute(f"SELECT count(*) FROM analytics.post_facts p {join} WHERE {' AND '.join(where)}",
                             params_join + params).fetchall()[0][0]
     finally:
         cur.close()
     return {"rank": "virality", "per_platform": per, "total_posts": int(total), "rated_posts": int(rated),
+            "floor_on": bool(floor_on), "below_floor": int(rated_all - rated),
             "min_ref": VIRALITY_MIN_REF, "by_virality": _clean_posts(rows, terms), "terms": terms}
 
 

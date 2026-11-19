@@ -27,7 +27,7 @@ const dom = new JSDOM(html, {
         if (/rank=virality/.test(u)) {
           const per = Number((u.match(/per_platform=(\d+)/) || [0, 0])[1]);
           const mk = (pl, pct) => ({ post_uid: pl + pct, platform: pl, posted_at: '2026-10-20 10:00:00+00', text: 'a viral ' + pl + ' post', url: '', views: 100, likes: 5, shares: 1, comments: 0, engagement: 6, virality_pct: pct, virality_ref_n: 8336, is_retweet: pl === 'twitter' && pct > 0.98 });
-          return Promise.resolve({ ok: true, json: () => Promise.resolve({ rank: 'virality', per_platform: per, total_posts: 40, rated_posts: 25, min_ref: 20,
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ rank: 'virality', per_platform: per, total_posts: 40, rated_posts: 25, min_ref: 20, floor_on: !/floor=off/.test(u), below_floor: 7,
             by_virality: per ? [mk('twitter', 0.99), mk('twitter', 0.97), mk('telegram', 0.98)] : [mk('twitter', 0.99), mk('telegram', 0.98)], terms: [] }) });
         }
         return Promise.resolve({ ok: true, json: () => Promise.resolve({
@@ -162,7 +162,7 @@ check('a search with no match empties Trending Topics', view().querySelectorAll(
   btn('Virality percentile').click(); await wait(700);
   check('the percentile ranking asks the API with rank=virality', calls.some((c) => /rank=virality&per_platform=0/.test(c)), calls[0] || '');
   const txt = view().textContent;
-  check('posts show "virality 0.99 (vs 8,336 similar posts)" and the note says how many are rated', /virality 0\.99 \(vs 8,336 similar posts\)/.test(txt) && /25 of them have a virality percentile/.test(txt));
+  check('posts show "virality 0.99 (vs 8,336 similar posts)" and the note says how many are rated', /virality 0\.99 \(vs 8,336 similar posts\)/.test(txt) && /32 of them have a virality percentile/.test(txt) && /leaving 25 ranked/.test(txt));
   check('a retweet is tagged "Retweet" and an original post is not', view().querySelectorAll('.ex-rt-tag').length === 1, String(view().querySelectorAll('.ex-rt-tag').length));
   check('the retweet switch offers Include / Original posts only, Include active by default', !!btn('Include') && !!btn('Original posts only') && btn('Include').classList.contains('active'));
   calls.length = 0;
@@ -170,6 +170,13 @@ check('a search with no match empties Trending Topics', view().querySelectorAll(
   check('"Original posts only" sends retweets=hide', calls.some((c) => /retweets=hide/.test(c)), calls[0] || '');
   btn('Include').click(); await wait(700);
   check('back to Include sends no retweets parameter', !calls[calls.length - 1].includes('retweets='), calls[calls.length - 1]);
+  check('the note says how many ranked posts the activity floor hides', /7 of those are hidden because their activity is below the median of their own platform/.test(view().textContent));
+  check('a MIN ACTIVITY switch (Platform median or more | Off) is shown, on by default', !!btn('Platform median or more') && !!btn('Off') && btn('Platform median or more').classList.contains('active'));
+  calls.length = 0;
+  btn('Off').click(); await wait(700);
+  check('"Off" sends floor=off and the hidden-by-floor note goes away', calls.some((c) => /floor=off/.test(c)) && !/hidden because their activity/.test(view().textContent), calls[0] || '');
+  btn('Platform median or more').click(); await wait(700);
+  check('back to "Platform median or more" sends no floor parameter', !calls[calls.length - 1].includes('floor='), calls[calls.length - 1]);
   btn('Top 3 per platform').click(); await wait(700);
   check('"Top 3 per platform" asks per_platform=3 and groups posts under platform headings',
     calls.some((c) => /per_platform=3/.test(c)) && [...view().querySelectorAll('.ex-col .ct')].some((x) => /^twitter \(2\)/.test(x.textContent)) && [...view().querySelectorAll('.ex-col .ct')].some((x) => /^telegram \(1\)/.test(x.textContent)));
