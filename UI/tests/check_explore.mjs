@@ -170,6 +170,17 @@ check('a search with no match empties Trending Topics', view().querySelectorAll(
   check('"Last 1d" is the last complete day', doc.getElementById('ex-date-from').value === '2026-10-25' && doc.getElementById('ex-date-to').value === '2026-10-25');
   const ov = [...doc.querySelectorAll('#basic-view')].length ? doc.getElementById('mode-basic-btn') : null;
 }
+// step 0 of the clustering plan: the merged "Neighbourhood" topic says what it covers; a topic holding a huge share of all posts is flagged
+{
+  [...doc.querySelectorAll('#explore-view .df-preset-btn')].find((x) => x.textContent === 'Reset').click(); await wait(500);
+  [...doc.querySelectorAll('#explore-view .df-preset-btn')].find((x) => x.textContent === 'Full window').click(); await wait(600);
+  await rows('topics');
+  const names = [...view().querySelectorAll('.tv table tbody tr')].map((tr) => tr.children[0].textContent);
+  check('the merged t004 + t005 topic names both subjects in its label (pakistan + bangladesh)', names.some((n) => /^Geopolitics \/ Neighbourhood \(pakistan \+ bangladesh\)$/.test(n)), names.join(' | '));
+  const note = view().querySelector('.ex-warn');
+  check('a topic holding 30%+ of all collected posts gets a visible note (China topic, about 44%)', !!note && /Geopolitics \/ China.* holds \d+% of all collected posts/.test(note.textContent) && /mixture/.test(note.textContent), note ? note.textContent.slice(0, 120) : 'no note');
+  check('only the catch-all is flagged (no other topic is named in the note)', !!note && (note.textContent.match(/holds \d+%/g) || []).length === 1);
+}
 // Viral Posts: rank by per-post virality percentile
 {
   await rows('viral');

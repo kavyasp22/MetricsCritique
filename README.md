@@ -71,6 +71,7 @@ posts) into **statistically gated OSINT signal metrics**, a **geopolitical ontol
 │   ├── 21_prod_entities.py            Read production `entities` (read-only) -> data/prod_entities.duckdb
 │   ├── 22_entity_alias_merge.py       Merge spelling variants of one entity (audit table entity_alias)
 │   ├── 23_load_prod_entities.py       Load production entities into geo_ontology.duckdb (Babelscape kept as *_babelscape)
+│   ├── 25_post_dedup.py               Group exact copies (same author + same normalised text) -> data/post_dedup.parquet (read-only, seconds)
 │   ├── 24_post_virality.py            Save the per-post virality percentile (same code as 07, ~10 min) -> data/post_virality.parquet
 │   ├── notify_poller.py     Reference alert poller (log-only; no channel wired)
 │   ├── audit_restatement.py "Is this metric just volume?" audit

@@ -53,6 +53,9 @@
           o.topic_id = tid;
           dimMap[tid] = o;
         } else {
+          // the two merged topics cover different subjects (first top terms differ), so say so in the label
+          var ta = String(dimMap[tid].description || '').split(',')[0].trim(), tb = String(o.description || '').split(',')[0].trim();
+          if (ta && tb && ta !== tb && String(dimMap[tid].label || '').indexOf('(') < 0) { dimMap[tid].label = dimMap[tid].label + ' (' + ta + ' + ' + tb + ')'; }
           dimMap[tid].cluster_size = (dimMap[tid].cluster_size || 0) + (o.cluster_size || 0);
           dimMap[tid].n_posts = (dimMap[tid].n_posts || 0) + (o.n_posts || 0);
           if (o.description && dimMap[tid].description) {
@@ -5873,6 +5876,7 @@
       '(starting / rising / peak / steady / declining; "too little data" under 20 posts in the last 6 days). ' +
       'The Burst stage on Trend Lifecycle describes a single burst on one platform and uses a different rule, so the two can differ. ' +
       '"Unclassified" (posts not assigned to a topic) is left out unless you tick the box. "Seen on" keeps only topics present on at least that many platforms. Click a row to open its posts.' );
+    exBigTopicNote(host, rows);
     tableView(host, [
       { k: 'topic', label: 'Topic' },
       { k: 'posts', label: 'Posts', num: true, fmt: function (v) { return fmtInt(v); } },
@@ -5891,6 +5895,18 @@
     });
     exWhyCards(host, rows);
     exMethodology(host);
+  }
+
+  /* A topic that holds a large share of ALL collected posts cannot be one subject; its trend numbers then describe a mixture. */
+  function exBigTopicNote(host, rows) {
+    var dims = T('topic_dim'), total = 0;
+    dims.forEach(function (d) { total += (d.n_posts || 0); });
+    if (!total) { return; }
+    var big = rows.map(function (r) { var d = TOPIC[r.topic_id]; return d ? { name: r.topic, share: (d.n_posts || 0) / total } : null; })
+      .filter(function (x) { return x && x.share >= 0.3; });
+    if (!big.length) { return; }
+    host.appendChild(h('p', { class: 'cs ex-warn', text: big.map(function (b) { return '\u201c' + b.name + '\u201d holds ' + Math.round(100 * b.share) + '% of all collected posts'; }).join('; ') +
+      ', more than one subject can. It mixes unrelated content (in a hand review most sampled posts were not about its name), so its numbers describe a mixture, not a single trend. Topic clustering is being reworked.' }));
   }
 
   /* plain-language reasons, each one a number the table already shows */

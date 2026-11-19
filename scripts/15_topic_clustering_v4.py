@@ -310,24 +310,35 @@ def get_backend(umap_fit_n: int | None = None) -> tuple:
 # ============================================================================
 # Data
 # ============================================================================
-def load_posts(limit: int | None = None, seed: int = 0) -> pd.DataFrame:
+DEDUP_FILE = ROOT / "data" / "post_dedup.parquet"      # stage 25
+
+
+def load_posts(limit: int | None = None, seed: int = 0, exclude_copies: bool = False) -> pd.DataFrame:
     """Embedded posts. `limit` = deterministic pseudo-random subset: posts are
     ordered by hash(post_uid, seed), so the subset is reproducible and unbiased by
-    insertion order / platform."""
+    insertion order / platform.
+    `exclude_copies` keeps only the first post of each exact-copy group (stage 25, data/post_dedup.parquet): one author's
+    identical message repeated 30 times would otherwise form a cluster of its own."""
     con = duckdb.connect(str(SRC_DB), read_only=True)
+    copies = ""
+    if exclude_copies:
+        if not DEDUP_FILE.exists():
+            raise SystemExit(f"--exclude-copies needs {DEDUP_FILE.name}: run scripts/25_post_dedup.py first")
+        copies = f"JOIN read_parquet('{DEDUP_FILE.as_posix()}') dd ON dd.post_uid = %s.post_uid AND dd.is_first"
     sel = ""
     if limit:
         sel = (f"WHERE e.post_uid IN (SELECT e2.post_uid FROM post_embeddings e2 "
-               f"JOIN post_facts p2 ON p2.post_uid = e2.post_uid "
+               f"JOIN post_facts p2 ON p2.post_uid = e2.post_uid {copies % 'e2' if copies else ''} "
                f"ORDER BY hash(e2.post_uid || '|{int(seed)}'), e2.post_uid LIMIT {int(limit)})")
     df = con.execute(f"""
         SELECT e.post_uid, e.embedding, p.text, p.lang, p.author_uid, p.platform
         FROM post_embeddings e
         JOIN post_facts p ON p.post_uid = e.post_uid
+        {copies % 'e' if copies and not limit else ''}
         {sel}
     """).fetchdf()
     con.close()
-    log(f"posts with embeddings: {len(df):,}" + (f" (--limit {limit:,})" if limit else ""))
+    log(f"posts with embeddings: {len(df):,}" + (f" (--limit {limit:,})" if limit else "") + (" [exact copies excluded]" if exclude_copies else ""))
     return df
 
 
@@ -596,6 +607,8 @@ def main() -> int:
                     help="seeded random subset of embedded posts (smoke tests)")
     ap.add_argument("--dry-run", action="store_true",
                     help="compute and print everything, write nothing")
+    ap.add_argument("--exclude-copies", action="store_true",
+                    help="cluster only the first post of each exact-copy group (needs data/post_dedup.parquet from stage 25)")
     ap.add_argument("--umap-fit-n", type=int, default=None,
                     help="fit UMAP on a seeded subsample of N posts and transform the "
                          "rest (default: fit on all)")
@@ -614,7 +627,7 @@ def main() -> int:
         log(f"UMAP fit on {args.umap_fit_n:,} posts per seed, transform the rest")
 
     with stages.run("load_posts"):
-        df = load_posts(args.limit)
+        df = load_posts(args.limit, exclude_copies=args.exclude_copies)
     with stages.run("unit_norm"):
         X = unit_norm(df)
     log(f"embeddings: {X.shape}   peak RSS so far {peak_rss_gb():.1f} GB")
