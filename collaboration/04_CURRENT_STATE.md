@@ -318,3 +318,10 @@ Verdicts and what changed (full table: Metrics_Finalisation_Two_Day_Action_Plan.
 - Effect at percentile >= 0.99 (share kept): Telegram 12%, TikTok 11%, Facebook 32%, Instagram 32%, LinkedIn 43%, Twitter 60%, Truth Social 60%; Snapchat, Mastodon, YouTube comments 100% (their top posts already have real activity within their own basis).
 - Still true: retweets (tagged) keep high scores because their share counts are large; use the RETWEETS switch.
 - Tests: `UI/tests/check_explore_api.py` 31/31, `check_explore.mjs` 69/69.
+
+### Added 2026-11-19 (later still): default floor raised to the top 10% of each platform
+- Judged sample #1 (40 posts, median floor, my own reading): clearly viral (>= platform p90) 8 (20%), popular only 29 (73%), not viral 3 (8%). Retweets were 41% of the top 300.
+- Change: stage 24 also saves `activity_p90` and `activity_top10`; `/api/explore/viral?rank=virality&floor=top10|median|off` (default `top10`; old `floor=on` = median). Page: MIN ACTIVITY = Top 10% of platform (default) | Platform median or more | Off. Ranked posts 2026-06-14..10-26: 22,800 (top 10%) <= 118,305 (median) <= 237,783 (off). Last 30 days: 5,229 ranked of 54,346 rated.
+- Judged sample #2 (fresh 40 posts from the new default, stricter bar: >= 1.5x the platform p90 or >= 50K views / >= 1,000 engagement): clearly viral 26 (65%), borderline 13 (32%, small-platform posts just over the line), not viral 1. The same stricter bar on sample #1 gives 7 of 40 (18%). Retweets 2% of the top 300 (was 41%).
+- Caveats: judged by me, not a human; Twitter now has few posts in the top 300 (15; its views p90 is 56K and retweets, which have no views, sit on the engagement basis), TikTok and Snapchat dominate (104 and 84), partly because the list is ordered by percentile first; Snapchat counters come from parsed captions. Option not built: order by percentile x activity rank.
+- Tests: `check_explore_api.py` 34/34, `check_explore.mjs` 70/70.

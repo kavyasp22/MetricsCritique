@@ -725,16 +725,20 @@ def _clean_posts(rows, terms):
     return out
 
 
-_PV_FLOOR = None
+_PV_COLS = None
+
+
+def _pv_cols() -> set:
+    """Columns of data/post_virality.parquet. Re-read until the activity columns are there, so a regenerated file needs no restart."""
+    global _PV_COLS
+    if _PV_COLS is None or "activity_top10" not in _PV_COLS:
+        _PV_COLS = {r[0] for r in _main_con.execute(
+            f"DESCRIBE SELECT * FROM read_parquet('{POST_VIRALITY.as_posix()}')").fetchall()}
+    return _PV_COLS
 
 
 def _pv_has_floor() -> bool:
-    """True when data/post_virality.parquet carries the activity columns (stage 24 of 2026-11-19 or later)."""
-    global _PV_FLOOR
-    if _PV_FLOOR is not True:                    # re-check until the new file is there; a regenerated file needs no restart
-        cols = {r[0] for r in _main_con.execute(f"DESCRIBE SELECT * FROM read_parquet('{POST_VIRALITY.as_posix()}')").fetchall()}
-        _PV_FLOOR = "activity_ok" in cols
-    return _PV_FLOOR
+    return "activity_ok" in _pv_cols()
 
 
 def explore_virality(qs, where, params, join, params_join, terms, limit):
@@ -742,10 +746,16 @@ def explore_virality(qs, where, params, join, params_join, terms, limit):
     age band (0.5 typical, 1.0 top). It is comparable across platforms, unlike raw views. Only posts with a usable ratio and a
     reference set of at least VIRALITY_MIN_REF posts are ranked. `per_platform=N` returns the top N of every platform instead of one
     mixed list. Ties are broken by engagement, so the order is stable.
-    The percentile ranks a RATIO, so a post with 4 views and 1 share can reach 1.00. Unless `floor=off`, a post must also have at
-    least the median activity (views, else likes + comments + shares) of rated posts of its own platform and basis: a relative
-    floor, not a fixed number."""
-    floor_on = qs.get("floor", ["on"])[0] != "off" and _pv_has_floor()
+    The percentile ranks a RATIO, so a post with 4 views and 1 share can reach 1.00. A post must also reach a floor on its raw
+    activity (views, else likes + comments + shares), relative to rated posts of its own platform and basis (no fixed number):
+    `floor=top10` (default) = top 10% of its platform, `floor=median` = the platform median or more, `floor=off` = no floor."""
+    mode = qs.get("floor", ["top10"])[0]
+    mode = mode if mode in ("top10", "median", "off") else ("median" if mode == "on" else "top10")
+    cols_have = _pv_cols()
+    if mode == "top10" and "activity_top10" not in cols_have:
+        mode = "median"                       # older file: fall back to the median floor
+    floor_col = {"top10": "activity_top10", "median": "activity_ok"}.get(mode)
+    floor_on = mode != "off" and floor_col in cols_have
     cols = "p.post_uid, p.platform, p.posted_at, p.author_name, left(coalesce(p.text,''), 100000) AS text, p.url"
     inner = (f"SELECT {cols}, p.views, p.likes, p.comments, p.shares, "
              f"coalesce(p.likes,0)+coalesce(p.comments,0)+coalesce(p.shares,0) AS engagement, {RETWEET_SQL} AS is_retweet, v.virality_pct, v.virality_ref_n "
@@ -753,7 +763,7 @@ def explore_virality(qs, where, params, join, params_join, terms, limit):
              f"WHERE {' AND '.join(where)} AND v.virality_pct IS NOT NULL AND v.virality_ref_n >= {VIRALITY_MIN_REF}")
     inner_all = inner
     if floor_on:
-        inner = inner + " AND v.activity_ok"
+        inner = inner + f" AND v.{floor_col}"
     try:
         per = int(qs.get("per_platform", ["0"])[0])
     except ValueError:
@@ -775,7 +785,7 @@ def explore_virality(qs, where, params, join, params_join, terms, limit):
     finally:
         cur.close()
     return {"rank": "virality", "per_platform": per, "total_posts": int(total), "rated_posts": int(rated),
-            "floor_on": bool(floor_on), "below_floor": int(rated_all - rated),
+            "floor_on": bool(floor_on), "floor_mode": mode if floor_on else "off", "below_floor": int(rated_all - rated),
             "min_ref": VIRALITY_MIN_REF, "by_virality": _clean_posts(rows, terms), "terms": terms}
 
 

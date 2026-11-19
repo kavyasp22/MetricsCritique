@@ -18,6 +18,10 @@ day cells and then drops it. This stage runs the SAME two functions of script 07
         activity          the post's raw attention: views when it has any, else likes + comments + shares
         activity_basis    'views' or 'engagement' (the two are never compared with each other)
         activity_floor    the median activity of rated posts of the same platform AND basis
+        activity_p90      the 90th percentile of activity of rated posts of the same platform AND basis
+        activity_top10    activity >= activity_p90: the post is in the top 10% of its own platform by raw attention.
+                          This is the page's default floor: in a judged sample of 40 posts ranked with the median
+                          floor only 8 (20%) were clearly viral (top 10% on their platform) and 29 were merely popular.
         activity_ok       activity >= activity_floor. The percentile ranks a RATIO, so a post with 4 views and
                           1 share can sit at 1.00; at the 99th percentile and above, 88% of Telegram and 98% of
                           Snapchat posts were below their own platform's median activity. The floor is relative
@@ -77,8 +81,10 @@ def main() -> int:
         "activity": activity.astype("float64"), "activity_basis": basis,
     })
     rated = out["virality_pct"].notna() & out["activity"].notna()
-    floor = out[rated].groupby(["platform", "activity_basis"])["activity"].median().rename("activity_floor")
+    grp = out[rated].groupby(["platform", "activity_basis"])["activity"]
+    floor = pd.concat([grp.median().rename("activity_floor"), grp.quantile(0.9).rename("activity_p90")], axis=1)
     out = out.merge(floor, on=["platform", "activity_basis"], how="left")
+    out["activity_top10"] = (out["activity"] >= out["activity_p90"]) & out["activity"].notna()
     out["activity_ok"] = (out["activity"] >= out["activity_floor"]) & out["activity"].notna()
     assert out["post_uid"].is_unique, "duplicate post_uid"
     ok = out["virality_pct"].between(0, 1) | out["virality_pct"].isna()
@@ -89,9 +95,9 @@ def main() -> int:
                                                       median="median")
     print(g.sort_values("n", ascending=False).to_string())
     top = out[out["virality_pct"] >= 0.99]
-    print("\nposts at percentile >= 0.99 that pass the activity floor, by platform:")
-    print(top.groupby("platform")["activity_ok"].agg(n="size", kept="sum").assign(
-        kept_share=lambda d: (d["kept"] / d["n"]).round(2)).to_string())
+    print("\nposts at percentile >= 0.99 that pass the activity floors, by platform:")
+    print(top.groupby("platform").agg(n=("activity_ok", "size"), kept_median=("activity_ok", "sum"), kept_top10=("activity_top10", "sum")).assign(
+        share_median=lambda d: (d["kept_median"] / d["n"]).round(2), share_top10=lambda d: (d["kept_top10"] / d["n"]).round(2)).to_string())
     return 0
 
 

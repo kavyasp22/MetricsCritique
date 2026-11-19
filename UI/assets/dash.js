@@ -5594,7 +5594,7 @@
      (topics, bursts, shared stories) and, for Viral Posts, the read-only /api/explore/viral.
      Nothing here writes anywhere. The date range is the shared S.from / S.to. */
 
-  var EX = { tile: 'topics', platforms: {}, q: '', entityUid: '', entityName: '', entType: '', entSub: '', terms: [], spreadMode: 'cards', spreadLimit: 10, top: 25, unclass: false, minPlat: 0, entTop: null, vrank: 'views', vper: 0, rt: 'include', floor: 'on',
+  var EX = { tile: 'topics', platforms: {}, q: '', entityUid: '', entityName: '', entType: '', entSub: '', terms: [], spreadMode: 'cards', spreadLimit: 10, top: 25, unclass: false, minPlat: 0, entTop: null, vrank: 'views', vper: 0, rt: 'include', floor: 'top10',
              viral: null, viralKey: '' };
   var EX_TILES = [
     { k: 'topics', t: 'Trending Topics', s: "What's gaining attention?",
@@ -6329,7 +6329,7 @@
       'ranked by likes + comments + shares, and never ranked as zero views. Views are not comparable across platforms, so the most viewed post is not ' +
       'necessarily the most unusual one. "Virality percentile": each post is ranked against posts of the same platform and age (1.00 = top of its peers, ' +
       '0.50 = typical), which can be compared across platforms. It is shown only for posts with a usable amplification ratio and at least 20 similar posts to ' +
-      'compare with; platforms with no counters (Reddit) have none. Ties are broken by engagement. Because the percentile ranks a ratio, tiny counts can score high (4 views and 1 share), so by default a post must also have at least the median activity of its own platform (views, else likes + comments + shares); MIN ACTIVITY switches that off. Retweets (posts starting "RT @") are included because they show spread, and are tagged; their counters are the original post\u2019s, so their score is really the original\u2019s. "Original posts only" hides them (only Twitter and Truth Social mark reposts this way).' + (EX.entityName ? ' Filtered to posts naming ' + EX.entityName + '.' : '') );
+      'compare with; platforms with no counters (Reddit) have none. Ties are broken by engagement. Because the percentile ranks a ratio, tiny counts can score high (4 views and 1 share), so by default a post must also be in the top 10% of its own platform by activity (views, else likes + comments + shares); MIN ACTIVITY can loosen it to the platform median or switch it off. Retweets (posts starting "RT @") are included because they show spread, and are tagged; their counters are the original post\u2019s, so their score is really the original\u2019s. "Original posts only" hides them (only Twitter and Truth Social mark reposts this way).' + (EX.entityName ? ' Filtered to posts naming ' + EX.entityName + '.' : '') );
     var rankBar = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'RANK BY' })]);
     [['views', 'Views'], ['virality', 'Virality percentile']].forEach(function (x) {
       var b = h('button', { type: 'button', class: 'df-preset-btn' + (EX.vrank === x[0] ? ' active' : ''), text: x[1] });
@@ -6344,9 +6344,11 @@
         rankBar.appendChild(b);
       });
       rankBar.appendChild(h('span', { class: 'bds-label', text: 'MIN ACTIVITY' }));
-      [['on', 'Platform median or more'], ['off', 'Off']].forEach(function (x) {
-        var b = h('button', { type: 'button', class: 'df-preset-btn' + (EX.floor === x[0] ? ' active' : ''), text: x[1],
-                              title: x[0] === 'on' ? 'Hide posts whose views (or likes + comments + shares) are below the median of their own platform. A post with 4 views and 1 share can otherwise reach the top because the score ranks a ratio.' : 'Rank every post that has a percentile, whatever its size.' });
+      [['top10', 'Top 10% of platform'], ['median', 'Platform median or more'], ['off', 'Off']].forEach(function (x) {
+        var tips = { top10: 'Keep only posts whose views (or likes + comments + shares) are in the top 10% of their own platform. This is what separates posts that are really spreading from posts that are only above average.',
+                     median: 'Keep posts at or above the median of their own platform. Looser: many are popular but not viral.',
+                     off: 'Rank every post that has a percentile, whatever its size. A post with 4 views and 1 share can reach the top, because the score ranks a ratio.' };
+        var b = h('button', { type: 'button', class: 'df-preset-btn' + (EX.floor === x[0] ? ' active' : ''), text: x[1], title: tips[x[0]] });
         b.addEventListener('click', function () { EX.floor = x[0]; render(); });
         rankBar.appendChild(b);
       });
@@ -6367,7 +6369,7 @@
         var withPct = d.rated_posts + (d.floor_on ? d.below_floor : 0);
         body.appendChild(h('p', { class: 'cs', text: fmtInt(d.total_posts) + ' posts match the filters; ' + fmtInt(withPct) +
           ' of them have a virality percentile (usable ratio and at least ' + d.min_ref + ' similar posts)' +
-          (d.floor_on ? '. ' + fmtInt(d.below_floor) + ' of those are hidden because their activity is below the median of their own platform (switch MIN ACTIVITY off to see them), leaving ' + fmtInt(d.rated_posts) + ' ranked' : ', all ranked') +
+          (d.floor_on ? '. ' + fmtInt(d.below_floor) + ' of those are hidden because their activity is below ' + (d.floor_mode === 'top10' ? 'the top 10%' : 'the median') + ' of their own platform (change MIN ACTIVITY to see them), leaving ' + fmtInt(d.rated_posts) + ' ranked' : ', all ranked') +
           '. The rest have no percentile and are not ranked here.' }));
         var list = d.by_virality || [];
         if (!list.length) { empty(body, 'No posts with a virality percentile match.'); return; }
@@ -6402,7 +6404,7 @@
     var url = '/api/explore/viral?from=' + encodeURIComponent(S.from) + '&to=' + encodeURIComponent(S.to) +
       '&platforms=' + encodeURIComponent(plats) + '&q=' + encodeURIComponent(EX.q) +
       '&entity_uid=' + encodeURIComponent(EX.entityUid) + '&limit=' + EX.top +
-      (EX.vrank === 'virality' ? '&rank=virality&per_platform=' + EX.vper : '') + (EX.rt === 'hide' ? '&retweets=hide' : '') + (EX.vrank === 'virality' && EX.floor === 'off' ? '&floor=off' : '');
+      (EX.vrank === 'virality' ? '&rank=virality&per_platform=' + EX.vper : '') + (EX.rt === 'hide' ? '&retweets=hide' : '') + (EX.vrank === 'virality' && EX.floor !== 'top10' ? '&floor=' + EX.floor : '');
     fetch(url, { cache: 'no-store' }).then(function (r) {
       return r.json().then(function (j) { if (!r.ok) { throw new Error(j && j.error ? j.error : 'HTTP ' + r.status); } return j; });
     }).then(function (d) {
