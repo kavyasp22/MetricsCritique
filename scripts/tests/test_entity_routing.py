@@ -93,3 +93,11 @@ if __name__ == "__main__":
         f()
         print("ok", f.__name__)
     print(f"{len(fns)} passed")
+
+
+def test_prompt_v2_adds_rules_and_v1_is_unchanged():
+    v1, v2 = R.routing_system_prompt(), R.routing_system_prompt("v2")
+    assert R.routing_system_prompt("v1") == v1
+    assert v2.startswith(v1) and len(v2) > len(v1) + 1500
+    for needle in ("RULES (apply strictly)", "answer none", "D08 only for large-scale humanitarian", "ransomware", "unsure between a domain and none"):
+        assert needle in v2 and needle not in v1

@@ -363,3 +363,10 @@ Verdicts and what changed (full table: Metrics_Finalisation_Two_Day_Action_Plan.
 - Note: the top posts of "Civil / Disaster" include crime stories (a road-rage sentence, a jailing), which shows the topic is fuzzy, not that the filter is wrong. Sub-topics would sharpen this.
 - Tests: `check_explore.mjs` 90/90, `check_explore_api.py` 51/51.
 
+### Added 2026-11-19 (night): Gemma domain routing reviewed and re-tested (`Final-docs/Gemma_Routing_Posts_For_Review.xlsx`, `Gemma_Routing_Prompt_v2_Retest_150.xlsx`)
+- **Pilot review (160 of the 500 routed posts, my reading, not a human review):** strict 70% / lenient 85%; wrong security domain only 4 of 160; the main error was putting a security domain on non-security posts (19 of 160: local crime, consumer tech, markets, weather, obituaries). Weakest: D08 (33% strict), D09 (50%), D03 (61%); `none` answers 19 of 19 correct. Confidence >= 0.95: 85% strict vs 56% below.
+- **Prompt v2** (`ROUTING_RULES_V2` in `scripts/lib/entity_routing.py`, `17_gemma_route.py --prompt v2`, writes `post_route_v2`; v1 stays the default and the 500-row `post_route_v1` is untouched): explicit "none" rule and tighter D03 / D07 / D08 / D09 rules.
+- **Fresh 150-post retest (same model, same posts, v1 vs v2):** v1 66% strict / 83% lenient (24 security domains on non-security posts); **v2 90% strict / 99% lenient** (1 such post; 0 security posts called none; 0 wrong security domains); v2 at confidence >= 0.95: 94% strict, 100% lenient (n=72). Choices: none 52 -> 84, D08 11 -> 1, D03 12 -> 5. **Caveat:** the gold labels are mine, set after seeing both outputs, and the v2 rules came from my own earlier review, so the test flatters v2; a blind human review is still needed. Only 56 of 148 posts are security related. Domain level only (no T-level themes yet).
+- Cost note: v2 uses about 900 tokens per post; the earlier estimate for a full run was about 20 h on the shared server. Not run on the corpus.
+- Tests: `scripts/tests/test_entity_routing.py` 9/9.
+

@@ -40,6 +40,7 @@ from lib import entity_routing as R  # noqa: E402
 from lib import gemma_client as G  # noqa: E402
 from lib.config import GEMMA_DB_PATH, gemma_config  # noqa: E402
 
+PROMPT_VERSION = "v1"        # --prompt v2 uses the stricter prompt and writes post_route_v2 (v1 rows are never mixed with v2)
 TABLE = "post_route_v1"
 DDL = f"""
     CREATE TABLE IF NOT EXISTS {TABLE} (
@@ -53,13 +54,20 @@ DDL = f"""
 """
 
 
+def use_prompt(version: str) -> None:
+    global PROMPT_VERSION, TABLE, DDL
+    PROMPT_VERSION = version
+    TABLE = "post_route_v1" if version == "v1" else f"post_route_{version}"
+    DDL = DDL.replace("post_route_v1", TABLE)
+
+
 def log(msg: str) -> None:
     print(f"[17] {msg}", flush=True)
 
 
 def route_one(item: tuple) -> dict:
     uid, platform, lang, text = item
-    res = G.chat_json(R.routing_system_prompt(), R.routing_user_prompt(text),
+    res = G.chat_json(R.routing_system_prompt(PROMPT_VERSION), R.routing_user_prompt(text),
                       max_tokens=600, validate=R.validate_route)
     row = {"post_uid": uid, "platform": platform, "lang": lang, "ok": res["ok"],
            "error": res["error"], "tokens": res["tokens"], "latency_s": res["latency_s"],
@@ -95,9 +103,12 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--since", help="only posts on/after this date (YYYY-MM-DD)")
     ap.add_argument("--newest-first", action="store_true", help="most recent posts first")
-    ap.add_argument("--apply", action="store_true", help=f"write {TABLE}")
+    ap.add_argument("--apply", action="store_true", help=f"write the routing table (post_route_v1 for prompt v1)")
+    ap.add_argument("--prompt", choices=["v1", "v2"], default="v1",
+                    help="v1 = original prompt (500-post pilot); v2 = adds explicit none/D03/D07/D08/D09 rules (writes post_route_v2)")
     ap.add_argument("--chunk", type=int, default=500)
     args = ap.parse_args()
+    use_prompt(args.prompt)
 
     cfg = gemma_config()
     log(f"endpoint host: {G.endpoint_host()}  model: {cfg['model']}  "

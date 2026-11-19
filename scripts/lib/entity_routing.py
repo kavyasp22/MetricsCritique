@@ -41,7 +41,34 @@ def domain_bucket(domain: Optional[str]) -> Optional[str]:
 # ----------------------------------------------------------------------------
 # Routing
 # ----------------------------------------------------------------------------
-def routing_system_prompt() -> str:
+ROUTING_RULES_V2 = (
+    "\n\nRULES (apply strictly):\n"
+    "1. First decide whether the post is about security, conflict, geopolitics, diplomacy, state power or "
+    "national-level economics and infrastructure. If it is not, answer none. These are none unless the post "
+    "clearly ties them to state security: sport; entertainment and celebrity news; lifestyle, consumer products "
+    "and gadgets; personal chatter and jokes; ordinary local crime and court cases (murder, fraud, theft, "
+    "embezzlement, abuse); traffic and industrial accidents; weather alerts; obituaries; company and "
+    "banking-industry events; exchange rates and market prices; science and engineering explainers; software "
+    "and app tutorials; religion and astrology; ads and spam.\n"
+    "2. D08 only for large-scale humanitarian crises: displacement, famine, epidemics and outbreak control, "
+    "major disaster relief, civilian protection or aid access. Not for individual crimes, accidents or weather "
+    "alerts, and not for military strikes (use D01 or D05).\n"
+    "3. D03 only when trade, sanctions, energy, infrastructure or supply chains are treated as strategic or "
+    "geopolitical. Ordinary business, finance, markets and consumer news are none.\n"
+    "4. D07 only for cyber operations (including ransomware victim announcements), espionage and influence "
+    "operations, or technology policy with a state or security dimension. Consumer tech, apps, science "
+    "explainers and competitions are none.\n"
+    "5. D09 for terrorism, insurgency, militant attacks, counter-terrorism and organised-crime or narcotics "
+    "enforcement as a security matter; ordinary crime is none.\n"
+    "6. Strikes, shelling or drone attacks between states or armed groups are D01 (conventional conflict) or D05 "
+    "(military operations), not D08 or D09, unless the post is about a terrorist or insurgent act.\n"
+    "7. If you are unsure between a domain and none, choose none and give a lower confidence."
+)
+
+
+def routing_system_prompt(version: str = "v1") -> str:
+    """v1 = the original prompt (used by the 500-post pilot). v2 adds explicit "none" and D03/D07/D08/D09 rules after
+    the pilot review found that 12% of routed posts were not security related (docs: Gemma_Routing_Posts_For_Review)."""
     s = load_schema()
     lines = [f"- {d}: {s['l2'][d]['name']} (bucket: {s['l2'][d]['bucket']})"
              for d in domain_ids()]
@@ -59,6 +86,7 @@ def routing_system_prompt() -> str:
         "hypothetical = speculation; negated = reports that something did NOT happen; "
         "claimed = a party's claim or denial; none = no event. "
         "Use only the enumerated values. Do not translate the evidence."
+        + (ROUTING_RULES_V2 if version == "v2" else "")
     )
 
 
