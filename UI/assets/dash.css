@@ -2939,3 +2939,4 @@ body[data-mode="explore"] #global-filters { display: none !important; }
 .ex-warn { border-left: 3px solid var(--gold); padding: 0.3rem 0.6rem; background: rgba(214, 170, 60, 0.08); max-width: none; }
 
 .ex-row .bds-label:not(:first-child) { margin-left: 0.9rem; }
+.ex-rt-tag { display: inline-block; margin-left: 0.4rem; padding: 0 0.4rem; border: 1px solid var(--gold); border-radius: 999px; font-size: 0.68rem; color: var(--gold); vertical-align: 1px; }

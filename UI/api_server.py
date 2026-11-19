@@ -41,6 +41,7 @@ DATA = EDA_ROOT / "data"
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 300
 POST_VIRALITY = DATA / "post_virality.parquet"   # scripts/24_post_virality.py; optional, the page works without it
+RETWEET_SQL = "(coalesce(p.text, '') ILIKE 'RT @%')"      # a retweet starts "RT @user:"; only Twitter / Truth Social mark reposts this way in the data
 VIRALITY_MIN_REF = 20                            # a percentile needs at least this many reference posts to be shown
 
 _main_con = duckdb.connect(database=":memory:", read_only=False)
@@ -731,7 +732,7 @@ def explore_virality(qs, where, params, join, params_join, terms, limit):
     mixed list. Ties are broken by engagement, so the order is stable."""
     cols = "p.post_uid, p.platform, p.posted_at, p.author_name, left(coalesce(p.text,''), 100000) AS text, p.url"
     inner = (f"SELECT {cols}, p.views, p.likes, p.comments, p.shares, "
-             f"coalesce(p.likes,0)+coalesce(p.comments,0)+coalesce(p.shares,0) AS engagement, v.virality_pct, v.virality_ref_n "
+             f"coalesce(p.likes,0)+coalesce(p.comments,0)+coalesce(p.shares,0) AS engagement, {RETWEET_SQL} AS is_retweet, v.virality_pct, v.virality_ref_n "
              f"FROM analytics.post_facts p {join} JOIN read_parquet('{POST_VIRALITY.as_posix()}') v ON v.post_uid = p.post_uid "
              f"WHERE {' AND '.join(where)} AND v.virality_pct IS NOT NULL AND v.virality_ref_n >= {VIRALITY_MIN_REF}")
     try:
@@ -784,6 +785,8 @@ def explore_viral(qs: dict) -> dict:
         params_join = [ent]
     else:
         params_join = []
+    if qs.get("retweets", ["include"])[0] == "hide":
+        where.append("NOT " + RETWEET_SQL)
     limit = _limit(qs)
     have_v = POST_VIRALITY.exists()
     vjoin = f" LEFT JOIN read_parquet('{POST_VIRALITY.as_posix()}') v ON v.post_uid = p.post_uid" if have_v else ""
@@ -796,7 +799,7 @@ def explore_viral(qs: dict) -> dict:
     # the text column is read long (100000 chars) so a snippet can be cut around the first match; it is shortened below
     cols = "p.post_uid, p.platform, p.posted_at, p.author_name, left(coalesce(p.text,''), 100000) AS text, p.url"
     base = (f"SELECT {cols}, p.views, p.likes, p.comments, p.shares, "
-            f"coalesce(p.likes,0)+coalesce(p.comments,0)+coalesce(p.shares,0) AS engagement{vcols} "
+            f"coalesce(p.likes,0)+coalesce(p.comments,0)+coalesce(p.shares,0) AS engagement, {RETWEET_SQL} AS is_retweet{vcols} "
             f"FROM analytics.post_facts p {join}{vjoin} WHERE {' AND '.join(where)}")
     cur = _main_con.cursor()
     try:

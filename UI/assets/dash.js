@@ -5594,7 +5594,7 @@
      (topics, bursts, shared stories) and, for Viral Posts, the read-only /api/explore/viral.
      Nothing here writes anywhere. The date range is the shared S.from / S.to. */
 
-  var EX = { tile: 'topics', platforms: {}, q: '', entityUid: '', entityName: '', entType: '', entSub: '', terms: [], spreadMode: 'cards', spreadLimit: 10, top: 25, unclass: false, minPlat: 0, entTop: null, vrank: 'views', vper: 0,
+  var EX = { tile: 'topics', platforms: {}, q: '', entityUid: '', entityName: '', entType: '', entSub: '', terms: [], spreadMode: 'cards', spreadLimit: 10, top: 25, unclass: false, minPlat: 0, entTop: null, vrank: 'views', vper: 0, rt: 'include',
              viral: null, viralKey: '' };
   var EX_TILES = [
     { k: 'topics', t: 'Trending Topics', s: "What's gaining attention?",
@@ -6261,7 +6261,8 @@
     var second = (mode === 'virality' ? (p.views ? ' · ' + fmtCompact(p.views) + ' views' : '') : (vt ? ' · ' + vt : '')) +
       (p.likes != null ? ' · ' + fmtCompact(p.likes) + ' likes' : '') + (p.shares != null ? ' · ' + fmtCompact(p.shares) + ' shares' : '');
     var title = h('div', { class: 'ex-post-top' }, [
-      h('b', { text: p.platform }), h('span', { text: ' · ' + when + ' · ' }),
+      h('b', { text: p.platform }), p.is_retweet ? h('span', { class: 'ex-rt-tag', text: 'Retweet', title: 'Starts with "RT @": the counters shown are the original post\u2019s, not its own' }) : null,
+      h('span', { text: ' · ' + when + ' · ' }),
       h('span', { class: 'ex-post-m', text: metric }),
       h('span', { text: second })
     ]);
@@ -6323,12 +6324,12 @@
     });
     host.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Top individual posts' }));
     var plats = PLATFORMS.filter(exPlatOk).join(',');
-    var key = [S.from, S.to, plats, EX.q, EX.entityUid, EX.top, EX.vrank, EX.vper].join('|');
+    var key = [S.from, S.to, plats, EX.q, EX.entityUid, EX.top, EX.vrank, EX.vper, EX.rt].join('|');
     exExplain(host, 'Top posts', 'Two ways to rank. "Views": posts ranked by observed views; platforms that give no view count are listed separately, ' +
       'ranked by likes + comments + shares, and never ranked as zero views. Views are not comparable across platforms, so the most viewed post is not ' +
       'necessarily the most unusual one. "Virality percentile": each post is ranked against posts of the same platform and age (1.00 = top of its peers, ' +
       '0.50 = typical), which can be compared across platforms. It is shown only for posts with a usable amplification ratio and at least 20 similar posts to ' +
-      'compare with; platforms with no counters (Reddit) have none. Ties are broken by engagement.' + (EX.entityName ? ' Filtered to posts naming ' + EX.entityName + '.' : '') );
+      'compare with; platforms with no counters (Reddit) have none. Ties are broken by engagement. Retweets (posts starting "RT @") are included because they show spread, and are tagged; their counters are the original post\u2019s, so their score is really the original\u2019s. "Original posts only" hides them (only Twitter and Truth Social mark reposts this way).' + (EX.entityName ? ' Filtered to posts naming ' + EX.entityName + '.' : '') );
     var rankBar = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'RANK BY' })]);
     [['views', 'Views'], ['virality', 'Virality percentile']].forEach(function (x) {
       var b = h('button', { type: 'button', class: 'df-preset-btn' + (EX.vrank === x[0] ? ' active' : ''), text: x[1] });
@@ -6343,6 +6344,13 @@
         rankBar.appendChild(b);
       });
     }
+    rankBar.appendChild(h('span', { class: 'bds-label', text: 'RETWEETS' }));
+    [['include', 'Include'], ['hide', 'Original posts only']].forEach(function (x) {
+      var b = h('button', { type: 'button', class: 'df-preset-btn' + (EX.rt === x[0] ? ' active' : ''), text: x[1],
+                            title: x[0] === 'hide' ? 'Hide posts that start with "RT @" (Twitter, Truth Social). Other platforms do not mark reposts in the data.' : 'Retweets show spread, so they are included by default.' });
+      b.addEventListener('click', function () { EX.rt = x[0]; render(); });
+      rankBar.appendChild(b);
+    });
     host.appendChild(rankBar);
     var body = h('div', { class: 'ex-viral' });
     host.appendChild(body);
@@ -6384,7 +6392,7 @@
     var url = '/api/explore/viral?from=' + encodeURIComponent(S.from) + '&to=' + encodeURIComponent(S.to) +
       '&platforms=' + encodeURIComponent(plats) + '&q=' + encodeURIComponent(EX.q) +
       '&entity_uid=' + encodeURIComponent(EX.entityUid) + '&limit=' + EX.top +
-      (EX.vrank === 'virality' ? '&rank=virality&per_platform=' + EX.vper : '');
+      (EX.vrank === 'virality' ? '&rank=virality&per_platform=' + EX.vper : '') + (EX.rt === 'hide' ? '&retweets=hide' : '');
     fetch(url, { cache: 'no-store' }).then(function (r) {
       return r.json().then(function (j) { if (!r.ok) { throw new Error(j && j.error ? j.error : 'HTTP ' + r.status); } return j; });
     }).then(function (d) {

@@ -118,6 +118,19 @@ def main() -> int:
         all("flood" in (p["text"] or "").lower() or "flooding" in (p["text"] or "").lower() or "floods" in (p["text"] or "").lower() for p in kw["by_virality"]) and kw["terms"],
         f"{len(kw['by_virality'])} posts")
 
+    # ---------------- retweets
+    wide = {"from": "2026-06-14", "to": TO}
+    inc = a.explore_viral(q(rank="virality", limit=300, **wide))
+    hide = a.explore_viral(q(rank="virality", limit=300, retweets="hide", **wide))
+    rts = [p for p in inc["by_virality"] if p["is_retweet"]]
+    chk("retweets are flagged in the ranking (is_retweet)", len(rts) > 0 and all((p["text"] or "").upper().startswith("RT @") or "RT @" in (p["text"] or "").upper() for p in rts), f"{len(rts)} of {len(inc['by_virality'])}")
+    chk("'Original posts only' removes every retweet from the ranking", not any(p["is_retweet"] for p in hide["by_virality"]) and not any((p["text"] or "").upper().startswith("RT @") for p in hide["by_virality"]))
+    chk("hiding retweets lowers the match count by the retweets", hide["total_posts"] < inc["total_posts"], f"{inc['total_posts']} -> {hide['total_posts']}")
+    vi = a.explore_viral(q(limit=100, **wide)); vh = a.explore_viral(q(limit=100, retweets="hide", **wide))
+    chk("the by-views lists honour the switch too", not any((p["text"] or "").upper().startswith("RT @") for p in vh["with_views"] + vh["without_views"]) and all("is_retweet" in p for p in vi["with_views"] + vi["without_views"]))
+    only_rt = a._main_con.execute("SELECT count(*) FROM analytics.post_facts p WHERE " + a.RETWEET_SQL).fetchall()[0][0]
+    chk("the retweet rule matches a known count (Twitter 4,219 + Truth Social 10 start with 'RT @')", only_rt == 4229, only_rt)
+
     n_ok = sum(RESULTS)
     print(f"\n  {n_ok}/{len(RESULTS)} checks passed")
     return 0 if n_ok == len(RESULTS) else 1
