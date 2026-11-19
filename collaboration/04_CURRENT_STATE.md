@@ -358,3 +358,8 @@ Verdicts and what changed (full table: Metrics_Finalisation_Two_Day_Action_Plan.
 
   Removing exact copies raises stability (+0.10 ARI) and the share of coherent clusters (60% -> 91%, partly because the single-author and duplicate-text flags no longer fire). **Verdict: PARTIAL.** Stability is moderate (about 0.55), silhouette is near zero in both cases (clusters are soft, overlapping regions, not separated groups), and the 91% is the script's own flag, which passed 3 of 11 bad clusters in my earlier hand review. Not adopted; no v5 tables written. Needs a hand-judged sample before any use. The full `--sweep` (6 cluster sizes x 5 seeds, UMAP refit each time) takes over 90 min on CPU at 60K posts with the machine busy, so it was not run.
 
+### Added 2026-11-19 (night): Viral Posts search box takes a keyword or a topic
+- The Viral Posts search box ("Search a keyword, or pick a topic...") suggests the 7 topics (t004 + t005 shown as one). A topic name picked or typed in full filters to the posts in that topic (`/api/explore/viral?topic_id=`; applies to both the Viral ranking and the Views lists and to the breakout-groups table); anything else is a keyword search as before. One entry is either a topic or a keyword in the UI; the API accepts both together. Reset clears it. Last 30 days, topic Civil / Disaster: 7,482 of 97,673 posts; keyword flood: 1,105.
+- Note: the top posts of "Civil / Disaster" include crime stories (a road-rage sentence, a jailing), which shows the topic is fuzzy, not that the filter is wrong. Sub-topics would sharpen this.
+- Tests: `check_explore.mjs` 90/90, `check_explore_api.py` 51/51.
+

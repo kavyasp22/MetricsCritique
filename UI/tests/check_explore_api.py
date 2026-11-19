@@ -171,6 +171,28 @@ def main() -> int:
     pb = a.explore_viral(q(rank="virality", per_platform=3, **{"from": FROM, "to": TO}))["by_virality"]
     chk("Biggest per platform returns at most 3 per platform, sorted by multiple inside each", max(__import__("collections").Counter(p["platform"] for p in pb).values()) <= 3)
 
+    # ---------------- topic filter on Viral Posts (search box: keyword or topic)
+    tw = {"from": "2026-09-26", "to": "2026-10-25"}
+    allr = a.explore_viral(q(rank="virality", limit=5, **tw))
+    t006 = a.explore_viral(q(rank="virality", limit=300, topic_id="t006", **tw))
+    chk("a topic filter narrows the match count", 0 < t006["total_posts"] < allr["total_posts"], f"{t006['total_posts']:,} of {allr['total_posts']:,}")
+    mem = {r[0] for r in a._main_con.execute("SELECT post_uid FROM analytics.post_topic WHERE topic_id = 't006'").fetchall()}
+    chk("every post returned under topic t006 belongs to topic t006", all(p["post_uid"] in mem for p in t006["by_virality"]) and len(t006["by_virality"]) > 0)
+    v006 = a.explore_viral(q(limit=100, topic_id="t006", **tw))
+    chk("the by-views lists honour the topic too", all(p["post_uid"] in mem for p in v006["with_views"] + v006["without_views"]))
+    drill = a._main_con.execute(a.build_query("topic", q(topic_id="t006", **tw))[0].replace("SELECT ", "SELECT count(*) OVER () AS _c, ", 1) + " LIMIT 1", a.build_query("topic", q(topic_id="t006", **tw))[1]).fetchall()
+    chk("the topic filter's post count equals the topic drill-down total (posts + YouTube comments are counted there, posts only here)", t006["total_posts"] <= int(drill[0][0]), f"{t006['total_posts']:,} <= {int(drill[0][0]):,}")
+    merged = a.explore_viral(q(rank="virality", limit=5, topic_id="t004", **tw))["total_posts"]
+    only4 = a._main_con.execute("SELECT count(*) FROM analytics.post_facts p WHERE p.post_uid IN (SELECT post_uid FROM analytics.post_topic WHERE topic_id IN ('t004','t005')) "
+                                "AND CAST(p.posted_at AS DATE) BETWEEN ? AND ?", [tw["from"], tw["to"]]).fetchall()[0][0]
+    chk("t004 means t004 + t005 (the dashboard shows them as one topic)", merged == only4, f"{merged:,} vs {only4:,}")
+    both = a.explore_viral(q(rank="virality", limit=5, topic_id="t006", q="flood", **tw))["total_posts"]
+    chk("a topic and a keyword can be combined", 0 < both < t006["total_posts"], f"{both:,} of {t006['total_posts']:,}")
+    try:
+        a.explore_viral(q(topic_id="t006; drop table x", **tw)); chk("a malformed topic id is refused", False)
+    except ValueError:
+        chk("a malformed topic id is refused", True)
+
     # ---------------- retweets
     wide = {"from": "2026-06-14", "to": TO}
     inc = a.explore_viral(q(rank="virality", order="amplified", limit=300, **wide))

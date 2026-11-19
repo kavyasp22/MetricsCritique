@@ -5634,7 +5634,7 @@
      (topics, bursts, shared stories) and, for Viral Posts, the read-only /api/explore/viral.
      Nothing here writes anywhere. The date range is the shared S.from / S.to. */
 
-  var EX = { tile: 'topics', platforms: {}, q: '', entityUid: '', entityName: '', entType: '', entSub: '', terms: [], spreadMode: 'cards', spreadLimit: 10, top: 25, unclass: false, minPlat: 0, entTop: null, vrank: 'views', vper: 0, rt: 'include', floor: 'top10', vorder: 'biggest',
+  var EX = { tile: 'topics', platforms: {}, q: '', entityUid: '', entityName: '', entType: '', entSub: '', terms: [], spreadMode: 'cards', spreadLimit: 10, top: 25, unclass: false, minPlat: 0, entTop: null, vrank: 'views', vper: 0, rt: 'include', floor: 'top10', vorder: 'biggest', topicId: '', topicName: '',
              viral: null, viralKey: '' };
   var EX_TILES = [
     { k: 'topics', t: 'Trending Topics', s: "What's gaining attention?",
@@ -6356,7 +6356,7 @@
         pct: o.vn >= 20 ? o.vs / o.vn : null, n_rated: o.vn,
         reach: o.rn >= 20 ? o.rs / o.rn : null,
         views: o.hasViews ? o.views : null, eng: o.engN ? o.eng / o.engN : null };
-    }).filter(function (r) { return r.pct != null && (EX.unclass || r.topic !== 'Unclassified'); });   // the search box here searches POST TEXT (below), not topic names
+    }).filter(function (r) { return r.pct != null && (EX.unclass || r.topic !== 'Unclassified') && (!EX.topicId || r.topic_id === exTid(EX.topicId)); });   // the search box here searches POST TEXT (below), not topic names
   }
 
   function exViralView(host) {
@@ -6386,8 +6386,8 @@
     });
     host.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Top individual posts' }));
     var plats = PLATFORMS.filter(exPlatOk).join(',');
-    var key = [S.from, S.to, plats, EX.q, EX.entityUid, EX.top, EX.vrank, EX.vper, EX.rt, EX.floor, EX.vorder].join('|');
-    exExplain(host, 'Top posts', 'Two ways to rank. "Views": posts ranked by observed views; platforms that give no view count are listed separately, ' +
+    var key = [S.from, S.to, plats, EX.q, EX.entityUid, EX.top, EX.vrank, EX.vper, EX.rt, EX.floor, EX.vorder, EX.topicId].join('|');
+    exExplain(host, 'Top posts', (EX.topicName ? 'Showing only the posts in the topic \u201c' + EX.topicName + '\u201d. ' : '') + 'The search box takes a keyword, or pick a topic name from its suggestions to see only the posts in that topic. Two ways to rank. "Views": posts ranked by observed views; platforms that give no view count are listed separately, ' +
       'ranked by likes + comments + shares, and never ranked as zero views. Views are not comparable across platforms, so the most viewed post is not ' +
       'necessarily the most unusual one. "Viral ranking" has two orders. BIGGEST (default) sorts by where a post\u2019s raw attention (views, else likes + comments + shares) sits among posts of the same ' +
       'platform and age, so a post with millions of views comes first whatever its share rate; the percentile is comparable across platforms. MOST AMPLIFIED sorts by the amplification percentile: each post is ranked against ' +
@@ -6473,7 +6473,7 @@
     if (EX.viral && EX.viralKey === key) { EX.terms = EX.viral.terms || []; paint(EX.viral); return; }
     body.appendChild(h('div', { class: 'empty', text: 'Loading…' }));
     var url = '/api/explore/viral?from=' + encodeURIComponent(S.from) + '&to=' + encodeURIComponent(S.to) +
-      '&platforms=' + encodeURIComponent(plats) + '&q=' + encodeURIComponent(EX.q) +
+      '&platforms=' + encodeURIComponent(plats) + '&q=' + encodeURIComponent(EX.q) + (EX.topicId ? '&topic_id=' + encodeURIComponent(EX.topicId) : '') +
       '&entity_uid=' + encodeURIComponent(EX.entityUid) + '&limit=' + EX.top +
       (EX.vrank === 'virality' ? '&rank=virality&per_platform=' + EX.vper : '') + (EX.rt === 'hide' ? '&retweets=hide' : '') + (EX.vrank === 'virality' && EX.floor !== 'top10' ? '&floor=' + EX.floor : '') +
       (EX.vrank === 'virality' && EX.vorder !== 'biggest' ? '&order=' + EX.vorder : '');
@@ -6596,11 +6596,29 @@
     menu.appendChild(ap);
     det.appendChild(menu); row2.appendChild(det);
 
-    var q = h('input', { type: 'text', class: 'ex-q', placeholder: EX.tile === 'viral' ? 'Search post text\u2026' : 'Search topic or text\u2026' });
-    if (EX.tile === 'viral') { q.title = 'flood = any form of the word (floods, flooding\u2026) \u00b7 flood relief = both words \u00b7 "flash flood" = exact phrase \u00b7 flood OR landslide = either \u00b7 flood -dam = without dam'; }
-    q.value = EX.q;
-    function applyQ() { EX.q = q.value.trim(); EX.viral = null; render(); }
+    var q = h('input', { type: 'text', class: 'ex-q', placeholder: EX.tile === 'viral' ? 'Search a keyword, or pick a topic\u2026' : 'Search topic or text\u2026' });
+    var topicByLabel = {};
+    if (EX.tile === 'viral') {
+      q.title = 'A keyword: flood = any form of the word (floods, flooding\u2026) \u00b7 flood relief = both words \u00b7 "flash flood" = exact phrase \u00b7 flood OR landslide = either \u00b7 flood -dam = without dam. Or pick a topic from the suggestions to see only the posts in that topic.';
+      var tl = h('datalist', { id: 'ex-topic-list' });
+      T('topic_dim').forEach(function (d) {
+        if (d.topic_id === 'unassigned' || !d.label) { return; }
+        topicByLabel[String(d.label).toLowerCase()] = d;
+        var o = document.createElement('option'); o.value = d.label; o.label = 'topic \u00b7 ' + fmtInt(d.n_posts || 0) + ' posts'; tl.appendChild(o);
+      });
+      q.setAttribute('list', 'ex-topic-list');
+      row2.appendChild(tl);
+    }
+    q.value = (EX.tile === 'viral' && EX.topicId) ? EX.topicName : EX.q;
+    function applyQ() {
+      var v = q.value.trim();
+      var hit = EX.tile === 'viral' ? topicByLabel[v.toLowerCase()] : null;        // a topic name picked or typed in full = topic filter; anything else = keyword search
+      if (hit) { EX.topicId = hit.topic_id; EX.topicName = hit.label; EX.q = ''; }
+      else { EX.topicId = ''; EX.topicName = ''; EX.q = v; }
+      EX.viral = null; render();
+    }
     q.addEventListener('keydown', function (e) { if (e.key === 'Enter') { applyQ(); } });
+    q.addEventListener('change', function () { if (EX.tile === 'viral' && topicByLabel[q.value.trim().toLowerCase()]) { applyQ(); } });
     row2.appendChild(q);
     if (EX.tile === 'viral' || EX.tile === 'topics') {
       var TYPES = [['', 'Any type'], ['PERSON', 'People'], ['ORG', 'Organisations'], ['LOCATION', 'Places (incl. countries)'], ['EVENT', 'Events']];
@@ -6662,7 +6680,7 @@
     var go = h('button', { type: 'button', class: 'df-preset-btn', text: 'Search' });
     go.addEventListener('click', applyQ);
     var rs = h('button', { type: 'button', class: 'df-preset-btn', text: 'Reset' });
-    rs.addEventListener('click', function () { EX.platforms = {}; EX.minPlat = 0; EX.q = ''; EX.entityUid = ''; EX.entityName = ''; EX.entType = ''; EX.entSub = ''; EX.viral = null; render(); });
+    rs.addEventListener('click', function () { EX.platforms = {}; EX.minPlat = 0; EX.q = ''; EX.topicId = ''; EX.topicName = ''; EX.entityUid = ''; EX.entityName = ''; EX.entType = ''; EX.entSub = ''; EX.viral = null; render(); });
     row2.appendChild(go); row2.appendChild(rs);
     card.appendChild(row2);
     host.appendChild(card);

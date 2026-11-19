@@ -181,6 +181,25 @@ check('a search with no match empties Trending Topics', view().querySelectorAll(
   check('a topic holding 30%+ of all collected posts gets a visible note (China topic, about 44%)', !!note && /Geopolitics \/ China.* holds \d+% of all collected posts/.test(note.textContent) && /mixture/.test(note.textContent), note ? note.textContent.slice(0, 120) : 'no note');
   check('only the catch-all is flagged (no other topic is named in the note)', !!note && (note.textContent.match(/holds \d+%/g) || []).length === 1);
 }
+// Viral Posts: the search box takes a keyword or a topic name
+{
+  await rows('viral');
+  calls.length = 0;
+  const qbox = doc.querySelector('.ex-q');
+  check('the Viral Posts search box invites a keyword or a topic', /keyword, or pick a topic/.test(qbox.placeholder), qbox.placeholder);
+  const opts = [...doc.querySelectorAll('#ex-topic-list option')].map((o) => o.value);
+  check('the box suggests the topics (Civil / Disaster, Geopolitics / China ...)', opts.includes('Civil / Disaster') && opts.includes('Geopolitics / China') && !opts.some((x) => /^Unassigned/.test(x)), opts.join(' | '));
+  qbox.value = 'Civil / Disaster'; qbox.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter' })); await wait(800);
+  check('picking a topic sends topic_id and no keyword', calls.some((c) => /topic_id=t006/.test(c) && /[?&]q=&/.test(c)), calls[0] || '');
+  check('the box keeps showing the topic name and the explanation says only that topic is shown', doc.querySelector('.ex-q').value === 'Civil / Disaster' && /Showing only the posts in the topic .Civil \/ Disaster./.test(view().textContent));
+  const brk = [...view().querySelectorAll('.tv table tbody tr')].map((tr) => tr.children[0].textContent);
+  check('the breakout groups follow the topic (only Civil / Disaster rows)', brk.length > 0 && brk.every((n) => /Civil \/ Disaster/.test(n)), brk.slice(0, 3).join(' | '));
+  calls.length = 0;
+  const q2 = doc.querySelector('.ex-q'); q2.value = 'flood'; q2.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter' })); await wait(800);
+  check('a keyword sends q and clears the topic', calls.some((c) => /q=flood/.test(c) && !/topic_id=/.test(c)), calls[0] || '');
+  [...doc.querySelectorAll('#explore-view .df-preset-btn')].find((x) => x.textContent === 'Reset').click(); await wait(500);
+  check('Reset clears the box', doc.querySelector('.ex-q').value === '');
+}
 // Viral Posts: rank by per-post virality percentile
 {
   await rows('viral');

@@ -821,6 +821,13 @@ def explore_viral(qs: dict) -> dict:
         cond, cp = KQ.to_sql(kq, "p.text")
         where.append(cond); params.extend(cp)
         terms = kq.words()
+    tid = qs.get("topic_id", [""])[0].strip()
+    if tid:
+        if not re.fullmatch(r"[A-Za-z0-9_]+", tid):
+            raise ValueError("topic_id has an invalid form")
+        ids = ["t004", "t005"] if tid in ("t004", "t005") else [tid]      # the dashboard shows these two as one topic
+        where.append("p.post_uid IN (SELECT post_uid FROM analytics.post_topic WHERE topic_id IN (" + ",".join("?" * len(ids)) + "))")
+        params += ids
     ent = qs.get("entity_uid", [""])[0].strip()
     join = ""
     if ent:
