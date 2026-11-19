@@ -63,7 +63,7 @@ const results = [];
 // 1. taxonomy actually shipped in the payload
 const axes = metrics.taxonomy?.axes || {};
 results.push(report('taxonomy present in metrics.json',
-  Object.keys(axes).length === 6,
+  Object.keys(axes).length === 7 && (axes.security_domain?.order || []).join(',') === 'D01,D02,D03,D04,D05,D06,D07,D08,D09',
   Object.keys(axes).map(a => `${a}=${axes[a].order.length}`).join(' ')));
 
 // 2. nothing in the rendered data is undeclared

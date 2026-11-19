@@ -206,6 +206,43 @@ def main() -> int:
     only_rt = a._main_con.execute("SELECT count(*) FROM analytics.post_facts p WHERE " + a.RETWEET_SQL).fetchall()[0][0]
     chk("the retweet rule matches a known count (Twitter 4,219 + Truth Social 10 start with 'RT @')", only_rt == 4229, only_rt)
 
+    # ---------------- theme filter and search trend (stage 27)
+    import pandas as pd
+    th = pd.read_parquet(a.POST_THEME, columns=["post_uid", "theme", "tier"])
+    w = dict(**{"from": FROM, "to": TO})
+    vt = a.explore_viral(q(theme="D04", limit=300, **w))
+    uids = [p["post_uid"] for p in vt["with_views"] + vt["without_views"]]
+    tmap = th.set_index("post_uid")
+    chk("theme filter D04 returns only D04 posts of the high tier", uids and all(tmap.loc[u, "theme"] == "D04" and tmap.loc[u, "tier"] == "high" for u in uids), len(uids))
+    va = a.explore_viral(q(theme="D04", theme_all=1, limit=300, **w))
+    chk("the lower-confidence switch adds posts and never removes any", va["total_posts"] >= vt["total_posts"] and va["total_posts"] > 0, (vt["total_posts"], va["total_posts"]))
+    d4 = th[(th.theme == "D04") & (th.tier == "high")]
+    a._main_con.register("d4_uids", d4[["post_uid"]])
+    exp = a._main_con.execute("SELECT count(*) FROM d4_uids u JOIN analytics.post_facts p ON p.post_uid = u.post_uid WHERE p.posted_at IS NOT NULL").fetchall()[0][0]
+    tot_all = a.explore_viral(q(theme="D04", **{"from": "1990-01-01", "to": "2100-01-01"}))["total_posts"]
+    chk("theme total over all days equals the stage-27 file (D04 high tier, posts with a posted day)", tot_all == exp and exp > 0, (tot_all, exp, len(d4)))
+    for bad in ("D10", "x", "D0"):
+        try:
+            a.explore_viral(q(theme=bad, **w)); chk(f"theme '{bad}' is refused", False)
+        except ValueError:
+            chk(f"theme '{bad}' is refused", True)
+    pf = dict(prev_from=PF, prev_to=PT, **w)
+    t1 = a.explore_search_trend(q(q="ladakh", **pf))
+    chk("search trend: counts, daily series and shares are consistent", t1["n_cur"] > 0 and t1["distinct_cur"] <= t1["n_cur"] and
+        sum(r["n"] for r in t1["daily"] if FROM <= r["day"] <= TO) == t1["n_cur"] and sum(r["n"] for r in t1["daily"] if PF <= r["day"] <= PT) == t1["n_prev"],
+        (t1["n_cur"], t1["n_prev"]))
+    chk("search trend: the day total is every post of that day, never smaller than the matches", all(r["total"] >= r["n"] for r in t1["daily"]))
+    chk("search trend: platform and topic counts add up to the matches", sum(r["n_cur"] for r in t1["platforms"]) == t1["n_cur"] and sum(r["n"] for r in t1["topics"]) <= t1["n_cur"])
+    chk("search trend: matches agree with the Viral Posts total for the same words", t1["n_cur"] == a.explore_viral(q(q="ladakh", **w))["total_posts"],
+        (t1["n_cur"], a.explore_viral(q(q="ladakh", **w))["total_posts"]))
+    t2 = a.explore_search_trend(q(theme="D06", **pf))
+    chk("search trend by theme lists only that theme", t2["n_cur"] > 0 and {r["theme"] for r in t2["themes"]} == {"D06"} and all(r["tier"] == "high" for r in t2["themes"]))
+    for kw, label in ((dict(), "nothing to search for"), (dict(q="-dam"), "only a minus word")):
+        try:
+            a.explore_search_trend(q(**kw, **pf)); chk(f"search trend refuses {label}", False)
+        except (ValueError, a.KQ.KeywordError):
+            chk(f"search trend refuses {label}", True)
+
     n_ok = sum(RESULTS)
     print(f"\n  {n_ok}/{len(RESULTS)} checks passed")
     return 0 if n_ok == len(RESULTS) else 1

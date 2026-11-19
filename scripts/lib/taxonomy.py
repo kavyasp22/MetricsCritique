@@ -304,6 +304,26 @@ def build() -> dict:
         "entries": st_entries,
     }
 
+    # --- security domains D01..D09 (the hybrid theme filter, stage 27). Names come from data/entity_schema.json, the file the
+    #     routing stage uses, so the dashboard and the routing never disagree. Automatic and provisional: not alertable. ---
+    sd = json.loads((EDA_ROOT / "data" / "entity_schema.json").read_text(encoding="utf-8"))
+    sd_entries = {
+        d: {"display": sd["l2"][d]["name"], "description": sd["l2"][d]["name"],
+            "model_description": None, "hypothesis": None, "code": d, "parent_key": None, "level": 1,
+            "alertable": False,
+            "alertable_reason": "automatic provisional label (stage 27, about 74% right on its high tier); alerts are keyed on topic_id",
+            "crosswalk_from": [], "crosswalk_to": []}
+        for d in sd["domain_ids"]
+    }
+    axes["security_domain"] = {
+        "label": "Security theme (automatic, provisional)",
+        "kind": "legacy",
+        "hierarchical": False,
+        "status": "provisional",
+        "order": list(sd["domain_ids"]),
+        "entries": sd_entries,
+    }
+
     # --- CAMEO axes: split by grain, see module docstring on share_V ---
     def _cameo_entry(c: dict) -> dict:
         return {

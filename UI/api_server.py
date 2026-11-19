@@ -41,6 +41,8 @@ DATA = EDA_ROOT / "data"
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 300
 POST_VIRALITY = DATA / "post_virality.parquet"   # scripts/24_post_virality.py; optional, the page works without it
+POST_THEME = DATA / "post_theme_v1.parquet"      # scripts/27_post_theme.py: hybrid security theme D01..D09; optional
+POST_DEDUP = DATA / "post_dedup.parquet"         # scripts/25_post_dedup.py: is_first = the first post of an exact-copy group
 RETWEET_SQL = "(coalesce(p.text, '') ILIKE 'RT @%')"      # a retweet starts "RT @user:"; only Twitter / Truth Social mark reposts this way in the data
 VIRALITY_MIN_REF = 20                            # a percentile needs at least this many reference posts to be shown
 
@@ -90,6 +92,23 @@ def _platform_clause(qs, where, params, col="p.platform"):
     if plats:
         where.append(f"{col} IN (" + ",".join("?" * len(plats)) + ")")
         params.extend(plats)
+
+
+def _theme_clause(qs, where, params):
+    """Theme filter (D01..D09) from stage 27. `theme_all=1` also takes the medium tier (one cue term); the default is the high tier
+    only (74% right on a fresh sample, medium 59%). Returns the chosen theme or ''."""
+    th = qs.get("theme", [""])[0].strip()
+    if not th:
+        return ""
+    if not re.fullmatch(r"D0[1-9]", th):
+        raise ValueError("theme must be D01..D09")
+    if not POST_THEME.exists():
+        raise ValueError("themes are not built yet: run scripts/27_post_theme.py")
+    tiers = ("high", "medium") if qs.get("theme_all", ["0"])[0] == "1" else ("high",)
+    where.append(f"p.post_uid IN (SELECT post_uid FROM read_parquet('{POST_THEME.as_posix()}') "
+                 f"WHERE theme = ? AND tier IN ({','.join('?' * len(tiers))}))")
+    params.append(th); params.extend(tiers)
+    return th
 
 
 _ENG_P = "(coalesce(p.likes,0)+coalesce(p.comments,0)+coalesce(p.shares,0))"
@@ -837,6 +856,7 @@ def explore_viral(qs: dict) -> dict:
         params_join = []
     if qs.get("retweets", ["include"])[0] == "hide":
         where.append("NOT " + RETWEET_SQL)
+    _theme_clause(qs, where, params)
     limit = _limit(qs)
     have_v = POST_VIRALITY.exists()
     vjoin = f" LEFT JOIN read_parquet('{POST_VIRALITY.as_posix()}') v ON v.post_uid = p.post_uid" if have_v else ""
@@ -867,6 +887,73 @@ def explore_viral(qs: dict) -> dict:
         return _clean_posts(rows, terms)
 
     return {"total_posts": int(total), "with_views": clean(with_views), "without_views": clean(no_views), "terms": terms}
+
+
+SEARCH_TREND_MIN = 20     # fewer matching posts in the selected days than this: the page says "too few posts to call a trend"
+
+
+def explore_search_trend(qs: dict) -> dict:
+    """Explore > a keyword, entity or theme search: how much it is posted per day, against the previous period and against all posts of the same
+    days and platforms (so a collector ramp-up does not look like a surge), where it is posted, and which topics and themes the matching posts fall in.
+    Read-only. Day rule = posted day, else scraped day (the one the metrics use). Posts are counted with repeats and, separately, as distinct messages."""
+    import pandas as pd
+    d_from, d_to = qs.get("from", [""])[0], qs.get("to", [""])[0]
+    p_from, p_to = qs.get("prev_from", [""])[0], qs.get("prev_to", [""])[0]
+    if not (d_from and d_to):
+        raise ValueError("from and to required")
+    expr = "CAST(coalesce(p.posted_at, p.scraped_at) AS DATE)"
+    lo = p_from or d_from
+    base_where, base_params = [f"{expr} >= ?", f"{expr} <= ?"], [lo, d_to]
+    _platform_clause(qs, base_where, base_params)
+    where, params = list(base_where), list(base_params)
+    q = qs.get("q", [""])[0].strip()
+    terms = []
+    if q:
+        kq = KQ.parse(q)
+        cond, cp = KQ.to_sql(kq, "p.text")
+        where.append(cond); params.extend(cp)
+        terms = kq.words()
+    theme = _theme_clause(qs, where, params)
+    ent = qs.get("entity_uid", [""])[0].strip()
+    join, pj = "", []
+    if ent:
+        join = "JOIN (SELECT DISTINCT post_uid FROM geo.entity_mentions WHERE entity_uid = ?) em ON em.post_uid = p.post_uid"
+        pj = [ent]
+    if not (q or theme or ent):
+        raise ValueError("give a keyword, a theme or an entity")
+    dd = (f"LEFT JOIN read_parquet('{POST_DEDUP.as_posix()}') dd ON dd.post_uid = p.post_uid" if POST_DEDUP.exists() else "")
+    first = "coalesce(dd.is_first, TRUE)" if dd else "TRUE"
+    cur = _main_con.cursor()
+    try:
+        m = cur.execute(f"SELECT p.post_uid, p.platform, {expr} AS d, {first} AS is_first FROM analytics.post_facts p {join} {dd} "
+                        f"WHERE {' AND '.join(where)}", pj + params).fetchdf()
+        tot = cur.execute(f"SELECT {expr} AS d, count(*) AS n FROM analytics.post_facts p WHERE {' AND '.join(base_where)} GROUP BY 1",
+                          base_params).fetchdf()
+        m["d"] = m["d"].astype(str); tot["d"] = tot["d"].astype(str)
+        in_cur = (m["d"] >= d_from) & (m["d"] <= d_to)
+        in_prev = (m["d"] >= p_from) & (m["d"] <= p_to) if (p_from and p_to) else pd.Series(False, index=m.index)
+        cm = m[in_cur]
+        daily = m.groupby("d").agg(n=("post_uid", "size"), distinct=("is_first", "sum")).reset_index()
+        daily = daily.merge(tot.rename(columns={"n": "total"}), on="d", how="outer").fillna(0).sort_values("d")
+        plat = [{"platform": k, "n_cur": int(v), "n_prev": int(((m["platform"] == k) & in_prev).sum())}
+                for k, v in cm.groupby("platform").size().sort_values(ascending=False).items()]
+        topics, themes = [], []
+        if len(cm):
+            cur.register("m_cur", cm[["post_uid"]])
+            topics = [{"topic_id": r[0], "n": int(r[1])} for r in cur.execute(
+                "SELECT pt.topic_id, count(*) FROM analytics.post_topic pt JOIN m_cur ON m_cur.post_uid = pt.post_uid GROUP BY 1 ORDER BY 2 DESC").fetchall()]
+            if POST_THEME.exists():
+                themes = [{"theme": r[0], "tier": r[1], "n": int(r[2])} for r in cur.execute(
+                    f"SELECT t.theme, t.tier, count(*) FROM read_parquet('{POST_THEME.as_posix()}') t JOIN m_cur ON m_cur.post_uid = t.post_uid "
+                    "WHERE t.theme <> 'unassigned' GROUP BY 1, 2 ORDER BY 3 DESC").fetchall()]
+            cur.unregister("m_cur")
+    finally:
+        cur.close()
+    return {"q": q, "theme": theme, "entity_uid": ent, "terms": terms, "min_posts": SEARCH_TREND_MIN,
+            "n_cur": int(len(cm)), "n_prev": int(in_prev.sum()), "distinct_cur": int(cm["is_first"].sum()),
+            "unassigned_cur": int(len(cm)) - int(sum(t["n"] for t in themes)),
+            "daily": [{"day": r.d, "n": int(r.n), "distinct": int(r.distinct), "total": int(r.total)} for r in daily.itertuples()],
+            "platforms": plat, "topics": topics, "themes": themes}
 
 
 _ENT_COVER = None
@@ -1192,6 +1279,14 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 self._json(explore_entity_topics(parse_qs(parsed.query)))
             except ValueError as e:
+                self._json({"error": str(e)}, status=400)
+            except Exception as e:
+                self._json({"error": f"query failed: {e}"}, status=500)
+            return
+        if parsed.path == "/api/explore/search_trend":
+            try:
+                self._json(explore_search_trend(parse_qs(parsed.query)))
+            except (ValueError, KQ.KeywordError) as e:
                 self._json({"error": str(e)}, status=400)
             except Exception as e:
                 self._json({"error": f"query failed: {e}"}, status=500)

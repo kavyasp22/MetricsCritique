@@ -73,6 +73,7 @@ posts) into **statistically gated OSINT signal metrics**, a **geopolitical ontol
 │   ├── 23_load_prod_entities.py       Load production entities into geo_ontology.duckdb (Babelscape kept as *_babelscape)
 │   ├── 26a_embed_domain_prototypes.py Embed the D01-D09 description sentences with the pretrained bge-m3 (needs torch)
 │   ├── 26_domain_zeroshot.py          Zero-shot domain scoring of all embedded posts, no training (17 s) -> data/post_domain_zs.parquet
+│   ├── 27_post_theme.py               Hybrid security theme D01-D09 per post (bge-m3 zero-shot + keyword cue), high / medium tier -> data/post_theme_v1.parquet
 │   ├── 25_post_dedup.py               Group exact copies (same author + same normalised text) -> data/post_dedup.parquet (read-only, seconds)
 │   ├── 24_post_virality.py            Save the per-post virality percentile (same code as 07, ~10 min) -> data/post_virality.parquet
 │   ├── notify_poller.py     Reference alert poller (log-only; no channel wired)

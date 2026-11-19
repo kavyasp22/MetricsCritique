@@ -5634,8 +5634,10 @@
      (topics, bursts, shared stories) and, for Viral Posts, the read-only /api/explore/viral.
      Nothing here writes anywhere. The date range is the shared S.from / S.to. */
 
-  var EX = { tile: 'topics', platforms: {}, q: '', entityUid: '', entityName: '', entType: '', entSub: '', terms: [], spreadMode: 'cards', spreadLimit: 10, top: 25, unclass: false, minPlat: 0, entTop: null, vrank: 'views', vper: 0, rt: 'include', floor: 'top10', vorder: 'biggest', topicId: '', topicName: '',
-             viral: null, viralKey: '' };
+  var EX_ALL = 100000;     // "Show all": every row of a list; post lists are cut to the server limit below
+  var EX_POST_CAP = 300;   // api_server MAX_LIMIT: most posts one list can fetch
+  var EX = { tile: 'topics', platforms: {}, q: '', entityUid: '', entityName: '', entType: '', entSub: '', terms: [], spreadMode: 'cards', spreadLimit: 10, top: 25, unclass: false, minPlat: 0, entTop: null, vrank: 'views', vper: 0, rt: 'include', floor: 'top10', vorder: 'biggest', topicId: '', topicName: '', theme: '', themeAll: false,
+             viral: null, viralKey: '', st: null, stKey: '' };
   var EX_TILES = [
     { k: 'topics', t: 'Trending Topics', s: "What's gaining attention?",
       i: '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>' },
@@ -5862,7 +5864,129 @@
     });
   }
 
+  /* ---- a keyword, entity or security theme searched on Trending Topics ---------------------------------------------------------
+     What a reader asking "what is trending about X?" needs: X's own trend (posts per day against ALL posts of the same days and platforms, so
+     a collector ramp-up is not mistaken for a surge), where it is posted, which topics and themes its posts fall in, and its top posts.
+     The numbers come from /api/explore/search_trend (read-only). The match is on the words in the post text, not on what the post is about. */
+  function exThemeName(k) { return k + ' · ' + TAX.name('security_domain', k); }
+  function exThemeQs() { return EX.theme ? '&theme=' + encodeURIComponent(EX.theme) + (EX.themeAll ? '&theme_all=1' : '') : ''; }
+  function exThemeNote() {
+    return 'Theme ' + exThemeName(EX.theme) + ': assigned automatically by the language model plus a keyword check, so it is provisional. ' +
+      (EX.themeAll ? 'Includes the lower-confidence matches (about 59% right, 74% for the clear ones). ' : 'Only clear matches are listed (about 74% right on a fresh check); many relevant posts carry no theme. ') +
+      'Do not read counts per theme as how much of the conversation is about it.';
+  }
+  function exSearchTitle() {
+    var parts = [];
+    if (EX.q) { parts.push('“' + EX.q + '”'); }
+    if (EX.theme) { parts.push(exThemeName(EX.theme)); }
+    if (EX.entityUid) { parts.push('naming ' + (EX.entityName || EX.entityUid)); }
+    return parts.join(' · ');
+  }
+  function exSearchTrendView(host) {
+    var days = exDays(), prev = exPrevDays(days), plats = PLATFORMS.filter(exPlatOk).join(','), title = exSearchTitle();
+    exExplain(host, 'Trend for ' + title, 'Posts that contain your words (and/or carry the chosen theme) in the selected days, counted per day. "Share of all posts" divides by every post ' +
+      'collected on the same days and platforms, so a day with more collection does not look like more interest. Growth compares the selected days with the same number of days just before ' +
+      '(shown only with at least ' + EX_RULES.growthMinPrev + ' earlier and ' + EX_RULES.growthMinCur + ' current posts; under ' + EX_RULES.stageMinPosts + ' posts the page says there are too few to call a trend). ' +
+      'Stage uses the same rule as the topics list (last 3 days against the 3 before, as share of all posts). The match is on the words in the text, not on what the post is about; ' +
+      '"distinct" counts an exact copy once. Topics are the pipeline’s broad topics, so most posts of a niche subject sit in one or two of them. Counts are collected posts, not audience.');
+    if (EX.theme) { host.appendChild(h('p', { class: 'cs ex-warn', text: exThemeNote() })); }
+    var body = h('div', { class: 'ex-search-trend' });
+    host.appendChild(body);
+    var qs = '&from=' + encodeURIComponent(S.from) + '&to=' + encodeURIComponent(S.to) + '&prev_from=' + encodeURIComponent(prev[0] || '') + '&prev_to=' + encodeURIComponent(prev[prev.length - 1] || '') +
+      '&platforms=' + encodeURIComponent(plats) + '&q=' + encodeURIComponent(EX.q) + exThemeQs() + '&entity_uid=' + encodeURIComponent(EX.entityUid);
+    var key = qs;
+    function sumDays(d, list) { var set = exSet(list), n = 0, t = 0; d.daily.forEach(function (r) { if (set[r.day]) { n += r.n; t += r.total; } }); return { n: n, total: t }; }
+    function chip(label, count, onClick, tip) {
+      var b = h('button', { type: 'button', class: 'df-preset-btn ex-chip', text: label + ' · ' + fmtInt(count), title: tip || '' });
+      b.addEventListener('click', onClick); return b;
+    }
+    function paint(d) {
+      body.textContent = '';
+      if (!d.n_cur) { empty(body, 'No posts match in the selected days and platforms.'); return; }
+      var c = sumDays(d, days), p = sumDays(d, prev);
+      var enough = d.n_cur >= d.min_posts;
+      var share = c.total ? d.n_cur / c.total * 1000 : null;
+      body.appendChild(h('p', { class: 'cs', text: fmtInt(d.n_cur) + ' posts in the selected ' + days.length + ' days (' + fmtInt(d.distinct_cur) + ' distinct messages); ' +
+        fmtInt(d.n_prev) + ' in the ' + prev.length + ' days before' + (share != null ? '; ' + share.toFixed(share < 10 ? 1 : 0) + ' per 1,000 collected posts.' : '.') }));
+      if (!enough) {
+        body.appendChild(h('p', { class: 'cs ex-warn', text: 'Too few posts (' + d.n_cur + ', need ' + d.min_posts + ') to call a trend: growth and stage are not shown.' }));
+      } else {
+        var okG = d.n_prev >= EX_RULES.growthMinPrev && d.n_cur >= EX_RULES.growthMinCur;
+        var g = okG ? (d.n_cur - d.n_prev) / d.n_prev : null;
+        var gs = (okG && p.total && c.total && p.n) ? (d.n_cur / c.total) / (p.n / p.total) - 1 : null;
+        function pct(v) { return v == null ? '—' : (v >= 0 ? '+' : '') + Math.round(v * 100) + '%'; }
+        var dm = {}; d.daily.forEach(function (r) { dm[r.day] = { V: r.n, eff: r.total / 1000 }; });
+        var sd = exStageDetail(dm, days, d.n_prev);
+        body.appendChild(h('p', { class: 'cs', text: 'Growth in posts ' + pct(g) + ' · growth in share of all posts ' + pct(gs) + ' · stage: ' + sd.stage +
+          (sd.change != null ? ' (last 3 days ' + pct(sd.change) + ' vs the 3 before, per collected post)' : '') + '.' }));
+      }
+      var plot = h('div', { class: 'ex-st-plot' });
+      body.appendChild(plot);
+      var set = exSet(days), byDay = {}; d.daily.forEach(function (r) { byDay[r.day] = r.n; });
+      lineChart(plot, { days: days, series: [{ label: 'Posts per day', role: 'focal', kind: 'bar', pts: days.map(function (x, i) { return { i: i, v: byDay[x] || 0 }; }) }],
+        width: Math.max(280, plot.clientWidth || host.clientWidth || 520), height: 130, zeroBase: true, yFmt: fmtCompact, tipFmt: fmtInt, tipHead: 'Posts per day', yTicks: 3,
+        xTicks: Math.min(5, days.length), margin: { t: 8, r: 10, b: 22, l: 36 } });
+      // where
+      var wr = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'WHERE' })]);
+      d.platforms.forEach(function (r) {
+        var ch = r.n_prev >= 5 ? ' (' + (r.n_cur >= r.n_prev ? '+' : '') + Math.round((r.n_cur - r.n_prev) / r.n_prev * 100) + '% vs before)' : '';
+        wr.appendChild(h('span', { class: 'ex-rt-tag', text: r.platform + ' · ' + fmtInt(r.n_cur) + ch }));
+      });
+      body.appendChild(wr);
+      // topics
+      var tmap = {};
+      d.topics.forEach(function (r) { var t = exTid(r.topic_id); tmap[t] = (tmap[t] || 0) + r.n; });
+      var tr = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'TOPICS' })]);
+      var tids = Object.keys(tmap).sort(function (a, b) { return tmap[b] - tmap[a]; });
+      tids.slice(0, 6).forEach(function (t) {
+        tr.appendChild(chip(topicLabel(t), tmap[t], function () { EX.topicId = t; EX.topicName = topicLabel(t); EX.tile = 'viral'; EX.viral = null; render(); },
+          Math.round(tmap[t] / d.n_cur * 100) + '% of these posts. Click to see them in Viral Posts, limited to this topic.'));
+      });
+      if (!tids.length) { tr.appendChild(h('span', { class: 'cs', text: 'none of these posts is assigned to a topic' })); }
+      body.appendChild(tr);
+      // themes
+      var thm = {};
+      d.themes.forEach(function (r) { var o = thm[r.theme] || (thm[r.theme] = { high: 0, medium: 0 }); o[r.tier] += r.n; });
+      var hr = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'THEMES' })]);
+      Object.keys(thm).sort(function (a, b) { return (thm[b].high + thm[b].medium) - (thm[a].high + thm[a].medium); }).forEach(function (k) {
+        var o = thm[k];
+        hr.appendChild(chip(exThemeName(k), o.high + (EX.themeAll ? o.medium : 0), function () { EX.theme = k; EX.viral = null; EX.st = null; render(); },
+          o.high + ' clear match(es), ' + o.medium + ' lower-confidence. Automatic and provisional. Click to filter by this theme.'));
+      });
+      hr.appendChild(h('span', { class: 'cs', text: fmtInt(d.unassigned_cur) + ' of these posts have no theme (most posts are not security posts or have no clear cue).' }));
+      body.appendChild(hr);
+      // posts
+      body.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Top posts for this search' }));
+      var pbox = h('div', { class: 'ex-col' }, [h('div', { class: 'empty', text: 'Loading…' })]);
+      body.appendChild(pbox);
+      var more = h('button', { type: 'button', class: 'df-preset-btn', text: 'Open all in Viral Posts' });
+      more.addEventListener('click', function () { EX.tile = 'viral'; EX.viral = null; render(); });
+      var url = '/api/explore/viral?limit=6' + qs.replace(/&prev_from=[^&]*&prev_to=[^&]*/, '');
+      fetch(url, { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (v) {
+        if (v.error) { throw new Error(v.error); }
+        pbox.textContent = '';
+        EX.terms = v.terms || [];
+        v.with_views.forEach(function (x) { pbox.appendChild(exPostCard(x, true)); });
+        v.without_views.slice(0, v.with_views.length ? 2 : 6).forEach(function (x) { pbox.appendChild(exPostCard(x, false)); });
+        if (!v.with_views.length && !v.without_views.length) { empty(pbox, 'No posts with a view or engagement counter match.'); }
+        pbox.appendChild(more);
+      }).catch(function (err) { pbox.textContent = ''; empty(pbox, 'Could not load posts: ' + err.message); });
+    }
+    if (EX.st && EX.stKey === key) { paint(EX.st); return; }
+    body.appendChild(h('div', { class: 'empty', text: 'Loading…' }));
+    fetch('/api/explore/search_trend?' + qs.slice(1), { cache: 'no-store' }).then(function (r) {
+      return r.json().then(function (j) { if (!r.ok) { throw new Error(j && j.error ? j.error : 'HTTP ' + r.status); } return j; });
+    }).then(function (d) {
+      EX.st = d; EX.stKey = key;
+      if (body.isConnected !== false) { paint(d); }
+    }).catch(function (err) {
+      body.textContent = '';
+      empty(body, /^HTTP|Failed|fetch|NetworkError/i.test(err.message) ? 'Search trends need the API server (' + err.message + '). The static snapshot has no post-level data.' : 'Search problem: ' + err.message);
+    });
+  }
+
   function exTopicsView(host) {
+    if (EX.q || EX.theme) { return exSearchTrendView(host); }
     if (EX.entityUid) { return exEntityTopicsView(host); }
     var rows = exTopicRows().filter(function (r) { return !EX.minPlat || r.platforms >= EX.minPlat; }).sort(function (a, b) {
       var ea = a.emergence == null ? -1 : a.emergence, eb = b.emergence == null ? -1 : b.emergence;
@@ -6386,13 +6510,15 @@
     });
     host.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Top individual posts' }));
     var plats = PLATFORMS.filter(exPlatOk).join(',');
-    var key = [S.from, S.to, plats, EX.q, EX.entityUid, EX.top, EX.vrank, EX.vper, EX.rt, EX.floor, EX.vorder, EX.topicId].join('|');
+    var key = [S.from, S.to, plats, EX.q, EX.entityUid, EX.top, EX.vrank, EX.vper, EX.rt, EX.floor, EX.vorder, EX.topicId, EX.theme, EX.themeAll].join('|');
     exExplain(host, 'Top posts', (EX.topicName ? 'Showing only the posts in the topic \u201c' + EX.topicName + '\u201d. ' : '') + 'The search box takes a keyword, or pick a topic name from its suggestions to see only the posts in that topic. Two ways to rank. "Views": posts ranked by observed views; platforms that give no view count are listed separately, ' +
       'ranked by likes + comments + shares, and never ranked as zero views. Views are not comparable across platforms, so the most viewed post is not ' +
       'necessarily the most unusual one. "Viral ranking" has two orders. BIGGEST (default) sorts by where a post\u2019s raw attention (views, else likes + comments + shares) sits among posts of the same ' +
       'platform and age, so a post with millions of views comes first whatever its share rate; the percentile is comparable across platforms. MOST AMPLIFIED sorts by the amplification percentile: each post is ranked against ' +
       'posts of the same platform and age (1.00 = top of its peers, 0.50 = typical), which can be compared across platforms. Every post shows both numbers. The percentile is shown only for posts with a usable amplification ratio and at least 20 similar posts to ' +
       'compare with; platforms with no counters (Reddit) have none. Ties are broken by engagement. Because the percentile ranks a ratio, tiny counts can score high (4 views and 1 share), so by default a post must also be in the top 10% of its own platform by activity (views, else likes + comments + shares); MIN ACTIVITY can loosen it to the platform median or switch it off. Retweets (posts starting "RT @") are included because they show spread, and are tagged; their counters are the original post\u2019s, so their score is really the original\u2019s. "Original posts only" hides them (only Twitter and Truth Social mark reposts this way).' + (EX.entityName ? ' Filtered to posts naming ' + EX.entityName + '.' : '') );
+    if (EX.theme) { host.appendChild(h('p', { class: 'cs ex-warn', text: exThemeNote() })); }
+    if (EX.top === EX_ALL) { host.appendChild(h('p', { class: 'cs', text: 'Show all: the posts below are cut at ' + EX_POST_CAP + ' per list (the server limit); narrow the search to see the rest.' })); }
     var rankBar = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'RANK BY' })]);
     [['views', 'Views'], ['virality', 'Viral ranking']].forEach(function (x) {
       var b = h('button', { type: 'button', class: 'df-preset-btn' + (EX.vrank === x[0] ? ' active' : ''), text: x[1] });
@@ -6473,8 +6599,8 @@
     if (EX.viral && EX.viralKey === key) { EX.terms = EX.viral.terms || []; paint(EX.viral); return; }
     body.appendChild(h('div', { class: 'empty', text: 'Loading…' }));
     var url = '/api/explore/viral?from=' + encodeURIComponent(S.from) + '&to=' + encodeURIComponent(S.to) +
-      '&platforms=' + encodeURIComponent(plats) + '&q=' + encodeURIComponent(EX.q) + (EX.topicId ? '&topic_id=' + encodeURIComponent(EX.topicId) : '') +
-      '&entity_uid=' + encodeURIComponent(EX.entityUid) + '&limit=' + EX.top +
+      '&platforms=' + encodeURIComponent(plats) + '&q=' + encodeURIComponent(EX.q) + (EX.topicId ? '&topic_id=' + encodeURIComponent(EX.topicId) : '') + exThemeQs() +
+      '&entity_uid=' + encodeURIComponent(EX.entityUid) + '&limit=' + Math.min(EX.top, EX_POST_CAP) +
       (EX.vrank === 'virality' ? '&rank=virality&per_platform=' + EX.vper : '') + (EX.rt === 'hide' ? '&retweets=hide' : '') + (EX.vrank === 'virality' && EX.floor !== 'top10' ? '&floor=' + EX.floor : '') +
       (EX.vrank === 'virality' && EX.vorder !== 'biggest' ? '&order=' + EX.vorder : '');
     fetch(url, { cache: 'no-store' }).then(function (r) {
@@ -6655,6 +6781,18 @@
       }
       ent.addEventListener('change', applyEnt);
       row2.appendChild(tsel); row2.appendChild(ssel); row2.appendChild(ent); row2.appendChild(dl);
+      var thsel = h('select', { class: 'ex-top', id: 'ex-theme', 'aria-label': 'Security theme',
+                                title: 'Security theme (D01\u2013D09), assigned automatically and provisional. Default: only posts with a clear match (about 74% right on a fresh check). Most posts have no theme.' });
+      [''].concat(TAX.axis('security_domain').order).forEach(function (k) {
+        var o = h('option', { text: k ? exThemeName(k) : 'Any security theme', value: k }); if (EX.theme === k) { o.selected = true; } thsel.appendChild(o);
+      });
+      thsel.addEventListener('change', function () { EX.theme = thsel.value; EX.viral = null; EX.st = null; render(); });
+      row2.appendChild(thsel);
+      if (EX.theme) {
+        var tb = h('input', { type: 'checkbox', id: 'ex-theme-all' }); tb.checked = !!EX.themeAll;
+        tb.addEventListener('change', function () { EX.themeAll = tb.checked; EX.viral = null; EX.st = null; render(); });
+        row2.appendChild(h('label', { class: 'ex-plat-opt', title: 'Also include posts with a weaker match (about 59% right)' }, [tb, h('span', { text: ' Include lower-confidence' })]));
+      }
     }
     if (EX.tile === 'topics' || EX.tile === 'life' || EX.tile === 'viral' || EX.tile === 'sent') {
       var ub = h('input', { type: 'checkbox', id: 'ex-unclass' });
@@ -6672,15 +6810,17 @@
       row2.appendChild(psel);
     }
     var sel = h('select', { class: 'ex-top' });
-    [10, 25, 50].forEach(function (v) {
-      var o = h('option', { text: 'Show ' + v, value: String(v) }); if (EX.top === v) { o.selected = true; } sel.appendChild(o);
+    [10, 25, 50, EX_ALL].forEach(function (v) {
+      var o = h('option', { text: v === EX_ALL ? 'Show all' : 'Show ' + v, value: String(v) }); if (EX.top === v) { o.selected = true; }
+      if (v === EX_ALL) { o.title = 'Every row of a list. Lists of posts are cut at ' + EX_POST_CAP + ' per list (the server limit).'; }
+      sel.appendChild(o);
     });
     sel.addEventListener('change', function () { EX.top = parseInt(sel.value, 10); EX.viral = null; render(); });
     row2.appendChild(sel);
     var go = h('button', { type: 'button', class: 'df-preset-btn', text: 'Search' });
     go.addEventListener('click', applyQ);
     var rs = h('button', { type: 'button', class: 'df-preset-btn', text: 'Reset' });
-    rs.addEventListener('click', function () { EX.platforms = {}; EX.minPlat = 0; EX.q = ''; EX.topicId = ''; EX.topicName = ''; EX.entityUid = ''; EX.entityName = ''; EX.entType = ''; EX.entSub = ''; EX.viral = null; render(); });
+    rs.addEventListener('click', function () { EX.platforms = {}; EX.minPlat = 0; EX.q = ''; EX.topicId = ''; EX.topicName = ''; EX.entityUid = ''; EX.entityName = ''; EX.entType = ''; EX.entSub = ''; EX.theme = ''; EX.themeAll = false; EX.viral = null; EX.st = null; render(); });
     row2.appendChild(go); row2.appendChild(rs);
     card.appendChild(row2);
     host.appendChild(card);
