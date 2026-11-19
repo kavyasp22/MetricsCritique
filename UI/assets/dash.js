@@ -5767,6 +5767,7 @@
       'Growth compares the selected days with the same number of days just before them (shown only with at least 10 earlier and 20 current posts). ' +
       'Momentum is the recent direction of volume, not a forecast. Stage compares the last 3 days with the 3 before, as posts per active channel ' +
       '(starting / rising / peak / steady / declining; "too little data" under 20 posts in the last 6 days). ' +
+      'The Burst stage on Trend Lifecycle describes a single burst on one platform and uses a different rule, so the two can differ. ' +
       '"Unclassified" (posts not assigned to a topic) is left out unless you tick the box. Click a row to open its posts.' );
     tableView(host, [
       { k: 'topic', label: 'Topic' },
@@ -5864,12 +5865,13 @@
       };
     }).sort(function (a, b) { return b.peak < a.peak ? -1 : (b.peak > a.peak ? 1 : 0); }).slice(0, EX.top * 4);
     var cnt = {}; rows.forEach(function (r) { cnt[r.stage] = (cnt[r.stage] || 0) + 1; });
-    exExplain(host, 'Trend lifecycle', 'Each row is one burst of activity (Kleinberg or CUSUM detector) for a topic on a platform. Stage is judged at the end ' +
-      'of the selected range: starting, rising, peak, declining, or steady (no active burst). Onset slope = how fast it built up (log-linear); ' +
+    exExplain(host, 'Trend lifecycle', 'Each row is one burst of activity (Kleinberg or CUSUM detector) for a topic on a platform. Burst stage is judged at the end ' +
+      'of the selected range: starting, rising, peak, declining, or steady (no active burst). It describes this one burst on this one platform; ' +
+      'the Stage on Trending Topics is a different rule (last 3 days against the 3 before, for the whole topic), so the two can differ. Onset slope = how fast it built up (log-linear); ' +
       'half-life = how fast it faded, shown with whether the decay curve fit well. ' +
       Object.keys(cnt).map(function (k) { return cnt[k] + ' ' + k; }).join(' · ') );
     tableView(host, [
-      { k: 'topic', label: 'Topic' }, { k: 'platform', label: 'Platform' }, { k: 'stage', label: 'Stage' },
+      { k: 'topic', label: 'Topic' }, { k: 'platform', label: 'Platform' }, { k: 'stage', label: 'Burst stage' },
       { k: 'start', label: 'Started' }, { k: 'peak', label: 'Peak day' }, { k: 'end', label: 'Ended' },
       { k: 'n_days', label: 'Days', num: true },
       { k: 'peak_V', label: 'Peak/day', num: true },
