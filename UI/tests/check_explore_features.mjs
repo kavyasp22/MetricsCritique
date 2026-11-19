@@ -10,7 +10,7 @@ const ROOT = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const html = readFileSync(`${ROOT}/index.html`, 'utf8');
 const script = readFileSync(`${ROOT}/assets/dash.js`, 'utf8');
 const base = JSON.parse(readFileSync(`${ROOT}/data/metrics.json`, 'utf8'));
-const errors = [], viralCalls = [], fbPosts = [], drillCalls = [];
+const errors = [], viralCalls = [], fbPosts = [], drillCalls = [], entCalls = [];
 const row = (i) => ({ post_uid: 'p' + i, platform: 'twitter', posted_at: '2026-10-2' + (i % 7) + ' 10:00:00+00', author_name: 'a', text: 'post ' + i, url: '', views: 1000 - i, likes: 5, comments: 1, shares: 2 });
 let prefill = {};
 
@@ -28,6 +28,10 @@ const dom = new JSDOM(html, {
         return J({ total_posts: 2, terms: ['flood', 'floods', 'flash flood'],
           with_views: [{ post_uid: 'a', platform: 'twitter', posted_at: '2026-10-20 10:00:00+00', text: 'Flash flood hits the floods area, not flooding', url: '', views: 5000, likes: 10, shares: 2, engagement: 12 }],
           without_views: [] });
+      }
+      if (u.includes('/api/explore/entity_topics')) {
+        entCalls.push(u);
+        return J({ entity_uid: 'x', coverage: [{ platform: 'twitter', last_day: '2026-07-23', posts: 5 }, { platform: 'mastodon', last_day: '2026-10-26', posts: 9 }], rows: [{ topic_id: 't000', n_cur: 12, n_prev: 14 }, { topic_id: 't007', n_cur: 30, n_prev: 10 }, { topic_id: 't005', n_cur: 2, n_prev: 0 }, { topic_id: 't004', n_cur: 1, n_prev: 1 }] });
       }
       if (u.includes('/api/drill')) {
         drillCalls.push(u);
@@ -134,6 +138,33 @@ const ent = doc.getElementById('ex-ent');
 viralCalls.length = 0;
 await typeIn(ent, opts[0]);
 check('picking an entity sends its id to the API', viralCalls.some((u) => /entity_uid=location%3A/.test(u)), viralCalls[0] || '');
+
+// ---- entity filter on Trending Topics ----
+entCalls.length = 0;
+await tile('topics');
+{ const q0 = doc.querySelector('.ex-q'); q0.value = ''; q0.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter' })); await wait(700); }   // the viral text query above would filter topic names here
+check('Trending Topics shows the entity picker (type, subtype, name)', !!doc.getElementById('ex-ent') && !!doc.getElementById('ex-ent-type') && !!doc.getElementById('ex-ent-sub'));
+check('with an entity chosen the page asks the entity-topics API with the entity id and the previous period',
+  entCalls.length > 0 && /entity_uid=location%3A/.test(entCalls[0]) && /prev_from=/.test(entCalls[0]) && /prev_to=/.test(entCalls[0]), entCalls[0] || '');
+const eth = [...view().querySelectorAll('.tv thead th .th-label')].map((x) => x.textContent);
+check('entity table names the entity count and labels the topic-level columns "whole topic"',
+  eth.some((x) => /^Posts naming /.test(x)) && eth.includes('Emergence (whole topic)') && eth.includes('Alert days (whole topic)') && eth.includes('Stage (whole topic)'), eth.join(' | '));
+const erows = [...view().querySelectorAll('.tv table tbody tr')];
+const firstCells = erows.map((tr) => tr.children[1].textContent.replace(/[\s,]/g, ''));
+check('rows are sorted by posts naming the entity (highest first)', erows.length > 0 && Number(firstCells[0]) >= Number(firstCells[firstCells.length - 1]), firstCells.join(','));
+check('topics t004 and t005 are merged into one row (1 + 2 posts = 3)', firstCells.filter((c) => c === '3').length === 1 && erows.length === 3, firstCells.join(','));
+check('a platform whose entities stop early is named in a warning (twitter, 2026-07-23); a complete one is not', /twitter \(entities end 2026-07-23\)/.test(view().textContent) && !/mastodon \(entities end/.test(view().textContent));
+check('the explanation names the entity and says emergence/stage are the whole topic', /whole topic/.test(view().textContent) && /YouTube comments carry no entity mentions/.test(view().textContent));
+drillCalls.length = 0;
+erows[0].click(); await wait(700);
+check('clicking a row opens the posts of that entity in that topic (drill gets topic_id and entity_uid)',
+  drillCalls.some((u) => /topic_id=t\d+/.test(u) && /entity_uid=location%3A/.test(u) && /sort=engagement/.test(u)), drillCalls[0] || '');
+doc.getElementById('drill-close')?.click(); await wait(200);
+const rs0 = [...doc.querySelectorAll('#explore-view .df-preset-btn')].find((x) => x.textContent === 'Reset');
+rs0.click(); await wait(600);
+check('after Reset the normal Trending Topics table is back (no entity columns)',
+  ![...view().querySelectorAll('.tv thead th .th-label')].some((x) => /whole topic/.test(x.textContent)));
+const entBack = [...opts][0];
 
 // ---- drill paging ----
 await tile('viral');

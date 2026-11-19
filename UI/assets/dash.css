@@ -2935,3 +2935,7 @@ body[data-mode="explore"] #global-filters { display: none !important; }
 .ex-explain[open] > summary::before { content: "\2212\00a0"; }
 .ex-explain-hint { color: var(--gold); font-weight: 400; }
 .ex-explain > p { margin: 0.4rem 0 0.2rem; font-size: 0.8rem; font-weight: 400; color: var(--ink-2); max-width: 90ch; line-height: 1.5; }
+
+.ex-warn { border-left: 3px solid var(--gold); padding: 0.3rem 0.6rem; background: rgba(214, 170, 60, 0.08); max-width: none; }
+
+.ex-row .bds-label:not(:first-child) { margin-left: 0.9rem; }

@@ -5594,7 +5594,7 @@
      (topics, bursts, shared stories) and, for Viral Posts, the read-only /api/explore/viral.
      Nothing here writes anywhere. The date range is the shared S.from / S.to. */
 
-  var EX = { tile: 'topics', platforms: {}, q: '', entityUid: '', entityName: '', entType: '', entSub: '', terms: [], spreadMode: 'cards', spreadLimit: 10, top: 25, unclass: false,
+  var EX = { tile: 'topics', platforms: {}, q: '', entityUid: '', entityName: '', entType: '', entSub: '', terms: [], spreadMode: 'cards', spreadLimit: 10, top: 25, unclass: false, minPlat: 0, entTop: null, vrank: 'views', vper: 0,
              viral: null, viralKey: '' };
   var EX_TILES = [
     { k: 'topics', t: 'Trending Topics', s: "What's gaining attention?",
@@ -5681,7 +5681,7 @@
 
   /* The thresholds behind the Trending Topics ranking. ONE place: the code below and the "How this is decided" panel both read it. */
   var EX_RULES = { stageDays: 6, stageMinPosts: 20, rise: 1.25, fall: 0.8, peakBand: 0.9, startPrev: 0.3, startMaxDays: 30,
-                   growthMinPrev: 10, growthMinCur: 20, alpha: 0.05, tonePosNeg: 0.15 };
+                   growthMinPrev: 10, growthMinCur: 20, entGrowthMinPrev: 5, entGrowthMinCur: 10, alpha: 0.05, tonePosNeg: 0.15 };
 
   /* Stage of a topic from its own daily series (effort-normalised: posts per active channel, so a collector ramp-up does not
      look like a surge). Compares the last 3 days with the 3 before them. Returns {stage, change} where change = last 3 / previous 3 - 1. */
@@ -5756,8 +5756,75 @@
     return det;
   }
 
+  /* Trending Topics with an entity chosen: the topics in which posts name that entity, counted for the selected days and for the
+     same number of days just before. Posts only (YouTube comments carry no entity mentions). The emergence / alert / stage columns
+     are still the WHOLE topic's, because the pipeline does not compute them per entity, and are labelled that way. */
+  function exEntityTopicsView(host) {
+    var days = exDays(), prev = exPrevDays(days), plats = PLATFORMS.filter(exPlatOk).join(',');
+    var key = [S.from, S.to, prev[0] || '', prev[prev.length - 1] || '', plats, EX.entityUid].join('|');
+    var nm = EX.entityName || EX.entityUid;
+    exExplain(host, 'Topics for ' + nm, 'Each row is a topic in which posts name ' + nm + '. "Posts naming" counts posts in the selected days that mention it; ' +
+      '"Previous period" is the same number of days directly before. Growth is shown with at least ' + EX_RULES.entGrowthMinPrev + ' earlier and ' + EX_RULES.entGrowthMinCur +
+      ' current posts. Only posts are counted: YouTube comments carry no entity mentions. Emergence, alert days and stage are the whole topic’s ' +
+      '(the pipeline does not compute them per entity), so they show how the topic itself is behaving, not the entity. Click a row to open the posts naming ' + nm + ' in that topic.');
+    var body = h('div', { class: 'ex-ent-topics' });
+    host.appendChild(body);
+    function paint(d) {
+      body.textContent = '';
+      // platforms whose stored entities stop before the selected end day (the production extract is a snapshot)
+      var gone = (d.coverage || []).filter(function (c) { return c.platform !== 'youtube_comment' && exPlatOk(c.platform) && (!c.last_day || c.last_day < S.to); })
+        .sort(function (x, y) { return (x.last_day || '') < (y.last_day || '') ? -1 : 1; });
+      var none = PLATFORMS.filter(function (pl) { return pl !== 'youtube_comment' && exPlatOk(pl) && !(d.coverage || []).some(function (c) { return c.platform === pl; }); });
+      if (gone.length || none.length) {
+        body.appendChild(h('p', { class: 'cs ex-warn', text: 'Entity data is incomplete for these dates: ' +
+          gone.map(function (c) { return c.platform + ' (entities end ' + c.last_day + ')'; }).concat(none.map(function (pl) { return pl + ' (no entities)'; })).join(', ') +
+          '. Posts on those platforms after that day are not counted, so counts for this entity can be lower than the real activity.' }));
+      }
+      var whole = {};
+      exTopicRows().forEach(function (r) { whole[r.topic_id] = r; });
+      var by = {};
+      d.rows.forEach(function (r) {
+        var t = exTid(r.topic_id), o = by[t] || (by[t] = { topic_id: t, cur: 0, prev: 0 });
+        o.cur += r.n_cur; o.prev += r.n_prev;
+      });
+      var rows = Object.keys(by).map(function (t) {
+        var o = by[t], w = whole[t], ok = o.prev >= EX_RULES.entGrowthMinPrev && o.cur >= EX_RULES.entGrowthMinCur;
+        return { topic_id: t, topic: topicLabel(t), cur: o.cur, prev: o.prev, growth: ok ? (o.cur - o.prev) / o.prev : null,
+          emergence: w ? w.emergence : null, alert_days: w ? w.alert_days : null, stage: w ? w.stage : null };
+      }).filter(function (r) { return r.cur > 0 && exTextOk(r.topic) && (EX.unclass || r.topic !== 'Unclassified'); })
+        .sort(function (a, b) { return b.cur - a.cur || (b.growth == null ? -1 : b.growth) - (a.growth == null ? -1 : a.growth); }).slice(0, EX.top);
+      tableView(body, [
+        { k: 'topic', label: 'Topic' },
+        { k: 'cur', label: 'Posts naming ' + nm, num: true, fmt: fmtInt },
+        { k: 'prev', label: 'Previous period', num: true, fmt: fmtInt },
+        { k: 'growth', label: 'Growth', num: true, fmt: function (v) { return v == null ? '—' : (v >= 0 ? '+' : '') + Math.round(v * 100) + '%'; } },
+        { k: 'emergence', label: 'Emergence (whole topic)', num: true, fmt: function (v) { return v == null ? '—' : Number(v).toFixed(2); } },
+        { k: 'alert_days', label: 'Alert days (whole topic)', num: true },
+        { k: 'stage', label: 'Stage (whole topic)' }
+      ], rows, {
+        label: 'Topics naming ' + nm + ' (' + rows.length + ')',
+        rowDrill: function (r) { return { view: 'topic', params: exDrillParams({ topic_id: r.topic_id, entity_uid: EX.entityUid, sort: 'engagement' }, true), title: r.topic + ' · ' + nm, subtitle: S.from + ' → ' + S.to }; }
+      });
+    }
+    if (EX.entTop && EX.entTop.key === key) { paint(EX.entTop.d); return; }
+    body.appendChild(h('div', { class: 'empty', text: 'Loading…' }));
+    var url = '/api/explore/entity_topics?from=' + encodeURIComponent(S.from) + '&to=' + encodeURIComponent(S.to) +
+      (prev.length ? '&prev_from=' + encodeURIComponent(prev[0]) + '&prev_to=' + encodeURIComponent(prev[prev.length - 1]) : '') +
+      '&platforms=' + encodeURIComponent(plats) + '&entity_uid=' + encodeURIComponent(EX.entityUid);
+    fetch(url, { cache: 'no-store' }).then(function (r) {
+      return r.json().then(function (j) { if (!r.ok) { throw new Error(j && j.error ? j.error : 'HTTP ' + r.status); } return j; });
+    }).then(function (d) {
+      EX.entTop = { key: key, d: d };
+      if (EX.entityUid && body.isConnected !== false) { paint(d); }
+    }).catch(function (err) {
+      body.textContent = '';
+      empty(body, /^HTTP|Failed|fetch|NetworkError/i.test(err.message) ? 'The entity view needs the API server (' + err.message + ').' : 'Problem: ' + err.message);
+    });
+  }
+
   function exTopicsView(host) {
-    var rows = exTopicRows().sort(function (a, b) {
+    if (EX.entityUid) { return exEntityTopicsView(host); }
+    var rows = exTopicRows().filter(function (r) { return !EX.minPlat || r.platforms >= EX.minPlat; }).sort(function (a, b) {
       var ea = a.emergence == null ? -1 : a.emergence, eb = b.emergence == null ? -1 : b.emergence;
       return eb - ea || b.posts - a.posts;
     }).slice(0, EX.top);
@@ -5768,7 +5835,7 @@
       'Momentum is the recent direction of volume, not a forecast. Stage compares the last 3 days with the 3 before, as posts per active channel ' +
       '(starting / rising / peak / steady / declining; "too little data" under 20 posts in the last 6 days). ' +
       'The Burst stage on Trend Lifecycle describes a single burst on one platform and uses a different rule, so the two can differ. ' +
-      '"Unclassified" (posts not assigned to a topic) is left out unless you tick the box. Click a row to open its posts.' );
+      '"Unclassified" (posts not assigned to a topic) is left out unless you tick the box. "Seen on" keeps only topics present on at least that many platforms. Click a row to open its posts.' );
     tableView(host, [
       { k: 'topic', label: 'Topic' },
       { k: 'posts', label: 'Posts', num: true, fmt: function (v) { return fmtInt(v); } },
@@ -6157,7 +6224,7 @@
       { k: 'tone', label: 'Mean tone', num: true, fmt: function (v) { return v == null ? '—' : Number(v).toFixed(2); } },
       { k: 'n', label: 'Posts scored', num: true, fmt: fmtInt }
     ], drops, {
-      open: !!drops.length, label: 'Significant tone drops (' + drops.length + ')',
+      label: 'Significant tone drops (' + drops.length + ')',
       rowDrill: function (r) { return { view: 'topic', params: { topic_id: r.topic_id, platform: r.platform, day: r.day }, title: r.topic + ' · ' + r.platform, subtitle: r.day }; }
     });
   }
@@ -6182,14 +6249,21 @@
     return out;
   }
 
-  function exPostCard(p, byViews) {
+  function exViralityText(p) {          // "virality 0.97 (vs 8,336 similar posts)": rank among posts of the same platform and age
+    return (p.virality_pct != null && p.virality_ref_n >= 20)
+      ? 'virality ' + Number(p.virality_pct).toFixed(2) + ' (vs ' + fmtInt(p.virality_ref_n) + ' similar posts)' : '';
+  }
+  function exPostCard(p, byViews, mode) {
     var when = p.posted_at ? day(p.posted_at) : '';
-    var metric = byViews ? (fmtCompact(p.views || 0) + ' views') : ('engagement ' + fmtCompact(p.engagement || 0));
+    var vt = exViralityText(p);
+    var metric = mode === 'virality' ? (vt || 'virality \u2014')
+      : (byViews ? (fmtCompact(p.views || 0) + ' views') : ('engagement ' + fmtCompact(p.engagement || 0)));
+    var second = (mode === 'virality' ? (p.views ? ' · ' + fmtCompact(p.views) + ' views' : '') : (vt ? ' · ' + vt : '')) +
+      (p.likes != null ? ' · ' + fmtCompact(p.likes) + ' likes' : '') + (p.shares != null ? ' · ' + fmtCompact(p.shares) + ' shares' : '');
     var title = h('div', { class: 'ex-post-top' }, [
       h('b', { text: p.platform }), h('span', { text: ' · ' + when + ' · ' }),
       h('span', { class: 'ex-post-m', text: metric }),
-      h('span', { text: ' · ' + (p.likes != null ? fmtCompact(p.likes) + ' likes' : '') +
-        (p.shares != null ? ' · ' + fmtCompact(p.shares) + ' shares' : '') })
+      h('span', { text: second })
     ]);
     var kids = [title, h('div', { class: 'ex-post-text' }, exHl(String(p.text || '').slice(0, 400), EX.terms))];
     if (p.url && /^https?:/i.test(p.url)) {
@@ -6249,14 +6323,53 @@
     });
     host.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Top individual posts' }));
     var plats = PLATFORMS.filter(exPlatOk).join(',');
-    var key = [S.from, S.to, plats, EX.q, EX.entityUid, EX.top].join('|');
-    exExplain(host, 'Most viewed posts', 'Posts ranked by observed views. Platforms that give no view count are listed separately, ' +
-      'ranked by likes + comments + shares, and are never ranked as zero views. Views are observed counts, not estimates; ' +
-      'a post with the most views is not necessarily the most influential.' + (EX.entityName ? ' Filtered to posts naming ' + EX.entityName + '.' : '') );
+    var key = [S.from, S.to, plats, EX.q, EX.entityUid, EX.top, EX.vrank, EX.vper].join('|');
+    exExplain(host, 'Top posts', 'Two ways to rank. "Views": posts ranked by observed views; platforms that give no view count are listed separately, ' +
+      'ranked by likes + comments + shares, and never ranked as zero views. Views are not comparable across platforms, so the most viewed post is not ' +
+      'necessarily the most unusual one. "Virality percentile": each post is ranked against posts of the same platform and age (1.00 = top of its peers, ' +
+      '0.50 = typical), which can be compared across platforms. It is shown only for posts with a usable amplification ratio and at least 20 similar posts to ' +
+      'compare with; platforms with no counters (Reddit) have none. Ties are broken by engagement.' + (EX.entityName ? ' Filtered to posts naming ' + EX.entityName + '.' : '') );
+    var rankBar = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'RANK BY' })]);
+    [['views', 'Views'], ['virality', 'Virality percentile']].forEach(function (x) {
+      var b = h('button', { type: 'button', class: 'df-preset-btn' + (EX.vrank === x[0] ? ' active' : ''), text: x[1] });
+      b.addEventListener('click', function () { EX.vrank = x[0]; render(); });
+      rankBar.appendChild(b);
+    });
+    if (EX.vrank === 'virality') {
+      rankBar.appendChild(h('span', { class: 'bds-label', text: 'SHOW' }));
+      [[0, 'Overall'], [3, 'Top 3 per platform']].forEach(function (x) {
+        var b = h('button', { type: 'button', class: 'df-preset-btn' + (EX.vper === x[0] ? ' active' : ''), text: x[1] });
+        b.addEventListener('click', function () { EX.vper = x[0]; render(); });
+        rankBar.appendChild(b);
+      });
+    }
+    host.appendChild(rankBar);
     var body = h('div', { class: 'ex-viral' });
     host.appendChild(body);
     function paint(d) {
       body.textContent = '';
+      if (d.rank === 'virality') {
+        body.appendChild(h('p', { class: 'cs', text: fmtInt(d.total_posts) + ' posts match the filters; ' + fmtInt(d.rated_posts) +
+          ' of them have a virality percentile (usable ratio and at least ' + d.min_ref + ' similar posts). The rest are not ranked here.' }));
+        var list = d.by_virality || [];
+        if (!list.length) { empty(body, 'No posts with a virality percentile match.'); return; }
+        if (d.per_platform > 0) {
+          var by = {}, order = [];
+          list.forEach(function (p) { if (!by[p.platform]) { by[p.platform] = []; order.push(p.platform); } by[p.platform].push(p); });
+          var grid = h('div', { class: 'ex-cols' });
+          order.forEach(function (pl) {
+            var col = h('div', { class: 'ex-col' }, [h('div', { class: 'ct', text: pl + ' (' + by[pl].length + ')' })]);
+            by[pl].forEach(function (p) { col.appendChild(exPostCard(p, false, 'virality')); });
+            grid.appendChild(col);
+          });
+          body.appendChild(grid);
+        } else {
+          var one = h('div', { class: 'ex-col' }, [h('div', { class: 'ct', text: 'Highest virality percentile (' + list.length + ')' })]);
+          list.forEach(function (p) { one.appendChild(exPostCard(p, false, 'virality')); });
+          body.appendChild(one);
+        }
+        return;
+      }
       body.appendChild(h('p', { class: 'cs', text: fmtInt(d.total_posts) + ' posts match the filters.' }));
       var a = h('div', { class: 'ex-col' }, [h('div', { class: 'ct', text: 'Ranked by views (' + d.with_views.length + ')' })]);
       d.with_views.forEach(function (p) { a.appendChild(exPostCard(p, true)); });
@@ -6270,7 +6383,8 @@
     body.appendChild(h('div', { class: 'empty', text: 'Loading…' }));
     var url = '/api/explore/viral?from=' + encodeURIComponent(S.from) + '&to=' + encodeURIComponent(S.to) +
       '&platforms=' + encodeURIComponent(plats) + '&q=' + encodeURIComponent(EX.q) +
-      '&entity_uid=' + encodeURIComponent(EX.entityUid) + '&limit=' + EX.top;
+      '&entity_uid=' + encodeURIComponent(EX.entityUid) + '&limit=' + EX.top +
+      (EX.vrank === 'virality' ? '&rank=virality&per_platform=' + EX.vper : '');
     fetch(url, { cache: 'no-store' }).then(function (r) {
       return r.json().then(function (j) { if (!r.ok) { throw new Error(j && j.error ? j.error : 'HTTP ' + r.status); } return j; });
     }).then(function (d) {
@@ -6374,7 +6488,7 @@
     function applyQ() { EX.q = q.value.trim(); EX.viral = null; render(); }
     q.addEventListener('keydown', function (e) { if (e.key === 'Enter') { applyQ(); } });
     row2.appendChild(q);
-    if (EX.tile === 'viral') {
+    if (EX.tile === 'viral' || EX.tile === 'topics') {
       var TYPES = [['', 'Any type'], ['PERSON', 'People'], ['ORG', 'Organisations'], ['LOCATION', 'Places (incl. countries)'], ['EVENT', 'Events']];
       var tsel = h('select', { class: 'ex-top', id: 'ex-ent-type', 'aria-label': 'Entity type' });
       TYPES.forEach(function (x) { var o = h('option', { text: x[1], value: x[0] }); if (EX.entType === x[0]) { o.selected = true; } tsel.appendChild(o); });
@@ -6400,7 +6514,7 @@
         o.label = opts[nm].entity_type + ' \u00b7 ' + fmtInt(opts[nm].distinct_posts) + ' posts';
         dl.appendChild(o);
       });
-      var ent = h('input', { type: 'text', class: 'ex-q', id: 'ex-ent', placeholder: 'Posts naming\u2026 (type to pick)', title: 'Pick a person, organisation, place or country; only posts that name it are listed. A country here means the post names it, not that the event happened there.' });
+      var ent = h('input', { type: 'text', class: 'ex-q', id: 'ex-ent', placeholder: (EX.tile === 'topics' ? 'Topics with posts naming\u2026 (type to pick)' : 'Posts naming\u2026 (type to pick)'), title: 'Pick a person, organisation, place or country; only posts that name it are listed. A country here means the post names it, not that the event happened there.' });
       ent.setAttribute('list', 'ex-ent-list'); ent.value = EX.entityName;
       function applyEnt() {
         var r = opts[ent.value.trim()];
@@ -6416,6 +6530,15 @@
       ub.addEventListener('change', function () { EX.unclass = ub.checked; render(); });
       row2.appendChild(h('label', { class: 'ex-plat-opt' }, [ub, h('span', { text: ' Include Unclassified' })]));
     }
+    if (EX.tile === 'topics' && !EX.entityUid) {
+      var psel = h('select', { class: 'ex-top', id: 'ex-minplat', 'aria-label': 'Seen on at least this many platforms',
+                               title: 'Keep only topics that appear on at least this many platforms (cross-platform presence)' });
+      [[0, 'Seen on any number of platforms'], [2, 'Seen on 2+ platforms'], [3, 'Seen on 3+ platforms'], [5, 'Seen on 5+ platforms']].forEach(function (x) {
+        var o = h('option', { text: x[1], value: String(x[0]) }); if (EX.minPlat === x[0]) { o.selected = true; } psel.appendChild(o);
+      });
+      psel.addEventListener('change', function () { EX.minPlat = parseInt(psel.value, 10); render(); });
+      row2.appendChild(psel);
+    }
     var sel = h('select', { class: 'ex-top' });
     [10, 25, 50].forEach(function (v) {
       var o = h('option', { text: 'Show ' + v, value: String(v) }); if (EX.top === v) { o.selected = true; } sel.appendChild(o);
@@ -6425,7 +6548,7 @@
     var go = h('button', { type: 'button', class: 'df-preset-btn', text: 'Search' });
     go.addEventListener('click', applyQ);
     var rs = h('button', { type: 'button', class: 'df-preset-btn', text: 'Reset' });
-    rs.addEventListener('click', function () { EX.platforms = {}; EX.q = ''; EX.entityUid = ''; EX.entityName = ''; EX.entType = ''; EX.entSub = ''; EX.viral = null; render(); });
+    rs.addEventListener('click', function () { EX.platforms = {}; EX.minPlat = 0; EX.q = ''; EX.entityUid = ''; EX.entityName = ''; EX.entType = ''; EX.entSub = ''; EX.viral = null; render(); });
     row2.appendChild(go); row2.appendChild(rs);
     card.appendChild(row2);
     host.appendChild(card);

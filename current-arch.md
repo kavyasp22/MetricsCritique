@@ -133,6 +133,7 @@ reruns are deterministic.
 | Topics v2 | `09_ontology_v2_cluster_fix.py` | `topic_dim_v2`, `post_topic_v2` (fixed absolute `min_cluster_size`) |
 | Topics v4 | `15_topic_clustering_v4.py` | Rebuilds `topic_dim_v3` / `post_topic_v3` with parent + sub-topics (GPU) |
 | Entities | `21_prod_entities.py` → `22_entity_alias_merge.py` → `23_load_prod_entities.py` | `entity_dim`, `entity_mentions` from the production `entities` column (trained NER model, 25 subtypes); earlier Babelscape output kept as `entity_*_babelscape`. `10_entity_extraction.py` is the legacy path |
+| Per-post virality | `24_post_virality.py` | `data/post_virality.parquet`: per post, the virality percentile script 07 computes and drops (same functions, same parameters; rated counts per platform equal `metrics_daily.virality_n`). Read by Explore > Viral Posts "rank by virality percentile". Read-only, ~10 min, no metrics rerun |
 | Entity subtypes | `13_entity_subtype_resolution.py` (legacy path) | Zero-shot subtype fallback for the Babelscape entities; production entities already carry the 25 subtypes |
 | Risk / theme | `12_risk_theme_classification.py` | `risk_labels`, `theme_labels` (bi-encoder recall net → mDeBERTa NLI, threshold 0.22) |
 | CAMEO | `14_cameo_event_coding.py` | Two-axis codes (theme / action), taxonomy in `data/taxonomy_cameo.json`, thresholds in `data/thresholds_cameo.json` |

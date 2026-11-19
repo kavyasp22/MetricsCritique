@@ -24,6 +24,12 @@ const dom = new JSDOM(html, {
       }
       if (u.includes('/api/explore/viral')) {
         calls.push(u);
+        if (/rank=virality/.test(u)) {
+          const per = Number((u.match(/per_platform=(\d+)/) || [0, 0])[1]);
+          const mk = (pl, pct) => ({ post_uid: pl + pct, platform: pl, posted_at: '2026-10-20 10:00:00+00', text: 'a viral ' + pl + ' post', url: '', views: 100, likes: 5, shares: 1, comments: 0, engagement: 6, virality_pct: pct, virality_ref_n: 8336 });
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ rank: 'virality', per_platform: per, total_posts: 40, rated_posts: 25, min_ref: 20,
+            by_virality: per ? [mk('twitter', 0.99), mk('twitter', 0.97), mk('telegram', 0.98)] : [mk('twitter', 0.99), mk('telegram', 0.98)], terms: [] }) });
+        }
         return Promise.resolve({ ok: true, json: () => Promise.resolve({
           total_posts: 12,
           with_views: [{ post_uid: 'a', platform: 'twitter', posted_at: '2026-10-20 10:00:00+00', text: 'hello world', url: 'https://x.test/1', views: 5000, likes: 10, shares: 2, engagement: 12 }],
@@ -147,6 +153,38 @@ await rows('topics');
 const q2 = doc.querySelector('.ex-q'); q2.value = 'zzzzqqq'; q2.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter' }));
 await wait(600);
 check('a search with no match empties Trending Topics', view().querySelectorAll('.tv table tbody tr').length === 0);
+// Viral Posts: rank by per-post virality percentile
+{
+  await rows('viral');
+  calls.length = 0;
+  const btn = (t) => [...view().querySelectorAll('.df-preset-btn')].find((x) => x.textContent === t);
+  check('Viral Posts offers Views and Virality percentile ranking', !!btn('Views') && !!btn('Virality percentile'));
+  btn('Virality percentile').click(); await wait(700);
+  check('the percentile ranking asks the API with rank=virality', calls.some((c) => /rank=virality&per_platform=0/.test(c)), calls[0] || '');
+  const txt = view().textContent;
+  check('posts show "virality 0.99 (vs 8,336 similar posts)" and the note says how many are rated', /virality 0\.99 \(vs 8,336 similar posts\)/.test(txt) && /25 of them have a virality percentile/.test(txt));
+  btn('Top 3 per platform').click(); await wait(700);
+  check('"Top 3 per platform" asks per_platform=3 and groups posts under platform headings',
+    calls.some((c) => /per_platform=3/.test(c)) && [...view().querySelectorAll('.ex-col .ct')].some((x) => /^twitter \(2\)/.test(x.textContent)) && [...view().querySelectorAll('.ex-col .ct')].some((x) => /^telegram \(1\)/.test(x.textContent)));
+  btn('Views').click(); await wait(700);
+  check('back to Views shows the by-views lists again', /Ranked by views/.test(view().textContent));
+}
+// Trending Topics: "seen on N+ platforms" filter
+{
+  [...doc.querySelectorAll('#explore-view .df-preset-btn')].find((x) => x.textContent === 'Reset').click(); await wait(500);   // the no-match search above is still in the box
+  [...doc.querySelectorAll('#explore-view .df-preset-btn')].find((x) => x.textContent === 'Full window').click(); await wait(600);
+  await rows('topics');
+  const pcol = () => [...view().querySelectorAll('.tv thead th .th-label')].map((x) => x.textContent).indexOf('Platforms');
+  const plats = () => [...view().querySelectorAll('.tv table tbody tr')].map((tr) => Number(tr.children[pcol()].textContent.replace(/[^0-9]/g, '')));
+  const before = plats();
+  const ps = doc.getElementById('ex-minplat');
+  check('Trending Topics has a "seen on N+ platforms" control', !!ps && [...ps.options].map((o) => o.value).join() === '0,2,3,5');
+  ps.value = '3'; ps.dispatchEvent(new dom.window.Event('change')); await wait(500);
+  const after = plats();
+  check('"Seen on 3+ platforms" keeps only topics on 3 or more platforms', after.length > 0 && after.every((n) => n >= 3) && after.length <= before.length, `${before.length} -> ${after.length}; min ${Math.min(...after)}`);
+  const ps2 = doc.getElementById('ex-minplat'); ps2.value = '0'; ps2.dispatchEvent(new dom.window.Event('change')); await wait(400);
+  check('back to "any number" restores the list', plats().length === before.length);
+}
 // every card: tables closed (+ to open), explanation closed behind a heading
 for (const k of ['topics', 'viral', 'spread', 'life', 'sent']) {
   [...doc.querySelectorAll('.ex-tile')].find((x) => x.dataset.tile === k).click(); await wait(500);
@@ -155,7 +193,7 @@ for (const k of ['topics', 'viral', 'spread', 'life', 'sent']) {
   check(`${k}: explanation is collapsed behind a heading with "click to see explanation"`,
     ex.length > 0 && ex.every((d) => !d.open && /click to see explanation/.test(d.querySelector('summary').textContent)), String(ex.length));
   const tv = [...v.querySelectorAll('details.tv')];
-  check(`${k}: tables are closed by default`, tv.every((d) => !d.open || (k === 'spread' && d.querySelector('summary').textContent.includes('Cross-platform spread'))), String(tv.length));
+  check(`${k}: tables are closed by default`, tv.every((d) => !d.open || (k === 'spread' && d.querySelector('summary').textContent.includes('Cross-platform spread'))), tv.map((d) => d.open + ':' + d.querySelector('summary').textContent.slice(0, 30)).join(' | '));
 }
 doc.getElementById('mode-basic-btn').click(); await wait(500);
 check('Overview range is still the last 7 days after using Explore (not changed to 1 day)',

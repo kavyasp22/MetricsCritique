@@ -40,6 +40,8 @@ DATA = EDA_ROOT / "data"
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 300
+POST_VIRALITY = DATA / "post_virality.parquet"   # scripts/24_post_virality.py; optional, the page works without it
+VIRALITY_MIN_REF = 20                            # a percentile needs at least this many reference posts to be shown
 
 _main_con = duckdb.connect(database=":memory:", read_only=False)
 _main_con.execute(f"ATTACH '{DATA / 'analytics.duckdb'}' AS analytics (READ_ONLY)")
@@ -200,6 +202,10 @@ def build_query(view: str, qs: dict):
         if not topic_id:
             raise ValueError("topic_id required")
         platform = qs.get("platform", [None])[0]
+        ent_uid = qs.get("entity_uid", [None])[0]
+        ent_sql = "p.post_uid IN (SELECT post_uid FROM geo.entity_mentions WHERE entity_uid = ?)"
+        if platform == "youtube_comment" and ent_uid:
+            raise ValueError("the entity filter does not apply to YouTube comments (they carry no entity mentions)")
         if platform == "youtube_comment":
             c_where = []
             if topic_id in ("t004", "t005"):
@@ -227,7 +233,7 @@ def build_query(view: str, qs: dict):
             # All platforms (or a chosen list): the card counts posts AND YouTube comments, so the
             # drill-down must list both or its total will not match the number on the card.
             plats = [x for x in qs.get("platforms", [""])[0].split(",") if x]
-            want_comments = (not plats) or ("youtube_comment" in plats)
+            want_comments = ((not plats) or ("youtube_comment" in plats)) and not ent_uid   # comments carry no entity mentions
             post_plats = [x for x in plats if x != "youtube_comment"]
             parts, uparams = [], []
             if (not plats) or post_plats:
@@ -238,6 +244,8 @@ def build_query(view: str, qs: dict):
                     w.append("pt.topic_id = ?"); pr.append(topic_id)
                 if post_plats:
                     w.append("p.platform IN (" + ",".join("?" * len(post_plats)) + ")"); pr.extend(post_plats)
+                if ent_uid:
+                    w.append(ent_sql); pr.append(ent_uid)
                 _day_clause(qs, w, pr)
                 parts.append(f"""SELECT {POST_COLS}{POST_METRICS}, pt.confidence FROM analytics.post_topic pt
                     JOIN analytics.post_facts p ON p.post_uid = pt.post_uid WHERE {' AND '.join(w)}""")
@@ -256,6 +264,8 @@ def build_query(view: str, qs: dict):
                     JOIN analytics.post_facts pf ON c.video_id = pf.native_id AND pf.platform = 'youtube_video'
                     JOIN analytics.post_topic pt ON pt.post_uid = pf.post_uid WHERE {' AND '.join(w)}""")
                 uparams += pr
+            if not parts:
+                raise ValueError("no post platform selected: YouTube comments carry no entity mentions")
             sk = _sort_key(qs)
             order = {"views": f"views DESC NULLS LAST, {_ENG_U} DESC, posted_at DESC",
                      "engagement": f"{_ENG_U} DESC, posted_at DESC",
@@ -271,6 +281,8 @@ def build_query(view: str, qs: dict):
             where.append("pt.topic_id = ?")
             params.append(topic_id)
         _platform_clause(qs, where, params)
+        if ent_uid:
+            where.append(ent_sql); params.append(ent_uid)
         _day_clause(qs, where, params)
         sql = f"""
             SELECT {POST_COLS}{POST_METRICS}, pt.confidence, count(*) OVER () AS total_rows
@@ -702,6 +714,49 @@ def _snippet(text: str, words: list, width: int = 320) -> str:
     return text[:width]
 
 
+def _clean_posts(rows, terms):
+    """NaN is not valid JSON (a browser's JSON.parse rejects the whole response): send null; cut the text to a snippet."""
+    out = []
+    for r in rows:
+        r = {k: (None if isinstance(v, float) and v != v else v) for k, v in r.items()}
+        r["text"] = _snippet(r.get("text") or "", terms)
+        out.append(r)
+    return out
+
+
+def explore_virality(qs, where, params, join, params_join, terms, limit):
+    """Viral Posts ranked by the per-post virality percentile (stage 24): where a post sits among posts of the SAME platform and
+    age band (0.5 typical, 1.0 top). It is comparable across platforms, unlike raw views. Only posts with a usable ratio and a
+    reference set of at least VIRALITY_MIN_REF posts are ranked. `per_platform=N` returns the top N of every platform instead of one
+    mixed list. Ties are broken by engagement, so the order is stable."""
+    cols = "p.post_uid, p.platform, p.posted_at, p.author_name, left(coalesce(p.text,''), 100000) AS text, p.url"
+    inner = (f"SELECT {cols}, p.views, p.likes, p.comments, p.shares, "
+             f"coalesce(p.likes,0)+coalesce(p.comments,0)+coalesce(p.shares,0) AS engagement, v.virality_pct, v.virality_ref_n "
+             f"FROM analytics.post_facts p {join} JOIN read_parquet('{POST_VIRALITY.as_posix()}') v ON v.post_uid = p.post_uid "
+             f"WHERE {' AND '.join(where)} AND v.virality_pct IS NOT NULL AND v.virality_ref_n >= {VIRALITY_MIN_REF}")
+    try:
+        per = int(qs.get("per_platform", ["0"])[0])
+    except ValueError:
+        per = 0
+    cur = _main_con.cursor()
+    try:
+        if per > 0:
+            per = min(per, 20)
+            sql = (f"SELECT * EXCLUDE (rn) FROM (SELECT *, row_number() OVER (PARTITION BY platform ORDER BY virality_pct DESC, "
+                   f"engagement DESC, post_uid) AS rn FROM ({inner}) t) u WHERE rn <= {per} ORDER BY platform, rn")
+            rows = cur.execute(sql, params_join + params).fetchdf().to_dict(orient="records")
+        else:
+            rows = cur.execute(f"SELECT * FROM ({inner}) t ORDER BY virality_pct DESC, engagement DESC, post_uid LIMIT ?",
+                               params_join + params + [limit]).fetchdf().to_dict(orient="records")
+        rated = cur.execute(f"SELECT count(*) FROM ({inner}) t", params_join + params).fetchall()[0][0]
+        total = cur.execute(f"SELECT count(*) FROM analytics.post_facts p {join} WHERE {' AND '.join(where)}",
+                            params_join + params).fetchall()[0][0]
+    finally:
+        cur.close()
+    return {"rank": "virality", "per_platform": per, "total_posts": int(total), "rated_posts": int(rated),
+            "min_ref": VIRALITY_MIN_REF, "by_virality": _clean_posts(rows, terms), "terms": terms}
+
+
 def explore_viral(qs: dict) -> dict:
     """Explore page: posts ranked by observed views (and, separately, engagement for platforms
     that give no view count). Read-only. Filters: from/to (day), platforms (csv), q (text),
@@ -730,11 +785,19 @@ def explore_viral(qs: dict) -> dict:
     else:
         params_join = []
     limit = _limit(qs)
+    have_v = POST_VIRALITY.exists()
+    vjoin = f" LEFT JOIN read_parquet('{POST_VIRALITY.as_posix()}') v ON v.post_uid = p.post_uid" if have_v else ""
+    vcols = ", v.virality_pct, v.virality_ref_n" if have_v else ", CAST(NULL AS DOUBLE) AS virality_pct, CAST(NULL AS BIGINT) AS virality_ref_n"
+    rank = qs.get("rank", ["views"])[0]
+    if rank == "virality":
+        if not have_v:
+            raise ValueError("per-post virality is not built yet: run scripts/24_post_virality.py")
+        return explore_virality(qs, where, params, join, params_join, terms, limit)
     # the text column is read long (100000 chars) so a snippet can be cut around the first match; it is shortened below
     cols = "p.post_uid, p.platform, p.posted_at, p.author_name, left(coalesce(p.text,''), 100000) AS text, p.url"
     base = (f"SELECT {cols}, p.views, p.likes, p.comments, p.shares, "
-            f"coalesce(p.likes,0)+coalesce(p.comments,0)+coalesce(p.shares,0) AS engagement "
-            f"FROM analytics.post_facts p {join} WHERE {' AND '.join(where)}")
+            f"coalesce(p.likes,0)+coalesce(p.comments,0)+coalesce(p.shares,0) AS engagement{vcols} "
+            f"FROM analytics.post_facts p {join}{vjoin} WHERE {' AND '.join(where)}")
     cur = _main_con.cursor()
     try:
         with_views = cur.execute(base + " AND p.views > 0 ORDER BY p.views DESC, p.post_uid LIMIT ?",
@@ -748,16 +811,62 @@ def explore_viral(qs: dict) -> dict:
     finally:
         cur.close()
     def clean(rows):
-        # missing counts come back from pandas as NaN, which is not valid JSON (a browser's JSON.parse rejects the whole
-        # response); send null instead. The text is cut to a short snippet, centred on the first match when searching.
-        out = []
-        for r in rows:
-            r = {k: (None if isinstance(v, float) and v != v else v) for k, v in r.items()}
-            r["text"] = _snippet(r.get("text") or "", terms)
-            out.append(r)
-        return out
+        return _clean_posts(rows, terms)
 
     return {"total_posts": int(total), "with_views": clean(with_views), "without_views": clean(no_views), "terms": terms}
+
+
+_ENT_COVER = None
+
+
+def _entity_cover() -> list:
+    """Per platform: the last day that has any entity mention, and how many posts have one. The production entity extract is
+    taken at one moment, so some platforms stop earlier than the posts do; the page says so instead of showing a silent gap."""
+    global _ENT_COVER
+    if _ENT_COVER is None:
+        cur = _main_con.cursor()
+        try:
+            rows = cur.execute(
+                "SELECT p.platform, CAST(max(coalesce(p.posted_at, p.scraped_at)) AS DATE) AS last_day, count(DISTINCT m.post_uid) AS n "
+                "FROM geo.entity_mentions m JOIN analytics.post_facts p ON p.post_uid = m.post_uid GROUP BY p.platform").fetchall()
+        finally:
+            cur.close()
+        _ENT_COVER = [{"platform": r[0], "last_day": str(r[1]) if r[1] else None, "posts": int(r[2])} for r in rows]
+    return _ENT_COVER
+
+
+def explore_entity_topics(qs: dict) -> dict:
+    """Explore > Trending Topics with an entity chosen: for each topic, how many posts name the entity in the
+    selected days (`from`..`to`) and in the period just before (`prev_from`..`prev_to`, sent by the page so both
+    sides use the same day list). Read-only. Posts only: YouTube comments carry no entity mentions.
+    The day rule is the one the metrics use (posted day, else scraped day)."""
+    ent = qs.get("entity_uid", [""])[0].strip()
+    if not ent:
+        raise ValueError("entity_uid required")
+    d_from, d_to = qs.get("from", [""])[0], qs.get("to", [""])[0]
+    p_from, p_to = qs.get("prev_from", [""])[0], qs.get("prev_to", [""])[0]
+    if not (d_from and d_to):
+        raise ValueError("from and to required")
+    expr = "CAST(coalesce(p.posted_at, p.scraped_at) AS DATE)"
+    lo = p_from or d_from
+    where, params = [f"{expr} >= ?", f"{expr} <= ?"], [lo, d_to]
+    _platform_clause(qs, where, params)
+    cur_sql = f"{expr} >= ? AND {expr} <= ?"
+    prev_sql = f"{expr} >= ? AND {expr} <= ?" if (p_from and p_to) else "FALSE"
+    sql = (f"SELECT pt.topic_id, "
+           f"count(*) FILTER (WHERE {cur_sql}) AS n_cur, "
+           f"count(*) FILTER (WHERE {prev_sql}) AS n_prev "
+           f"FROM analytics.post_topic pt JOIN analytics.post_facts p ON p.post_uid = pt.post_uid "
+           f"JOIN (SELECT DISTINCT post_uid FROM geo.entity_mentions WHERE entity_uid = ?) em ON em.post_uid = p.post_uid "
+           f"WHERE {' AND '.join(where)} GROUP BY pt.topic_id")
+    sel = [d_from, d_to] + ([p_from, p_to] if (p_from and p_to) else []) + [ent] + params
+    cur = _main_con.cursor()
+    try:
+        rows = cur.execute(sql, sel).fetchall()
+    finally:
+        cur.close()
+    return {"entity_uid": ent, "coverage": _entity_cover(),
+            "rows": [{"topic_id": r[0], "n_cur": int(r[1]), "n_prev": int(r[2])} for r in rows if r[1] or r[2]]}
 
 
 def compute_related(cur, view: str, qs: dict, seed_post_uid):
@@ -1025,6 +1134,14 @@ class Handler(SimpleHTTPRequestHandler):
             raw = qs.get("domains", [""])[0]
             doms = tuple(d for d in raw.split(",") if d) or DEFAULT_MILITARY
             self._json(live_overview(days, doms))
+            return
+        if parsed.path == "/api/explore/entity_topics":
+            try:
+                self._json(explore_entity_topics(parse_qs(parsed.query)))
+            except ValueError as e:
+                self._json({"error": str(e)}, status=400)
+            except Exception as e:
+                self._json({"error": f"query failed: {e}"}, status=500)
             return
         if parsed.path == "/api/explore/viral":
             try:
