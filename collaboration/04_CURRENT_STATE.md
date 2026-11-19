@@ -346,4 +346,15 @@ Verdicts and what changed (full table: Metrics_Finalisation_Two_Day_Action_Plan.
 - **Step 0 (dashboard):** the merged t004 + t005 topic now carries both subjects in its label ("Geopolitics / Neighbourhood (pakistan + bangladesh)"; the dashboard merges the two everywhere, so the duplicate label was never visible, but the label hid that they cover different places). Trending Topics shows a note when one topic holds 30%+ of all collected posts (Geopolitics / China, 44%): its numbers describe a mixture.
 - **Step 1 (`scripts/25_post_dedup.py`, `scripts/lib/text_dedup.py`):** exact-copy groups by author + normalised text (case, whitespace, URLs and Snapchat's generated counter caption removed; digits and words kept; texts under 20 characters or without an author are never grouped). Output `data/post_dedup.parquet` (git-ignored). **497,530 -> 391,162 (21.4% copies)**; Instagram 93,029 -> 1,087 (98.8%), Truth Social 13.2%, Reddit 8.2%, others under 4%. Largest groups: Instagram 312, Truth Social 231, Twitter 67. Sampled groups checked by eye: genuine repeats. Raw tables untouched. 6 unit tests (`scripts/tests/test_text_dedup.py`).
 - `15_topic_clustering_v4.py` gained `--exclude-copies` (reads `is_first` posts only). Stability sweep on 60,000 posts with and without copies run to test whether copies caused the earlier instability (cross-seed ARI 0.09-0.26); result recorded below once finished.
+- **Result of the copy test (script 15 `--dry-run`, 60,000 random embedded posts, min_cluster_size 30, 3 seeds, CPU, nothing written; logs `logs/topic_dry_*.log`):**
+
+  | | with copies | copies excluded |
+  |---|---|---|
+  | clusters | 342 | 286 |
+  | cross-seed ARI (mean / min) | 0.456 / 0.423 | **0.553 / 0.520** |
+  | clusters passing the script's coherence flags | 204 of 342 (60%) | **260 of 286 (91%)** |
+  | noise | 39.5% | 40.5% |
+  | silhouette in the real 1024-d space | 0.033 | 0.014 |
+
+  Removing exact copies raises stability (+0.10 ARI) and the share of coherent clusters (60% -> 91%, partly because the single-author and duplicate-text flags no longer fire). **Verdict: PARTIAL.** Stability is moderate (about 0.55), silhouette is near zero in both cases (clusters are soft, overlapping regions, not separated groups), and the 91% is the script's own flag, which passed 3 of 11 bad clusters in my earlier hand review. Not adopted; no v5 tables written. Needs a hand-judged sample before any use. The full `--sweep` (6 cluster sizes x 5 seeds, UMAP refit each time) takes over 90 min on CPU at 60K posts with the machine busy, so it was not run.
 
