@@ -28,6 +28,8 @@ data/*
 !data/entity_schema.json
 # hand-reviewed alias pairs (entity ids only, no post text), read by scripts/22_entity_alias_merge.py
 !data/entity_aliases_manual.json
+# prototype sentences describing each security domain (text only, no corpus data); read by scripts/26*_domain*.py
+!data/domain_prototypes_v1.json
 # data/calibration_cameo.csv holds raw post text — kept local on purpose.
 
 *.duckdb
