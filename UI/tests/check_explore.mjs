@@ -55,7 +55,7 @@ const btn = doc.getElementById('mode-explore-btn');
 check('Explore button exists', !!btn);
 const ovFrom = doc.querySelector('#basic-date-strip .bds-date-input').value, ovTo = doc.querySelectorAll('#basic-date-strip .bds-date-input')[1].value;
 btn.click(); await wait(600);
-check('Explore opens on the last day of data only (1 day)', doc.getElementById('ex-date-from').value === '2026-10-26' && doc.getElementById('ex-date-to').value === '2026-10-26',
+check('Explore opens on the last COMPLETE day only (2026-10-26 is a partial day, so 2026-10-25)', doc.getElementById('ex-date-from').value === '2026-10-25' && doc.getElementById('ex-date-to').value === '2026-10-25',
   doc.getElementById('ex-date-from').value + ' -> ' + doc.getElementById('ex-date-to').value);
 check('Overview range was the last 7 days before Explore (unchanged default)', ovFrom === '2026-10-20' && ovTo === '2026-10-26', ovFrom + ' -> ' + ovTo);
 check('Explore has a Last 1d button', [...doc.querySelectorAll('#explore-view .df-preset-btn')].some((b) => b.textContent === 'Last 1d'));
@@ -94,7 +94,7 @@ const cb2 = doc.getElementById('ex-unclass'); cb2.checked = false; cb2.dispatchE
   const row = view().querySelector('.tv table tbody tr');
   drillCalls.length = 0; row.click(); await wait(500);
   const u = drillCalls[0] || '';
-  check('clicking a Trending Topics row opens the drill-down with the selected dates', /from=2026-10-26/.test(u) && /to=2026-10-26/.test(u) && /topic_id=/.test(u), u);
+  check('clicking a Trending Topics row opens the drill-down with the selected dates', /from=2026-10-25/.test(u) && /to=2026-10-25/.test(u) && /topic_id=/.test(u), u);
 }
 const lifeRows = await rows('life');
 check('Lifecycle has onset slope, half-life and persistence table',
@@ -153,6 +153,23 @@ await rows('topics');
 const q2 = doc.querySelector('.ex-q'); q2.value = 'zzzzqqq'; q2.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter' }));
 await wait(600);
 check('a search with no match empties Trending Topics', view().querySelectorAll('.tv table tbody tr').length === 0);
+// data freshness and the partial last day
+{
+  await rows('topics');
+  const fresh = doc.querySelector('#explore-view .ex-fresh');
+  const ft = fresh ? fresh.textContent : '';
+  check('a notice names the newest data day and how many days ago it is', /Newest data is 2026-10-26, \d+ days ago/.test(ft), ft.slice(0, 120));
+  check('the notice says 2026-10-26 is a partial day, with its post count, and where the presets end', /2026-10-26 is a partial day \([\d,]+ posts and comments against about [\d,]+ on a normal day\)/.test(ft) && /presets end on the last complete day, 2026-10-25/.test(ft), ft.slice(120, 330));
+  check('the notice lists platforms whose data ends earlier (tiktok)', /Platforms whose data ends earlier: .*tiktok \(2026-10-14\)/.test(ft));
+  check('the page header carries "newest data 2026-10-26" and the partial-day flag', /newest data 2026-10-26 \(\d+ days ago\), 2026-10-26 is a partial day/.test(doc.querySelector('.brand .sub').textContent), doc.querySelector('.brand .sub').textContent);
+  [...doc.querySelectorAll('#explore-view .df-preset-btn')].find((x) => x.textContent === 'Last 7d').click(); await wait(500);
+  check('"Last 7d" ends on the last complete day (2026-10-19 to 2026-10-25)', doc.getElementById('ex-date-from').value === '2026-10-19' && doc.getElementById('ex-date-to').value === '2026-10-25', doc.getElementById('ex-date-from').value + ' -> ' + doc.getElementById('ex-date-to').value);
+  const dt = doc.getElementById('ex-date-to'); dt.value = '2026-10-26'; doc.getElementById('ex-date-apply').click(); await wait(500);
+  check('the partial day can still be included through the date boxes', doc.getElementById('ex-date-to').value === '2026-10-26');
+  [...doc.querySelectorAll('#explore-view .df-preset-btn')].find((x) => x.textContent === 'Last 1d').click(); await wait(500);
+  check('"Last 1d" is the last complete day', doc.getElementById('ex-date-from').value === '2026-10-25' && doc.getElementById('ex-date-to').value === '2026-10-25');
+  const ov = [...doc.querySelectorAll('#basic-view')].length ? doc.getElementById('mode-basic-btn') : null;
+}
 // Viral Posts: rank by per-post virality percentile
 {
   await rows('viral');

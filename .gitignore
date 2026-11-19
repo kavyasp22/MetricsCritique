@@ -26,6 +26,8 @@ data/*
 !data/thresholds_cameo.json
 !data/gazetteer.json
 !data/entity_schema.json
+# hand-reviewed alias pairs (entity ids only, no post text), read by scripts/22_entity_alias_merge.py
+!data/entity_aliases_manual.json
 # data/calibration_cameo.csv holds raw post text — kept local on purpose.
 
 *.duckdb

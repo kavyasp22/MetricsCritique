@@ -1859,6 +1859,43 @@
     GEODAYS = Object.keys(gd).sort();
   }
 
+  /* Data freshness and the partial last day, read from the metrics already in the snapshot (works without the API).
+     A day is PARTIAL when its total posts are under half of the median of the 7 days before it: the collector had not
+     finished, so a topic's growth against the full day before would look like a collapse. */
+  var _DQ = null, _DQ_FOR = null;
+  function dqInfo() {
+    if (_DQ && _DQ_FOR === DATA) { return _DQ; }
+    var W = WINDAYS.length ? WINDAYS : ALLDAYS, tot = {}, plat = {};
+    T('metrics_daily').forEach(function (r) {
+      var d = day(r.day), v = r.V || 0;
+      tot[d] = (tot[d] || 0) + v;
+      if (v > 0 && (!plat[r.platform] || d > plat[r.platform])) { plat[r.platform] = d; }
+    });
+    var newest = W[W.length - 1] || '';
+    var info = { newest: newest, ageDays: null, partial: null, lastFull: newest, ended: [] };
+    if (newest) {
+      info.ageDays = Math.floor((Date.now() - Date.parse(newest)) / 86400000);
+      var prev = W.slice(-8, -1).map(function (d) { return tot[d] || 0; }).sort(function (a, b) { return a - b; });
+      var typical = prev.length ? prev[Math.floor(prev.length / 2)] : 0;
+      if (typical > 0 && (tot[newest] || 0) < 0.5 * typical) {
+        info.partial = { day: newest, n: tot[newest] || 0, typical: typical };
+        info.lastFull = W.length > 1 ? W[W.length - 2] : newest;
+      }
+      var nd = Math.round(Date.parse(newest) / 86400000);
+      Object.keys(plat).sort().forEach(function (p) {
+        if (nd - Math.round(Date.parse(plat[p]) / 86400000) >= 2) { info.ended.push({ platform: p, last: plat[p] }); }
+      });
+    }
+    _DQ = info; _DQ_FOR = DATA;
+    return info;
+  }
+  function dqLine(q) {                 // one short sentence for headers
+    var i = dqInfo();
+    if (!i.newest) { return ''; }
+    return 'newest data ' + i.newest + (i.ageDays != null && i.ageDays >= 2 ? ' (' + i.ageDays + ' days ago)' : '') +
+      (i.partial ? ', ' + i.partial.day + ' is a partial day' : '');
+  }
+
   function selPlatforms() { return PLATFORMS.filter(function (p) { return S.platforms[p]; }); }
   function selTopics() { return TOPIC_IDS.filter(function (t) { return S.topics[t]; }); }
 
@@ -5098,7 +5135,7 @@
     var gen = (DATA.generated_at || '').slice(0, 10);
     host.appendChild(h('span', {
       text: 'Showing activity: ' + rangeStr +
-        (gen ? ' · snapshot taken ' + gen : '')
+        (gen ? ' · snapshot taken ' + gen : '') + (dqLine() ? ' · ' + dqLine() : '')
     }));
     if (BASIC.attentionOnly) {
       var ak = attentionKeys();
@@ -5616,7 +5653,7 @@
     var m = document.body && document.body.getAttribute('data-mode');
     if (m === 'explore' && !EXS.active && S.from) {
       EXS.ov = { from: S.from, to: S.to, windowOnly: S.windowOnly };
-      var W = WINDAYS.length ? WINDAYS : ALLDAYS, last = W[W.length - 1];
+      var W = WINDAYS.length ? WINDAYS : ALLDAYS, last = dqInfo().lastFull || W[W.length - 1];
       var r = EXS.range || { from: last, to: last, windowOnly: true };
       S.from = r.from; S.to = r.to; S.windowOnly = r.windowOnly;
       EXS.active = true;
@@ -6450,15 +6487,37 @@
     host.appendChild(card);
   };
 
+  /* What a reader needs to know before trusting "today": how old the data is, whether the newest day is partial, and which
+     platforms stopped earlier. Shown only when there is something to say. */
+  function exFreshness() {
+    var i = dqInfo(), bits = [];
+    if (!i.newest) { return null; }
+    if (i.ageDays != null && i.ageDays >= 2) { bits.push('Newest data is ' + i.newest + ', ' + i.ageDays + ' days ago, so "today" here means the newest day collected.'); }
+    if (i.partial) {
+      bits.push(i.partial.day + ' is a partial day (' + fmtInt(i.partial.n) + ' posts and comments against about ' + fmtInt(i.partial.typical) + ' on a normal day), so growth and stage against full days can look like a decline. ' +
+        'The presets end on the last complete day, ' + i.lastFull + '; pick ' + i.partial.day + ' in the date boxes to include it.');
+    }
+    if (!bits.length && !i.ended.length) { return null; }
+    var box = h('div', { class: 'cs ex-warn ex-fresh' });
+    bits.forEach(function (b) { box.appendChild(h('div', { text: b })); });
+    if (i.ended.length) {
+      box.appendChild(h('div', { text: 'Platforms whose data ends earlier: ' + i.ended.map(function (e) { return e.platform + ' (' + e.last + ')'; }).join(', ') + '.' }));
+    }
+    return box;
+  }
+
   P.explore_controls = function (host) {
     var card = h('div', { class: 'card ex-ctl' });
+    var fresh = exFreshness();
+    if (fresh) { card.appendChild(fresh); }
     var row1 = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'DATE RANGE' })]);
     [['Last 1d', 1], ['Last 7d', 7], ['Last 14d', 14], ['Last 30d', 30], ['Full window', 0]].forEach(function (p) {
       var b = h('button', { type: 'button', class: 'df-preset-btn', text: p[0] });
       b.addEventListener('click', function () {
         var W = WINDAYS.length ? WINDAYS : ALLDAYS;
-        S.to = W[W.length - 1];
-        S.from = p[1] ? W[Math.max(0, W.length - p[1])] : W[0];
+        S.to = dqInfo().lastFull || W[W.length - 1];                       // presets end on the last COMPLETE day
+        var ti = W.indexOf(S.to); if (ti < 0) { ti = W.length - 1; }
+        S.from = p[1] ? W[Math.max(0, ti - p[1] + 1)] : W[0];
         S.windowOnly = true; render();
       });
       row1.appendChild(b);
@@ -7103,7 +7162,8 @@
       var w = DATA.window || {};
       var gen = (DATA.generated_at || '').slice(0, 19).replace('T', ' ');
       sub.textContent = String(w.start || '').slice(0, 10) + ' → ' +
-        String(w.end || '').slice(0, 10) + ' · updated ' + gen.slice(0, 16) + ' UTC';
+        String(w.end || '').slice(0, 10) + ' · updated ' + gen.slice(0, 16) + ' UTC' +
+        (dqLine() ? ' · ' + dqLine() : '');
     }
     var src = document.getElementById('source-badge');
     if (src) { src.textContent = 'source: ' + (DATA.source || 'metrics.json'); }
