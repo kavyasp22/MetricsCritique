@@ -57,3 +57,15 @@ def test_vectors_are_normalised_so_scale_does_not_matter():
 def test_prototype_file_covers_every_domain_and_none():
     texts, dom = Z.load_prototype_texts(Path(__file__).resolve().parents[2] / "data" / "domain_prototypes_v1.json")
     assert set(dom) == set(Z.DOMAINS) | {"none"} and len(texts) == len(dom) >= 40
+
+
+def test_security_cue_catches_alerts_aircraft_and_launch_but_not_local_crime_or_weather():
+    cues = ["Київ: 🅿️ 1х Центр 🅿️ 1х Боярка", "Київ: 🅿️1х Голосіїв", "Київщина: 2х Бровари", "One of the best images showing SAC's J-XDS (Image via Weibo)", "Entered the predetermined orbit!",
+            "The Russian Navy will launch a Bulava SLBM", "Heavy shelling reported near Kharkiv", "Ukrainian drones hit a warehouse",
+            "俄军无人机袭击了仓库", "Пуск ракет з Брянська, загроза балістики", "India-China Border Tension | Arunachal Pradesh", "Countering China's Environmental Warfare Against India", "भारत की फौज सीमा पर", "پاکستان فوج کا حملہ"]
+    plain = ["Student who murdered university housemate jailed for life", "Heavy rain and flash flood warning in Dhaka",
+             "Happy birthday @narendramodi", "Selling a MacBook Pro, battery health 99%", "CBSE class 10 result 2026", "I had to",
+             "The Ballon d'Or ceremony is on Monday in London", "Tiny endangered frogs found in a Cape Town racecourse"]
+    assert all(Z.security_cue(x) for x in cues), [x for x in cues if not Z.security_cue(x)]
+    assert not any(Z.security_cue(x) for x in plain), [x for x in plain if Z.security_cue(x)]
+    assert not Z.security_cue(None) and not Z.security_cue("")

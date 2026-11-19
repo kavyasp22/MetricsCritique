@@ -12,6 +12,7 @@ So `confident_none` is meant to skip the LLM; `zs_domain` is only a provisional 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -52,3 +53,34 @@ def score(X: np.ndarray, proto_emb: np.ndarray, proto_dom: np.ndarray) -> dict:
 
 def DOMAINS_ARR() -> np.ndarray:
     return np.array(DOMAINS, dtype=object)
+
+
+# ---------------------------------------------------------------------------------------------------------------------------
+# Security-cue guard. The zero-shot "none" filter missed short alert-style posts ("Київ: 1х Центр 1х Боярка" = a drone alert),
+# a fighter-aircraft image caption and a launch/orbit tweet (3 of 100 skipped posts read by hand). A post that carries a clear
+# security term is never skipped, whatever the embedding says, and it is sent to the LLM even when it is shorter than the LLM's
+# usual minimum. English, Russian/Ukrainian and Chinese terms; Hindi/Urdu/Arabic/Burmese are NOT covered (stated limit).
+# Deliberately NOT cues: murder, killed, arrested, flood, rain, fire, accident, crash (local crime / weather / accidents).
+# ---------------------------------------------------------------------------------------------------------------------------
+_CUE_EN = (r"warfare|border tensions?|border disputes?|border conflicts?|world war|war ?\\d|drones?|uavs?|missiles?|ballistic|air ?strikes?|shelling|artillery|warships?|destroyers?|frigates?|submarines?|"
+           r"aircraft carriers?|fighter jets?|bombers?|military|army|armed forces|troops?|soldiers?|navy|naval|air force|nato|"
+           r"idf|hamas|hezbollah|houthis?|irgc|taliban|terror\w*|insurg\w*|militants?|ceasefire|nuclear|warheads?|"
+           r"cyber ?attacks?|ransomware|espionage|spy|spies|satellites?|orbit|rocket launch|strait of hormuz|south china sea|"
+           r"border clash\w*|line of control|coup|sanctions?|invasion|invaded|annex\w*|frontline|front line|defen[cs]e|"
+           r"pla|plaaf|pla navy|coast guard|intercepted|explosions?|air defen[cs]e")
+_CUE_AIRCRAFT = r"\b(?:J|JH|JL|KJ|H|Y|Z|WZ|CH|Su|MiG|Tu|F|B|KC|E|P)-\d{1,3}[A-Za-z]{0,2}\b|\bJ-XDS\b|\bType ?0?\d{2}[A-Z]?\b"
+_CUE_RU = (r"бпла|дрон\w*|ракет\w*|ппо|шахед\w*|геран\w*|обстр[іе]л\w*|вибух\w*|взрыв\w*|тривог\w*|тревог\w*|"
+           r"авіац\w*|авиац\w*|армі\w*|армия|арми[ия]|військ\w*|войск\w*|фронт\w*|наступ\w*|оборон\w*|ядерн\w*|санкц\w*")
+_CUE_ZH = r"导弹|无人机|战机|军队|军事|解放军|卫星|发射|轨道|核武|制裁|战争|空袭|袭击|海军|空军"
+_CUE_HI = r"सेना|फौज|युद्ध|सीमा|हमला|आतंक\w*|मिसाइल|ड्रोन|परमाणु|जंग|فوج|جنگ|حملہ|دہشت\w*|میزائل|سرحد|جيش|حرب|هجوم|صاروخ|إرهاب\w*|طائرة مسيرة"
+_RE_CUE = re.compile(rf"(?i)(?<![\w])(?:{_CUE_EN})(?![\w])|{_CUE_AIRCRAFT}|(?<![\w])(?:{_CUE_RU})|{_CUE_ZH}|{_CUE_HI}")
+_RE_ALERT = re.compile(r"(?<![\w])\d\s?[хx](?![\w])")        # "1х Центр", "2x Boyarka": drone-alert style (Cyrillic context only)
+_RE_CYR = re.compile(r"[А-Яа-яІіЇїЄє]")
+
+
+def security_cue(text) -> bool:
+    if not isinstance(text, str) or not text:
+        return False
+    if _RE_CUE.search(text):
+        return True
+    return bool(_RE_ALERT.search(text) and _RE_CYR.search(text))
