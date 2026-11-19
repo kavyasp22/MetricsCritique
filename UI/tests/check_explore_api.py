@@ -89,18 +89,24 @@ def main() -> int:
     chk("percentile is within 0..1 or empty", bool(((df["virality_pct"] >= 0) & (df["virality_pct"] <= 1) | df["virality_pct"].isna()).all()))
     mine = df[df["virality_pct"].notna()].groupby("platform").size()
     ref = dict(a._main_con.execute("SELECT platform, sum(virality_n) FROM metrics.metrics_daily GROUP BY 1").fetchall())
-    bad = {k: (int(mine.get(k, 0)), int(v or 0)) for k, v in ref.items() if int(mine.get(k, 0)) != int(v or 0)}
-    chk("rated posts per platform equal virality_n summed in metrics_daily (same numbers as the group metrics)", not bad, bad)
+    yt_unavail = a._main_con.execute("SELECT count(*) FROM analytics.post_facts WHERE platform = 'youtube_video' AND views = 0 "
+                                     "AND (coalesce(likes,0) + coalesce(comments,0)) > 0").fetchall()[0][0]
+    bad = {k: (int(mine.get(k, 0)), int(v or 0)) for k, v in ref.items() if int(mine.get(k, 0)) != int(v or 0) and k != "youtube_video"}
+    chk("rated posts per platform equal virality_n summed in metrics_daily on every platform except YouTube", not bad, bad)
+    yt_diff = int(ref.get("youtube_video", 0)) - int(mine.get("youtube_video", 0))
+    chk("YouTube differs by exactly the videos whose view counter is unavailable (views = 0 with likes or comments)", yt_diff == yt_unavail, f"{yt_diff} vs {yt_unavail}")
+    ytz = df[(df["platform"] == "youtube_video")]
+    chk("YouTube videos with views = 0 carry no percentile and no activity", bool((ytz.merge(a._main_con.execute("SELECT post_uid FROM analytics.post_facts WHERE platform='youtube_video' AND views = 0").fetchdf(), on="post_uid")[["virality_pct", "activity"]].isna().all().all())))
     chk("platforms with no counters carry no percentile (reddit)", int(mine.get("reddit", 0)) == 0)
 
     # ---------------- ranking API
-    r = a.explore_viral(q(rank="virality", limit=30, **{"from": FROM, "to": TO}))
+    r = a.explore_viral(q(rank="virality", order="amplified", limit=30, **{"from": FROM, "to": TO}))
     L = r["by_virality"]
     pcts = [p["virality_pct"] for p in L]
     chk("virality ranking is sorted high to low", len(L) == 30 and pcts == sorted(pcts, reverse=True), f"{pcts[0]:.3f}..{pcts[-1]:.3f}")
     chk("every ranked post has at least the minimum reference set", all(p["virality_ref_n"] >= a.VIRALITY_MIN_REF for p in L))
     chk("rated posts <= matching posts", r["rated_posts"] <= r["total_posts"], f"{r['rated_posts']} / {r['total_posts']}")
-    p3 = a.explore_viral(q(rank="virality", per_platform=3, **{"from": FROM, "to": TO}))["by_virality"]
+    p3 = a.explore_viral(q(rank="virality", order="amplified", per_platform=3, **{"from": FROM, "to": TO}))["by_virality"]
     cnt = {}
     for p in p3:
         cnt[p["platform"]] = cnt.get(p["platform"], 0) + 1
@@ -113,7 +119,7 @@ def main() -> int:
         chk("responses are strict JSON (no NaN)", False, e)
     v = a.explore_viral(q(limit=5, **{"from": FROM, "to": TO}))
     chk("the by-views lists also carry each post's percentile", "virality_pct" in v["with_views"][0])
-    kw = a.explore_viral(q(q="flood", rank="virality", limit=10, **{"from": "2026-06-14", "to": TO}))
+    kw = a.explore_viral(q(q="flood", rank="virality", order="amplified", limit=10, **{"from": "2026-06-14", "to": TO}))
     chk("keyword search works together with the percentile ranking",
         all("flood" in (p["text"] or "").lower() or "flooding" in (p["text"] or "").lower() or "floods" in (p["text"] or "").lower() for p in kw["by_virality"]) and kw["terms"],
         f"{len(kw['by_virality'])} posts")
@@ -121,9 +127,9 @@ def main() -> int:
     # ---------------- minimum-activity floor (top 10% of platform by default | platform median | off)
     chk("the parquet carries the activity columns (re-run scripts/24_post_virality.py)", a._pv_has_floor() and "activity_top10" in a._pv_cols())
     W = {"from": "2026-06-14", "to": TO}
-    top10 = a.explore_viral(q(rank="virality", limit=300, **W))
-    med = a.explore_viral(q(rank="virality", limit=300, floor="median", **W))
-    off = a.explore_viral(q(rank="virality", limit=300, floor="off", **W))
+    top10 = a.explore_viral(q(rank="virality", order="amplified", limit=300, **W))
+    med = a.explore_viral(q(rank="virality", order="amplified", limit=300, floor="median", **W))
+    off = a.explore_viral(q(rank="virality", order="amplified", limit=300, floor="off", **W))
     chk("default floor is the top 10% of the platform", top10["floor_mode"] == "top10" and med["floor_mode"] == "median" and off["floor_mode"] == "off" and not off["floor_on"])
     chk("ranked posts: top 10% <= median <= off (each looser floor is a superset)", top10["rated_posts"] <= med["rated_posts"] <= off["rated_posts"],
         f"{top10['rated_posts']:,} <= {med['rated_posts']:,} <= {off['rated_posts']:,}")
@@ -134,14 +140,41 @@ def main() -> int:
     g2 = fl.loc[[p["post_uid"] for p in med["by_virality"]]]
     chk("every post in the median ranking has activity >= its platform+basis median", bool((g2["activity"] >= g2["activity_floor"]).all() and g2["activity_ok"].all()))
     chk("without the floor, low-activity posts reach the top (that is why the floor exists)", bool((fl.loc[[p["post_uid"] for p in off["by_virality"]]]["activity_ok"] == False).any()))  # noqa: E712
-    perfl = a.explore_viral(q(rank="virality", per_platform=3, **{"from": FROM, "to": TO}))["by_virality"]
+    perfl = a.explore_viral(q(rank="virality", order="amplified", per_platform=3, **{"from": FROM, "to": TO}))["by_virality"]
     chk("per-platform view respects the default floor", all(fl.loc[p["post_uid"], "activity_top10"] for p in perfl), f"{len(perfl)} posts")
-    chk("the old floor=on value still means the median", a.explore_viral(q(rank="virality", limit=5, floor="on", **W))["floor_mode"] == "median")
+    chk("the old floor=on value still means the median", a.explore_viral(q(rank="virality", order="amplified", limit=5, floor="on", **W))["floor_mode"] == "median")
+
+    # ---------------- "Biggest" order (raw attention as a multiple of the platform's top-10% line)
+    wide = {"from": "2026-06-14", "to": TO}
+    big = a.explore_viral(q(rank="virality", limit=300, **W))
+    L = big["by_virality"]
+    pcts = [p["attention_pct"] for p in L]
+    mults = [p["attention_mult"] for p in L]
+    chk("Biggest is the default order and sorts by the within-platform attention percentile, high to low (ties by the multiple)",
+        big["order"] == "biggest" and len(L) == 300 and pcts == sorted(pcts, reverse=True), f"{pcts[0]:.4f} .. {pcts[-1]:.4f}")
+    chk("no single platform takes over the Biggest top 300 (was 153 Truth Social under a multiple-of-the-line order)",
+        max(__import__("collections").Counter(p["platform"] for p in L).values()) <= 120 and len({p["platform"] for p in L}) >= 6,
+        dict(__import__("collections").Counter(p["platform"] for p in L).most_common(4)))
+    chk("every post in Biggest is at or above the platform's top-10% line (default floor)", all(m >= 1 for m in mults) and all(p["activity_basis"] for p in L))
+    chk("Biggest includes posts that have no ratio (e.g. Snapchat without views), Amplified does not",
+        any(p["virality_pct"] is None for p in a.explore_viral(q(rank="virality", limit=300, floor="off", **W))["by_virality"])
+        and not any(p["virality_pct"] is None for p in a.explore_viral(q(rank="virality", order="amplified", limit=300, floor="off", **W))["by_virality"]))
+    top_viewed = a._main_con.execute("SELECT post_uid FROM analytics.post_facts p WHERE views > 0 AND CAST(coalesce(posted_at, scraped_at) AS DATE) BETWEEN ? AND ? "
+                                     "AND platform <> 'youtube_video' ORDER BY views DESC LIMIT 15", [wide["from"], wide["to"]]).fetchall()
+    top_ids = {r[0] for r in top_viewed}
+    wide_big = a.explore_viral(q(rank="virality", limit=300, **wide))["by_virality"]
+    in_top = sum(1 for p in wide_big if p["post_uid"] in top_ids)
+    chk("the 15 most-viewed posts of the period are all inside the Biggest top 300 (before: 2 of 15 in the ratio order's top 300)", in_top >= 14, f"{in_top} of 15")
+    chk("YouTube videos with an unavailable view counter never appear in Biggest", not any(p["platform"] == "youtube_video" and (p["views"] in (0, None) or p["views"] != p["views"]) for p in
+        a.explore_viral(q(rank="virality", limit=300, floor="off", platforms="youtube_video", **wide))["by_virality"]))
+    chk("platforms with no counters are not ranked (reddit)", not any(p["platform"] == "reddit" for p in a.explore_viral(q(rank="virality", limit=300, floor="off", **wide))["by_virality"]))
+    pb = a.explore_viral(q(rank="virality", per_platform=3, **{"from": FROM, "to": TO}))["by_virality"]
+    chk("Biggest per platform returns at most 3 per platform, sorted by multiple inside each", max(__import__("collections").Counter(p["platform"] for p in pb).values()) <= 3)
 
     # ---------------- retweets
     wide = {"from": "2026-06-14", "to": TO}
-    inc = a.explore_viral(q(rank="virality", limit=300, **wide))
-    hide = a.explore_viral(q(rank="virality", limit=300, retweets="hide", **wide))
+    inc = a.explore_viral(q(rank="virality", order="amplified", limit=300, **wide))
+    hide = a.explore_viral(q(rank="virality", order="amplified", limit=300, retweets="hide", **wide))
     rts = [p for p in inc["by_virality"] if p["is_retweet"]]
     chk("retweets are flagged in the ranking (is_retweet)", len(rts) > 0 and all((p["text"] or "").upper().startswith("RT @") or "RT @" in (p["text"] or "").upper() for p in rts), f"{len(rts)} of {len(inc['by_virality'])}")
     chk("'Original posts only' removes every retweet from the ranking", not any(p["is_retweet"] for p in hide["by_virality"]) and not any((p["text"] or "").upper().startswith("RT @") for p in hide["by_virality"]))

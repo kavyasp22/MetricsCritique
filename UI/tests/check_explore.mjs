@@ -26,8 +26,8 @@ const dom = new JSDOM(html, {
         calls.push(u);
         if (/rank=virality/.test(u)) {
           const per = Number((u.match(/per_platform=(\d+)/) || [0, 0])[1]);
-          const mk = (pl, pct) => ({ post_uid: pl + pct, platform: pl, posted_at: '2026-10-20 10:00:00+00', text: 'a viral ' + pl + ' post', url: '', views: 100, likes: 5, shares: 1, comments: 0, engagement: 6, virality_pct: pct, virality_ref_n: 8336, is_retweet: pl === 'twitter' && pct > 0.98 });
-          return Promise.resolve({ ok: true, json: () => Promise.resolve({ rank: 'virality', per_platform: per, total_posts: 40, rated_posts: 25, min_ref: 20, floor_on: !/floor=off/.test(u), floor_mode: /floor=median/.test(u) ? 'median' : (/floor=off/.test(u) ? 'off' : 'top10'), below_floor: 7,
+          const mk = (pl, pct) => ({ post_uid: pl + pct, platform: pl, posted_at: '2026-10-20 10:00:00+00', text: 'a viral ' + pl + ' post', url: '', views: 100, likes: 5, shares: 1, comments: 0, engagement: 6, virality_pct: pct, virality_ref_n: 8336, attention_mult: pl === 'twitter' ? 143 : 2.6, attention_pct: pl === 'twitter' ? 0.996 : 0.97, activity_basis: 'views', is_retweet: pl === 'twitter' && pct > 0.98 });
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ rank: 'virality', order: /order=amplified/.test(u) ? 'amplified' : 'biggest', per_platform: per, total_posts: 40, rated_posts: 25, min_ref: 20, floor_on: !/floor=off/.test(u), floor_mode: /floor=median/.test(u) ? 'median' : (/floor=off/.test(u) ? 'off' : 'top10'), below_floor: 7,
             by_virality: per ? [mk('twitter', 0.99), mk('twitter', 0.97), mk('telegram', 0.98)] : [mk('twitter', 0.99), mk('telegram', 0.98)], terms: [] }) });
         }
         return Promise.resolve({ ok: true, json: () => Promise.resolve({
@@ -175,11 +175,17 @@ check('a search with no match empties Trending Topics', view().querySelectorAll(
   await rows('viral');
   calls.length = 0;
   const btn = (t) => [...view().querySelectorAll('.df-preset-btn')].find((x) => x.textContent === t);
-  check('Viral Posts offers Views and Virality percentile ranking', !!btn('Views') && !!btn('Virality percentile'));
-  btn('Virality percentile').click(); await wait(700);
-  check('the percentile ranking asks the API with rank=virality', calls.some((c) => /rank=virality&per_platform=0/.test(c)), calls[0] || '');
+  check('Viral Posts offers Views and Viral ranking', !!btn('Views') && !!btn('Viral ranking'));
+  btn('Viral ranking').click(); await wait(700);
+  check('the viral ranking asks the API with rank=virality (Biggest order by default, so no order parameter)', calls.some((c) => /rank=virality&per_platform=0/.test(c) && !/order=/.test(c)), calls[0] || '');
   const txt = view().textContent;
-  check('posts show "virality 0.99 (vs 8,336 similar posts)" and the note says how many are rated', /virality 0\.99 \(vs 8,336 similar posts\)/.test(txt) && /32 of them have a virality percentile/.test(txt) && /leaving 25 ranked/.test(txt));
+  check('every post shows both numbers: "attention: top 0.4% of twitter posts of similar age (143x the top-10% line)" and "amplification 0.99 (vs 8,336 similar posts)"', /attention: top 0\.4% of twitter posts of similar age \(143\u00d7 the top-10% line\)/.test(txt) && /amplification 0\.99 \(vs 8,336 similar posts\)/.test(txt));
+  check('the default order is Biggest and the note says how many have counters and how it is ordered', /32 of them have a view or engagement counter/.test(txt) && /leaving 25 ranked/.test(txt) && /Ordered by raw attention compared with posts of the same platform and age/.test(txt) && /Biggest attention \(2\)/.test(txt));
+  check('ORDER switch offers Biggest | Most amplified, Biggest active by default', !!btn('Biggest') && !!btn('Most amplified') && btn('Biggest').classList.contains('active'));
+  calls.length = 0;
+  btn('Most amplified').click(); await wait(700);
+  check('"Most amplified" sends order=amplified and the note switches to the percentile wording', calls.some((c) => /order=amplified/.test(c)) && /have a virality percentile/.test(view().textContent) && /Most amplified \(2\)/.test(view().textContent), calls[0] || '');
+  btn('Biggest').click(); await wait(700);
   check('a retweet is tagged "Retweet" and an original post is not', view().querySelectorAll('.ex-rt-tag').length === 1, String(view().querySelectorAll('.ex-rt-tag').length));
   check('the retweet switch offers Include / Original posts only, Include active by default', !!btn('Include') && !!btn('Original posts only') && btn('Include').classList.contains('active'));
   calls.length = 0;

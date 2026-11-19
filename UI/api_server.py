@@ -748,7 +748,15 @@ def explore_virality(qs, where, params, join, params_join, terms, limit):
     mixed list. Ties are broken by engagement, so the order is stable.
     The percentile ranks a RATIO, so a post with 4 views and 1 share can reach 1.00. A post must also reach a floor on its raw
     activity (views, else likes + comments + shares), relative to rated posts of its own platform and basis (no fixed number):
-    `floor=top10` (default) = top 10% of its platform, `floor=median` = the platform median or more, `floor=off` = no floor."""
+    `floor=top10` (default) = top 10% of its platform, `floor=median` = the platform median or more, `floor=off` = no floor.
+    `order=biggest` (default) sorts by where the post's raw attention sits among posts of the same platform, basis and age band
+    (activity_pct, comparable across platforms), then by its multiple of the platform's top-10% line, so the largest posts come first
+    whatever their share rate; posts with no ratio (for example Snapchat) can appear. `order=amplified` sorts by the ratio
+    percentile described above. The two are deliberately not combined: a geometric mean put the most viewed posts at ranks 26-30,003."""
+    order = qs.get("order", ["biggest"])[0]
+    order = order if order in ("biggest", "amplified") else "biggest"
+    if order == "biggest" and not {"activity_mult", "activity_pct"} <= _pv_cols():
+        order = "amplified"                   # older file without the multiple
     mode = qs.get("floor", ["top10"])[0]
     mode = mode if mode in ("top10", "median", "off") else ("median" if mode == "on" else "top10")
     cols_have = _pv_cols()
@@ -758,9 +766,13 @@ def explore_virality(qs, where, params, join, params_join, terms, limit):
     floor_on = mode != "off" and floor_col in cols_have
     cols = "p.post_uid, p.platform, p.posted_at, p.author_name, left(coalesce(p.text,''), 100000) AS text, p.url"
     inner = (f"SELECT {cols}, p.views, p.likes, p.comments, p.shares, "
-             f"coalesce(p.likes,0)+coalesce(p.comments,0)+coalesce(p.shares,0) AS engagement, {RETWEET_SQL} AS is_retweet, v.virality_pct, v.virality_ref_n "
+             f"coalesce(p.likes,0)+coalesce(p.comments,0)+coalesce(p.shares,0) AS engagement, {RETWEET_SQL} AS is_retweet, v.virality_pct, v.virality_ref_n, "
+             f"{'v.activity_mult AS attention_mult, v.activity_basis, v.activity_pct AS attention_pct, v.activity_ref_n AS attention_ref_n' if {'activity_mult', 'activity_pct'} <= cols_have else 'CAST(NULL AS DOUBLE) AS attention_mult, CAST(NULL AS VARCHAR) AS activity_basis, CAST(NULL AS DOUBLE) AS attention_pct, CAST(NULL AS DOUBLE) AS attention_ref_n'} "
              f"FROM analytics.post_facts p {join} JOIN read_parquet('{POST_VIRALITY.as_posix()}') v ON v.post_uid = p.post_uid "
-             f"WHERE {' AND '.join(where)} AND v.virality_pct IS NOT NULL AND v.virality_ref_n >= {VIRALITY_MIN_REF}")
+             f"WHERE {' AND '.join(where)} AND " +
+             ("v.activity IS NOT NULL" if order == "biggest" else f"v.virality_pct IS NOT NULL AND v.virality_ref_n >= {VIRALITY_MIN_REF}"))
+    order_by = ("attention_pct DESC NULLS LAST, attention_mult DESC NULLS LAST, engagement DESC, post_uid" if order == "biggest"
+                else "virality_pct DESC, engagement DESC, post_uid")
     inner_all = inner
     if floor_on:
         inner = inner + f" AND v.{floor_col}"
@@ -772,11 +784,11 @@ def explore_virality(qs, where, params, join, params_join, terms, limit):
     try:
         if per > 0:
             per = min(per, 20)
-            sql = (f"SELECT * EXCLUDE (rn) FROM (SELECT *, row_number() OVER (PARTITION BY platform ORDER BY virality_pct DESC, "
-                   f"engagement DESC, post_uid) AS rn FROM ({inner}) t) u WHERE rn <= {per} ORDER BY platform, rn")
+            sql = (f"SELECT * EXCLUDE (rn) FROM (SELECT *, row_number() OVER (PARTITION BY platform ORDER BY {order_by}) AS rn "
+                   f"FROM ({inner}) t) u WHERE rn <= {per} ORDER BY platform, rn")
             rows = cur.execute(sql, params_join + params).fetchdf().to_dict(orient="records")
         else:
-            rows = cur.execute(f"SELECT * FROM ({inner}) t ORDER BY virality_pct DESC, engagement DESC, post_uid LIMIT ?",
+            rows = cur.execute(f"SELECT * FROM ({inner}) t ORDER BY {order_by} LIMIT ?",
                                params_join + params + [limit]).fetchdf().to_dict(orient="records")
         rated = cur.execute(f"SELECT count(*) FROM ({inner}) t", params_join + params).fetchall()[0][0]
         rated_all = cur.execute(f"SELECT count(*) FROM ({inner_all}) t", params_join + params).fetchall()[0][0] if floor_on else rated
@@ -784,7 +796,7 @@ def explore_virality(qs, where, params, join, params_join, terms, limit):
                             params_join + params).fetchall()[0][0]
     finally:
         cur.close()
-    return {"rank": "virality", "per_platform": per, "total_posts": int(total), "rated_posts": int(rated),
+    return {"rank": "virality", "order": order, "per_platform": per, "total_posts": int(total), "rated_posts": int(rated),
             "floor_on": bool(floor_on), "floor_mode": mode if floor_on else "off", "below_floor": int(rated_all - rated),
             "min_ref": VIRALITY_MIN_REF, "by_virality": _clean_posts(rows, terms), "terms": terms}
 
