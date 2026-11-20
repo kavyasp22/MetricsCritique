@@ -42,6 +42,7 @@ DEFAULT_LIMIT = 50
 MAX_LIMIT = 300
 POST_VIRALITY = DATA / "post_virality.parquet"   # scripts/24_post_virality.py; optional, the page works without it
 POST_THEME = DATA / "post_theme_v1.parquet"      # scripts/27_post_theme.py: hybrid security theme D01..D09; optional
+POST_THEME_KNN = DATA / "post_theme_knn_v1.parquet"   # scripts/28_theme_knn.py: theme spread to untagged posts by nearest-neighbour voting; optional
 POST_DEDUP = DATA / "post_dedup.parquet"         # scripts/25_post_dedup.py: is_first = the first post of an exact-copy group
 RETWEET_SQL = "(coalesce(p.text, '') ILIKE 'RT @%')"      # a retweet starts "RT @user:"; only Twitter / Truth Social mark reposts this way in the data
 VIRALITY_MIN_REF = 20                            # a percentile needs at least this many reference posts to be shown
@@ -95,8 +96,8 @@ def _platform_clause(qs, where, params, col="p.platform"):
 
 
 def _theme_clause(qs, where, params):
-    """Theme filter (D01..D09) from stage 27. `theme_all=1` also takes the medium tier (one cue term); the default is the high tier
-    only (74% right on a fresh sample, medium 59%). Returns the chosen theme or ''."""
+    """Theme filter (D01..D09). Default = the clear matches: stage-27 high tier (74% right on a fresh sample) plus stage-28 neighbour
+    votes of share >= 0.9 (about 75%). `theme_all=1` also takes the stage-27 medium tier (one cue term, 59%). Returns the chosen theme or ''."""
     th = qs.get("theme", [""])[0].strip()
     if not th:
         return ""
@@ -105,9 +106,12 @@ def _theme_clause(qs, where, params):
     if not POST_THEME.exists():
         raise ValueError("themes are not built yet: run scripts/27_post_theme.py")
     tiers = ("high", "medium") if qs.get("theme_all", ["0"])[0] == "1" else ("high",)
-    where.append(f"p.post_uid IN (SELECT post_uid FROM read_parquet('{POST_THEME.as_posix()}') "
-                 f"WHERE theme = ? AND tier IN ({','.join('?' * len(tiers))}))")
+    sub = (f"SELECT post_uid FROM read_parquet('{POST_THEME.as_posix()}') WHERE theme = ? AND tier IN ({','.join('?' * len(tiers))})")
     params.append(th); params.extend(tiers)
+    if POST_THEME_KNN.exists():
+        sub += f" UNION SELECT post_uid FROM read_parquet('{POST_THEME_KNN.as_posix()}') WHERE knn_theme = ?"
+        params.append(th)
+    where.append(f"p.post_uid IN ({sub})")
     return th
 
 
@@ -943,9 +947,12 @@ def explore_search_trend(qs: dict) -> dict:
             topics = [{"topic_id": r[0], "n": int(r[1])} for r in cur.execute(
                 "SELECT pt.topic_id, count(*) FROM analytics.post_topic pt JOIN m_cur ON m_cur.post_uid = pt.post_uid GROUP BY 1 ORDER BY 2 DESC").fetchall()]
             if POST_THEME.exists():
-                themes = [{"theme": r[0], "tier": r[1], "n": int(r[2])} for r in cur.execute(
-                    f"SELECT t.theme, t.tier, count(*) FROM read_parquet('{POST_THEME.as_posix()}') t JOIN m_cur ON m_cur.post_uid = t.post_uid "
-                    "WHERE t.theme <> 'unassigned' GROUP BY 1, 2 ORDER BY 3 DESC").fetchall()]
+                sql = (f"SELECT t.theme, t.tier, count(*) AS n FROM read_parquet('{POST_THEME.as_posix()}') t JOIN m_cur ON m_cur.post_uid = t.post_uid "
+                       "WHERE t.theme <> 'unassigned' GROUP BY 1, 2")
+                if POST_THEME_KNN.exists():      # untagged posts that took a theme from their nearest neighbours (disjoint from the rows above)
+                    sql += (f" UNION ALL SELECT k.knn_theme, 'neighbour', count(*) FROM read_parquet('{POST_THEME_KNN.as_posix()}') k "
+                            "JOIN m_cur ON m_cur.post_uid = k.post_uid WHERE k.knn_theme <> 'unassigned' GROUP BY 1")
+                themes = [{"theme": r[0], "tier": r[1], "n": int(r[2])} for r in cur.execute(f"SELECT * FROM ({sql}) ORDER BY n DESC").fetchall()]
             cur.unregister("m_cur")
     finally:
         cur.close()

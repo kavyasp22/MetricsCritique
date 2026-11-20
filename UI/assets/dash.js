@@ -5872,7 +5872,7 @@
   function exThemeQs() { return EX.theme ? '&theme=' + encodeURIComponent(EX.theme) + (EX.themeAll ? '&theme_all=1' : '') : ''; }
   function exThemeNote() {
     return 'Theme ' + exThemeName(EX.theme) + ': assigned automatically by the language model plus a keyword check, so it is provisional. ' +
-      (EX.themeAll ? 'Includes the lower-confidence matches (about 59% right, 74% for the clear ones). ' : 'Only clear matches are listed (about 74% right on a fresh check); many relevant posts carry no theme. ') +
+      (EX.themeAll ? 'Includes the lower-confidence matches (about 59% right, about 75% for the clear ones). ' : 'Only clear matches are listed (about 75% right on a fresh check: a clear keyword match, or posts whose nearest neighbours all carry the theme); many relevant posts carry no theme. ') +
       'Do not read counts per theme as how much of the conversation is about it.';
   }
   function exSearchTitle() {
@@ -5946,12 +5946,12 @@
       body.appendChild(tr);
       // themes
       var thm = {};
-      d.themes.forEach(function (r) { var o = thm[r.theme] || (thm[r.theme] = { high: 0, medium: 0 }); o[r.tier] += r.n; });
+      d.themes.forEach(function (r) { var o = thm[r.theme] || (thm[r.theme] = { high: 0, medium: 0, neighbour: 0 }); o[r.tier] += r.n; });
       var hr = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'THEMES' })]);
-      Object.keys(thm).sort(function (a, b) { return (thm[b].high + thm[b].medium) - (thm[a].high + thm[a].medium); }).forEach(function (k) {
+      Object.keys(thm).sort(function (a, b) { return (thm[b].high + thm[b].neighbour + thm[b].medium) - (thm[a].high + thm[a].neighbour + thm[a].medium); }).forEach(function (k) {
         var o = thm[k];
-        hr.appendChild(chip(exThemeName(k), o.high + (EX.themeAll ? o.medium : 0), function () { EX.theme = k; EX.viral = null; EX.st = null; render(); },
-          o.high + ' clear match(es), ' + o.medium + ' lower-confidence. Automatic and provisional. Click to filter by this theme.'));
+        hr.appendChild(chip(exThemeName(k), o.high + o.neighbour + (EX.themeAll ? o.medium : 0), function () { EX.theme = k; EX.viral = null; EX.st = null; render(); },
+          o.high + ' clear keyword match(es), ' + o.neighbour + ' via nearest neighbours, ' + o.medium + ' lower-confidence. Automatic and provisional. Click to filter by this theme.'));
       });
       hr.appendChild(h('span', { class: 'cs', text: fmtInt(d.unassigned_cur) + ' of these posts have no theme (most posts are not security posts or have no clear cue).' }));
       body.appendChild(hr);
@@ -6782,7 +6782,7 @@
       ent.addEventListener('change', applyEnt);
       row2.appendChild(tsel); row2.appendChild(ssel); row2.appendChild(ent); row2.appendChild(dl);
       var thsel = h('select', { class: 'ex-top', id: 'ex-theme', 'aria-label': 'Security theme',
-                                title: 'Security theme (D01\u2013D09), assigned automatically and provisional. Default: only posts with a clear match (about 74% right on a fresh check). Most posts have no theme.' });
+                                title: 'Security theme (D01\u2013D09), assigned automatically and provisional. Default: only clear matches (about 75% right on a fresh check). Most posts have no theme.' });
       [''].concat(TAX.axis('security_domain').order).forEach(function (k) {
         var o = h('option', { text: k ? exThemeName(k) : 'Any security theme', value: k }); if (EX.theme === k) { o.selected = true; } thsel.appendChild(o);
       });

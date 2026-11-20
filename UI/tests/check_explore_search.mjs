@@ -29,7 +29,7 @@ const dom = new JSDOM(html, {
           unassigned_cur: 70, daily: days('2026-09-01', 80).map((d) => ({ day: d, n: few ? 0 : 5, distinct: few ? 0 : 5, total: 3000 })),
           platforms: [{ platform: 'twitter', n_cur: 60, n_prev: 10 }, { platform: 'telegram', n_cur: 60, n_prev: 50 }],
           topics: [{ topic_id: 't004', n: 40 }, { topic_id: 't005', n: 10 }, { topic_id: 't007', n: 70 }],
-          themes: [{ theme: 'D06', tier: 'high', n: 30 }, { theme: 'D06', tier: 'medium', n: 5 }, { theme: 'D05', tier: 'high', n: 8 }] });
+          themes: [{ theme: 'D06', tier: 'high', n: 30 }, { theme: 'D06', tier: 'neighbour', n: 4 }, { theme: 'D06', tier: 'medium', n: 5 }, { theme: 'D05', tier: 'high', n: 8 }] });
       }
       if (u.includes('/api/explore/viral')) {
         viralCalls.push(u);
@@ -76,7 +76,7 @@ check('a bar chart of posts per day is drawn', !!st.querySelector('.ex-st-plot s
 check('platforms are listed with the change against the previous period', /twitter · 60 \(\+500% vs before\)/.test(txt) && /telegram · 60/.test(txt));
 const chips = [...st.querySelectorAll('.ex-chip')].map((c) => c.textContent);
 check('the two neighbourhood topics are merged into one chip (50)', chips.some((c) => /Neighbourhood/.test(c) && /· 50$/.test(c)), chips.join(' | '));
-check('theme chips list clear matches only by default (D06 = 30)', chips.some((c) => /^D06 · .* · 30$/.test(c)), chips.join(' | '));
+check('theme chips count clear matches and neighbour votes, not the lower-confidence tier (D06 = 30 + 4)', chips.some((c) => /^D06 · .* · 34$/.test(c)), chips.join(' | '));
 check('posts without a theme are counted and explained', /70 of these posts have no theme/.test(txt));
 check('top posts for the search are listed', st.querySelectorAll('.ex-post, .ex-post-card, .ex-row').length > 0 && /Ladakh border talks/.test(txt));
 check('the posts call carries the same keyword', viralCalls.some((u) => /q=ladakh/.test(u)));
@@ -85,7 +85,7 @@ check('the posts call carries the same keyword', viralCalls.some((u) => /q=ladak
 const d06 = [...st.querySelectorAll('.ex-chip')].find((c) => /^D06/.test(c.textContent));
 d06.click(); await wait(900);
 check('clicking a theme chip filters the search by that theme (clear matches only)', /theme=D06/.test(trendCalls.at(-1)) && !/theme_all/.test(trendCalls.at(-1)), trendCalls.at(-1));
-check('the page warns that the theme is provisional', /provisional/.test(view().textContent) && /74% right/.test(view().textContent));
+check('the page warns that the theme is provisional and gives the precision', /provisional/.test(view().textContent) && /75% right/.test(view().textContent));
 const all = doc.getElementById('ex-theme-all');
 check('the lower-confidence switch appears once a theme is chosen', !!all);
 all.checked = true; all.dispatchEvent(new win.Event('change')); await wait(900);

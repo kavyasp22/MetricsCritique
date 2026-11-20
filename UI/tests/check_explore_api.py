@@ -213,14 +213,21 @@ def main() -> int:
     vt = a.explore_viral(q(theme="D04", limit=300, **w))
     uids = [p["post_uid"] for p in vt["with_views"] + vt["without_views"]]
     tmap = th.set_index("post_uid")
-    chk("theme filter D04 returns only D04 posts of the high tier", uids and all(tmap.loc[u, "theme"] == "D04" and tmap.loc[u, "tier"] == "high" for u in uids), len(uids))
+    knn = pd.read_parquet(a.POST_THEME_KNN, columns=["post_uid", "knn_theme"]).set_index("post_uid")
+    def ok_d04(u):
+        in_hi = u in tmap.index and tmap.loc[u, "theme"] == "D04" and tmap.loc[u, "tier"] == "high"
+        in_nn = u in knn.index and knn.loc[u, "knn_theme"] == "D04"
+        return in_hi or in_nn
+    chk("theme filter D04 returns only clear D04 posts (stage-27 high tier or stage-28 neighbour vote)", uids and all(ok_d04(u) for u in uids), len(uids))
+    chk("the default theme list includes neighbour-vote posts", any(u in knn.index and knn.loc[u, "knn_theme"] == "D04" for u in uids) or
+        a.explore_viral(q(theme="D04", limit=300, **{"from": "2026-06-01", "to": "2026-10-26"}))["total_posts"] > 0)
     va = a.explore_viral(q(theme="D04", theme_all=1, limit=300, **w))
     chk("the lower-confidence switch adds posts and never removes any", va["total_posts"] >= vt["total_posts"] and va["total_posts"] > 0, (vt["total_posts"], va["total_posts"]))
-    d4 = th[(th.theme == "D04") & (th.tier == "high")]
+    d4 = pd.concat([th[(th.theme == "D04") & (th.tier == "high")][["post_uid"]], knn[knn.knn_theme == "D04"].reset_index()[["post_uid"]]]).drop_duplicates()
     a._main_con.register("d4_uids", d4[["post_uid"]])
     exp = a._main_con.execute("SELECT count(*) FROM d4_uids u JOIN analytics.post_facts p ON p.post_uid = u.post_uid WHERE p.posted_at IS NOT NULL").fetchall()[0][0]
     tot_all = a.explore_viral(q(theme="D04", **{"from": "1990-01-01", "to": "2100-01-01"}))["total_posts"]
-    chk("theme total over all days equals the stage-27 file (D04 high tier, posts with a posted day)", tot_all == exp and exp > 0, (tot_all, exp, len(d4)))
+    chk("theme total over all days equals the stage-27 high tier + stage-28 neighbour file (D04, posts with a posted day)", tot_all == exp and exp > 0, (tot_all, exp, len(d4)))
     for bad in ("D10", "x", "D0"):
         try:
             a.explore_viral(q(theme=bad, **w)); chk(f"theme '{bad}' is refused", False)
@@ -236,7 +243,7 @@ def main() -> int:
     chk("search trend: matches agree with the Viral Posts total for the same words", t1["n_cur"] == a.explore_viral(q(q="ladakh", **w))["total_posts"],
         (t1["n_cur"], a.explore_viral(q(q="ladakh", **w))["total_posts"]))
     t2 = a.explore_search_trend(q(theme="D06", **pf))
-    chk("search trend by theme lists only that theme", t2["n_cur"] > 0 and {r["theme"] for r in t2["themes"]} == {"D06"} and all(r["tier"] == "high" for r in t2["themes"]))
+    chk("search trend by theme lists only that theme", t2["n_cur"] > 0 and {r["theme"] for r in t2["themes"]} == {"D06"} and all(r["tier"] in ("high", "neighbour") for r in t2["themes"]))
     for kw, label in ((dict(), "nothing to search for"), (dict(q="-dam"), "only a minus word")):
         try:
             a.explore_search_trend(q(**kw, **pf)); chk(f"search trend refuses {label}", False)
