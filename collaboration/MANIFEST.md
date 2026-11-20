@@ -33,7 +33,7 @@ still open — do not treat that fix as proven, only improved.)
 | `../docs/GEO_ONTOLOGY_CONTEXT.md` | Shared environment/taxonomy reference every geo-ontology agent reads (entity types, risk categories, themes, known bugs) |
 | `../docs/GEOPOLITICAL_ONTOLOGY_SPEC.md` | As-built record + verdict-by-subsystem verification, including the live remediation state (§6) |
 | `../data/geo_ontology.duckdb` | Entities/risk/theme/timeline tables — separate from `data/metrics.duckdb`, additive, never overwrites it |
-| `../scripts/09_ontology_v2_cluster_fix.py`, `10_entity_extraction.py` (legacy), `11_geo_timeline_metrics.py`, `21_prod_entities.py`, `22_entity_alias_merge.py`, `23_load_prod_entities.py`, `24_post_virality.py`, `25_post_dedup.py`, `26a_embed_domain_prototypes.py`, `26_domain_zeroshot.py`, `27_post_theme.py`, `12_risk_theme_classification.py` | Committed, reproducible pipeline scripts for this layer |
+| `../scripts/09_ontology_v2_cluster_fix.py`, `10_entity_extraction.py` (legacy), `11_geo_timeline_metrics.py`, `21_prod_entities.py`, `22_entity_alias_merge.py`, `23_load_prod_entities.py`, `24_post_virality.py`, `25_post_dedup.py`, `26a_embed_domain_prototypes.py`, `26_domain_zeroshot.py`, `27_post_theme.py`, `31_post_embedding_index.py`, `embed_service.py`, `12_risk_theme_classification.py` | Committed, reproducible pipeline scripts for this layer |
 | `../scripts/notify_poller.py` | Reference notification poller (no delivery channel wired — logs only) |
 
 ### Delivery database (2026-07-30, separate handoff artifact)

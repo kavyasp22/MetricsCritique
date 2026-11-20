@@ -5637,7 +5637,7 @@
   var EX_ALL = 100000;     // "Show all": every row of a list; post lists are cut to the server limit below
   var EX_POST_CAP = 300;   // api_server MAX_LIMIT: most posts one list can fetch
   var EX = { tile: 'topics', platforms: {}, q: '', entityUid: '', entityName: '', entType: '', entSub: '', terms: [], spreadMode: 'cards', spreadLimit: 10, top: 25, unclass: false, minPlat: 0, entTop: null, vrank: 'views', vper: 0, rt: 'include', floor: 'top10', vorder: 'biggest', topicId: '', topicName: '', theme: '', themeAll: false,
-             viral: null, viralKey: '', st: null, stKey: '' };
+             viral: null, viralKey: '', st: null, stKey: '', scn: null, scnKey: '' };
   var EX_TILES = [
     { k: 'topics', t: 'Trending Topics', s: "What's gaining attention?",
       i: '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>' },
@@ -5892,6 +5892,67 @@
     if (r <= EX_RULES.fall) { return { k: 'declining', t: 'Declining', o: 2 }; }
     return { k: 'steady', t: 'Steady', o: 1 };
   }
+  /* "Who is involved" for a typed search: the scenario is understood by meaning (bge-m3) from a Gemma-written brief, the people named in the posts it
+     retrieves are checked post by post by Gemma for real involvement. Slow the first time (about a minute), cached after. If the service is down the
+     page falls back to the names counted in the keyword-matched posts and says so. */
+  function exScenarioWho(pg, fb, d) {
+    var plats = PLATFORMS.filter(exPlatOk).join(',');
+    var key = [EX.q, S.from, S.to, plats, EX.entType, EX.entSub].join('|');
+    var status = h('div', { class: 'cs', text: 'Searching by meaning and checking each shortlisted post with Gemma — about a minute the first time, instant after…' });
+    var box = h('div', { class: 'ex-who-scn' });
+    pg.insertBefore(status, fb); pg.insertBefore(box, fb);
+    function paint(r) {
+      status.textContent = '';
+      box.textContent = '';
+      var st = r.stats;
+      var det = h('details', { class: 'ex-explain' });
+      det.appendChild(h('summary', null, [h('b', { text: 'How this list was found' }), h('span', { class: 'ex-explain-hint', text: ' — click to see explanation' })]));
+      det.appendChild(h('p', { class: 'cs', text: 'Scenario understood as: ' + r.brief.summary + ' ' + (r.brief.actors && r.brief.actors.length ? 'Main actors seen: ' + r.brief.actors.slice(0, 10).join(', ') + '. ' : '') +
+        'Posts were ranked by meaning against ' + r.brief.anchors_used + ' descriptions of the scenario (not by its words); ' + fmtInt(st.naming_a_person) + ' of the ' + fmtInt(st.semantic_candidates) +
+        ' closest posts name a known person of this kind; ' + st.verified_ok + ' of them (the best few for each person) were checked by Gemma, ' + st.relevant + ' were about the scenario. ' +
+        'Direct = the post is about what that person does, decides, says or threatens in the scenario. "About N posts" applies the share of direct posts among the checked ones to all the scenario posts that name them, so it is an estimate. ' +
+        'Views and engagement play no part. Names are matched with spelling variants merged; a person called only by a title (“the president”) is not found.' }));
+      box.appendChild(det);
+      var involved = r.people.filter(function (o) { return o.direct > 0; }), other = r.people.filter(function (o) { return o.direct === 0; });
+      involved.forEach(function (o) {
+        var wrap = h('div', { class: 'ex-who-item' });
+        var b = h('button', { type: 'button', class: 'ex-rel-row', title: 'Click to see the posts about their part in it.' }, [
+          h('span', { class: 'ex-rel-tag ex-rel-' + (o.involvement >= 0.6 ? 'rising' : 'steady'), text: o.involvement >= 0.6 ? 'Central' : 'Involved' }),
+          h('span', { class: 'ex-rel-name', text: o.name + (o.top_role ? ' — ' + o.top_role : '') }),
+          h('span', { class: 'ex-rel-n', text: o.direct + ' of ' + o.checked + ' checked direct · about ' + fmtInt(o.est_direct_posts) + ' of ' + fmtInt(o.candidates) + ' posts' })]);
+        var open = false, pbox = null;
+        b.addEventListener('click', function () {
+          if (open) { pbox.remove(); open = false; return; }
+          open = true; pbox = h('div', { class: 'ex-who-posts' }); wrap.appendChild(pbox);
+          r.posts.filter(function (x) { return x.name === o.name && x.involvement === 'direct'; }).sort(function (x, y) { return y.score - x.score; }).slice(0, 5).forEach(function (x) {
+            pbox.appendChild(h('div', { class: 'cs ex-who-why', text: (x.role ? x.role + '. ' : '') + (x.reason || '') + (x.evidence_ok ? ' “' + x.evidence + '”' : '') }));
+            pbox.appendChild(exPostCard(x, !!x.views));
+          });
+          var nb = h('button', { type: 'button', class: 'df-preset-btn', text: 'Narrow the keyword search to posts naming ' + o.name });
+          nb.addEventListener('click', function () { EX.q = (EX.q ? EX.q + ' ' : '') + '"' + o.name + '"'; EX.entType = ''; EX.entSub = ''; EX.topicId = ''; EX.viral = null; EX.st = null; render(); });
+          pbox.appendChild(nb);
+        });
+        wrap.insertBefore(b, wrap.firstChild);
+        box.appendChild(wrap);
+      });
+      if (!involved.length) { box.appendChild(h('div', { class: 'cs', text: 'No one of this kind was found directly involved in the checked posts.' })); }
+      if (other.length) {
+        box.appendChild(h('div', { class: 'cs', text: 'Named in scenario posts but not involved (checked, none direct): ' + other.slice(0, 12).map(function (o) { return o.name; }).join(', ') + '.' }));
+      }
+      box.appendChild(h('div', { class: 'cs', text: 'Checked ' + st.verified_ok + ' posts with Gemma in ' + r.total_s + ' s' + (r.cached ? ' (saved result)' : '') + '. Relevance and involvement come from the post’s meaning, not from keywords.' }));
+    }
+    function fail(msg) {
+      status.textContent = 'Scenario search is not available (' + msg + '). Showing the names counted in the keyword-matched posts instead.';
+      fb.style.display = '';
+    }
+    if (EX.scn && EX.scnKey === key) { paint(EX.scn); return; }
+    fetch('/api/explore/scenario_people?scenario=' + encodeURIComponent(EX.q) + '&from=' + encodeURIComponent(S.from) + '&to=' + encodeURIComponent(S.to) +
+          '&platforms=' + encodeURIComponent(plats) + '&entity_type=' + encodeURIComponent(EX.entType) + '&entity_subtype=' + encodeURIComponent(EX.entSub), { cache: 'no-store' })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) { throw new Error(j && j.error ? j.error : 'HTTP ' + r.status); } return j; }); })
+      .then(function (r) { EX.scn = r; EX.scnKey = key; if (box.isConnected !== false) { paint(r); } })
+      .catch(function (err) { fail(String(err.message || err).slice(0, 120)); });
+  }
+
   function exSearchTrendView(host) {
     var days = exDays(), prev = exPrevDays(days), plats = PLATFORMS.filter(exPlatOk).join(','), title = exSearchTitle();
     exExplain(host, 'What is trending around ' + title, 'Everything below comes from the posts that match your search in the selected days. The tag on each related item compares its posts in the ' +
@@ -5971,6 +6032,7 @@
         var KIND = { PERSON: 'People', ORG: 'Organisations', LOCATION: 'Places', EVENT: 'Events' };
         var pg = h('div', { class: 'ex-rel-group ex-rel-who' }, [h('div', { class: 'ex-rel-title', text: 'Who is involved · ' + (KIND[d.people.type] || d.people.type) + (d.people.subtype ? ' · ' + subtypeName(d.people.subtype) : '') })]);
         var qBase = function (name) { return (EX.q ? EX.q + ' ' : '') + '"' + name + '"'; };
+        var fb = h('div', { class: 'ex-who-fallback' });
         d.people.rows.forEach(function (r) {
           var wrap = h('div', { class: 'ex-who-item' });
           var open = false, box = null;
@@ -5989,10 +6051,12 @@
               box.appendChild(nb);
             }).catch(function (err) { box.textContent = ''; empty(box, 'Could not load posts: ' + err.message); });
           });
-          pg.appendChild(wrap);
+          fb.appendChild(wrap);
         });
-        if (!d.people.rows.length) { pg.appendChild(h('div', { class: 'cs', text: 'No one of this kind is named in at least 3 of these posts.' })); }
-        pg.appendChild(h('div', { class: 'cs', text: 'Counted by name in the post text on every platform (' + d.people.candidates + ' best-known ' + (KIND[d.people.type] || 'entities').toLowerCase() + ' checked). Titles like "President", first names and spelling variants are merged or left out. The same surname can belong to two people.' }));
+        if (!d.people.rows.length) { fb.appendChild(h('div', { class: 'cs', text: 'No one of this kind is named in at least 3 of these posts.' })); }
+        fb.appendChild(h('div', { class: 'cs', text: 'Counted by name in the post text on every platform (' + d.people.candidates + ' best-known ' + (KIND[d.people.type] || 'entities').toLowerCase() + ' checked). Titles like "President", first names and spelling variants are merged or left out. The same surname can belong to two people.' }));
+        pg.appendChild(fb);
+        if (EX.q) { fb.style.display = 'none'; exScenarioWho(pg, fb, d); }
         body.appendChild(pg);
       }
       var prevOf = {}; d.platforms.forEach(function (r) { prevOf[r.platform] = r.n_prev; });

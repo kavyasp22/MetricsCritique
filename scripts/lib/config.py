@@ -85,3 +85,8 @@ def gemma_config() -> dict:
         "timeout": int(os.environ.get("GEMMA_TIMEOUT", "240")),
         "concurrency": int(os.environ.get("GEMMA_MAX_CONCURRENCY", "32")),
     }
+
+
+def embed_url() -> str:
+    """URL of the local bge-m3 embedding service (scripts/embed_service.py); needed only by query-time semantic search. No default."""
+    return _require_env("EMBED_URL").rstrip("/")

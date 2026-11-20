@@ -294,6 +294,15 @@ def main() -> int:
     pm = a._people_involved(a._main_con.cursor(), __import__("pandas").DataFrame({"t": ["trump said hello", "no one here", "donald trump spoke"], "per": ["cur", "cur", "prev"]}), "PERSON", "political_leader")
     chk("who: name matching is per post and splits the two periods", [(r["name"], r["n"], r["n_prev"]) for r in pm["rows"] if r["name"] == "Trump"] in ([], [("Trump", 1, 1)]))
 
+    # ---------------- scenario search: input checks (the Gemma and embedding calls themselves are not run here)
+    for bad in (dict(scenario="", entity_type="PERSON"), dict(scenario="x" * 130, entity_type="PERSON"), dict(scenario="iran war", entity_type="person"),
+                dict(scenario="iran war", entity_type="PERSON", entity_subtype="Political Leader")):
+        try:
+            a.explore_scenario_people(q(**bad, **{"from": FROM, "to": TO})); chk("scenario search refuses " + str(list(bad.values())[0])[:12] + "...", False)
+        except ValueError:
+            chk("scenario search refuses a bad request (" + ",".join(f"{k}={str(v)[:8]}" for k, v in bad.items()) + ")", True)
+    chk("scenario search needs the stage-31 embedding files", a.Path(a.DATA / "post_emb_fp16.npy").exists() and a.Path(a.DATA / "post_emb_index.parquet").exists())
+
     n_ok = sum(RESULTS)
     print(f"\n  {n_ok}/{len(RESULTS)} checks passed")
     return 0 if n_ok == len(RESULTS) else 1

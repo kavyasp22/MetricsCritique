@@ -982,47 +982,7 @@ def _platform_speed(m, tot_plat, d_from: str, d_to: str) -> list:
     return out[:8]
 
 
-# titles that the entity extract stores as if they were people ("President", "Prime Minister"): never a "who"
-GENERIC_PERSON = re.compile(r"^(the )?(vice[ -])?(president|prime minister|minister|secretary|chief|general|governor|mayor|chancellor|king|queen|leader|"
-                            r"commander|senator|spokesman|spokesperson|officials?|officer|premier|speaker|judge|ambassador|director|chairman)s?$", re.I)
-
-
-_FIRST_NAMES = {"donald", "joe", "benjamin", "narendra", "rahul", "hillary", "barack", "bill", "george", "vladimir", "volodymyr", "emmanuel", "boris", "angela",
-                "justin", "keir", "scott", "pete", "marco", "mark", "sergey", "recep", "ali", "mohammed", "mohammad", "ahmed", "abdul", "imran", "shehbaz"}
-_DEMONYM = re.compile(r"(ian|ish|ese|eli|ians|ans)$", re.I)
-_JUNK = {"https", "http", "www", "rt", "potus", "rep", "mps", "pm", "prime", "of state", "state", "foreign", "defense", "defence", "home", "representative", "deputy"}
-
-
-def _clean_candidates(cand):
-    """Entity extract noise removed before anything is counted: titles ("Foreign Minister"), links, nationalities ("Israeli"), plurals ("Trumps"), bare first names,
-    and the same person under several spellings (Xijinping / Xi Jinping, Obama / Barack Obama) merged under the longest name. Returns [(uid, display, subtype, corpus, [patterns])]."""
-    rows = []
-    for r in cand.itertuples():
-        name = str(r.canonical_name).strip()
-        low = name.lower()
-        toks = low.split()
-        if len(name) < 3 or low in _JUNK or GENERIC_PERSON.match(name) or re.search(r"\b(minister|president|secretary|commander|spokes\w+|officials?|ambassador|chief|governor|senator|mps)\b", low):
-            continue
-        if len(toks) == 1 and (low in _FIRST_NAMES or _DEMONYM.search(low)):
-            continue
-        rows.append([r.entity_uid, name, r.entity_subtype, int(r.distinct_posts or 0), [low]])
-    names = {r[1].lower(): r for r in rows}
-    keep = {}
-    for r in sorted(rows, key=lambda x: -len(x[1].split())):
-        low = r[1].lower(); toks = low.split()
-        if low.endswith("s") and low[:-1] in names:                       # plural / possessive of another candidate
-            continue
-        collapsed = re.sub(r"[^a-z0-9]", "", low)
-        tgt = next((k for k, v in keep.items() if re.sub(r"[^a-z0-9]", "", k) == collapsed), None)
-        if tgt is None and len(toks) == 1:                                 # a single token is merged into a longer name that starts or ends with it
-            tgt = next((k for k in keep if len(k.split()) > 1 and (k.split()[0] == low or k.split()[-1] == low)), None)
-        if tgt is None and len(toks) == 1 and len(low) >= 6:                # a handle written as one word (vladimirputin, pmmodi) goes to the person whose surname it ends with
-            tgt = next((k for k in keep if len(k.split()[-1]) >= 4 and low != k.split()[-1] and low.endswith(k.split()[-1])), None)
-        if tgt is not None:
-            keep[tgt][3] += r[3]; keep[tgt][4].append(low)
-        else:
-            keep[low] = [r[0], r[1], r[2], r[3], [low]]
-    return list(keep.values())
+from entity_people import GENERIC_PERSON, clean_candidates as _clean_candidates  # noqa: E402  (scripts/lib is on sys.path)
 
 
 def _people_involved(cur, tx, etype: str, esub: str, limit: int = 20) -> dict:
@@ -1148,6 +1108,29 @@ def explore_search_trend(qs: dict) -> dict:
             "entities": entities, "hashtags": tags, "anomaly": anomaly, "platform_speed": speed, "people": people, "entity_coverage": _entity_cover(),
             "daily": [{"day": r.d, "n": int(r.n), "distinct": int(r.distinct), "total": int(r.total)} for r in daily.itertuples()],
             "platforms": plat, "topics": topics, "themes": themes}
+
+
+def explore_scenario_people(qs: dict) -> dict:
+    """Explore > a scenario searched with an entity type chosen: who is actually involved and the posts about their part in it (meaning first, then
+    Gemma verification; see scripts/lib/scenario_search.py). Slow the first time (about 40 s: Gemma brief, retrieval, 18 verification calls), cached after."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from lib import scenario_search as SS
+    scenario = qs.get("scenario", [""])[0].strip()
+    d_from, d_to = qs.get("from", [""])[0], qs.get("to", [""])[0]
+    etype = qs.get("entity_type", [""])[0].strip()
+    esub = qs.get("entity_subtype", [""])[0].strip()
+    if not scenario or len(scenario) > 120:
+        raise ValueError("give a scenario of at most 120 characters")
+    if not (d_from and d_to):
+        raise ValueError("from and to required")
+    if not re.fullmatch(r"[A-Z]+", etype) or not re.fullmatch(r"[a-z_]*", esub):
+        raise ValueError("entity_type must be like PERSON and entity_subtype like political_leader")
+    plats = [x for x in qs.get("platforms", [""])[0].split(",") if x]
+    cur = _main_con.cursor()
+    try:
+        return SS.run(cur, scenario, d_from, d_to, plats or None, etype, esub, refresh=qs.get("refresh", ["0"])[0] == "1")
+    finally:
+        cur.close()
 
 
 _ENT_COVER = None
@@ -1476,6 +1459,14 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json({"error": str(e)}, status=400)
             except Exception as e:
                 self._json({"error": f"query failed: {e}"}, status=500)
+            return
+        if parsed.path == "/api/explore/scenario_people":
+            try:
+                self._json(explore_scenario_people(parse_qs(parsed.query)))
+            except ValueError as e:
+                self._json({"error": str(e)}, status=400)
+            except Exception as e:
+                self._json({"error": f"scenario search failed: {type(e).__name__}: {e}"}, status=503)
             return
         if parsed.path == "/api/explore/search_trend":
             try:

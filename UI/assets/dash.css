@@ -2957,3 +2957,6 @@ body[data-mode="explore"] #global-filters { display: none !important; }
 
 .ex-rel-who { margin: 0.8rem 0; }
 .ex-who-posts { margin: 0.2rem 0 0.6rem 1.2rem; padding-left: 0.6rem; border-left: 2px solid currentColor; }
+
+.ex-who-why { margin: 0.3rem 0 0.1rem; font-style: italic; }
+.ex-who-scn { margin: 0.3rem 0; }

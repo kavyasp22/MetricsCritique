@@ -11,7 +11,8 @@ const ROOT = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const html = readFileSync(`${ROOT}/index.html`, 'utf8');
 const script = readFileSync(`${ROOT}/assets/dash.js`, 'utf8');
 const base = JSON.parse(readFileSync(`${ROOT}/data/metrics.json`, 'utf8'));
-const errors = [], trendCalls = [], viralCalls = [];
+const errors = [], trendCalls = [], viralCalls = [], scnCalls = [];
+let scnMode = 'ok';
 let trendMode = 'ok';
 const days = (from, n) => Array.from({ length: n }, (_, i) => new Date(Date.parse(from) + i * 86400000).toISOString().slice(0, 10));
 
@@ -22,6 +23,18 @@ const dom = new JSDOM(html, {
       u = String(u);
       const J = (o, ok = true, status = 200) => Promise.resolve({ ok, status, json: () => Promise.resolve(o) });
       if (u.startsWith('/api/feedback')) return J({ votes: {} });
+      if (u.includes('/api/explore/scenario_people')) {
+        scnCalls.push(u);
+        if (scnMode === 'down') return J({ error: 'scenario search failed: embedding service not running' }, false, 503);
+        return J({ scenario: 'iran war', entity_type: 'PERSON', entity_subtype: 'political_leader', cached: false, total_s: 42.1,
+          brief: { summary: 'A US/Israel-Iran confrontation with strikes and Hormuz shipping attacks.', actors: ['Donald Trump', 'Benjamin Netanyahu'], not_this: ['games'], anchors_used: 17 },
+          stats: { semantic_candidates: 1500, naming_a_person: 449, verified: 84, verified_ok: 80, relevant: 62, people_candidates: 120 },
+          people: [{ entity_uid: 'person:trump', name: 'Trump', candidates: 372, checked: 44, direct: 18, mentioned: 14, unrelated: 12, involvement: 0.41, est_direct_posts: 154, score: 154, top_role: 'planning strikes' },
+                   { entity_uid: 'person:netanyahu', name: 'Benjamin Netanyahu', candidates: 38, checked: 12, direct: 9, mentioned: 2, unrelated: 1, involvement: 0.75, est_direct_posts: 27, score: 27, top_role: 'renewed strikes' },
+                   { entity_uid: 'person:putin', name: 'Putin', candidates: 24, checked: 10, direct: 0, mentioned: 3, unrelated: 7, involvement: 0, est_direct_posts: 2, score: 2, top_role: '' }],
+          posts: [{ post_uid: 'p1', name: 'Trump', involvement: 'direct', role: 'planning strikes', reason: 'Reports Trump weighing new strikes.', evidence: 'weighing new military options', evidence_ok: true, relevant: true, score: 0.9, platform: 'twitter', posted_at: '2026-10-20 10:00:00+00', author_name: 'x', url: '', views: 5000, text: 'US weighing new military options on Iran' },
+                  { post_uid: 'p2', name: 'Trump', involvement: 'mentioned', role: '', reason: 'tag only', evidence: '', evidence_ok: false, relevant: true, score: 0.2, platform: 'twitter', posted_at: '2026-10-20 10:00:00+00', author_name: 'x', url: '', views: 10, text: 'a post that only tags Trump' }] });
+      }
       if (u.includes('/api/explore/search_trend')) {
         trendCalls.push(u);
         const few = trendMode === 'few';
@@ -141,18 +154,30 @@ await tile('topics');
   const ssel3 = doc.getElementById('ex-ent-sub'); ssel3.value = 'political_leader'; ssel3.dispatchEvent(new win.Event('change')); await wait(500);
   await search('iran war');
   check('with a type chosen the call asks for the people involved (type and subtype)', /entity_type=PERSON/.test(trendCalls.at(-1)) && /entity_subtype=political_leader/.test(trendCalls.at(-1)), trendCalls.at(-1));
+  await wait(500);
   const who = doc.querySelector('.ex-rel-who');
-  check('a "Who is involved" list appears with the type and subtype in its title', !!who && /Who is involved · People · /.test(who.querySelector('.ex-rel-title').textContent), who && who.querySelector('.ex-rel-title').textContent);
-  const names = who ? [...who.querySelectorAll('.ex-rel-name')].map((e) => e.textContent) : [];
-  check('it lists the people, most mentioned first, with a Rising tag for the one that grew', names.join(',') === 'Trump,Putin' && /Rising/.test(who.querySelector('.ex-rel-row').textContent), names.join(','));
-  check('the list says how it is counted (name in the post text, all platforms)', /by name in the post text on every platform/.test(who.textContent));
-  const before = viralCalls.length;
-  who.querySelector('.ex-rel-row').click(); await wait(700);
-  const u2 = decodeURIComponent(viralCalls.at(-1));
-  check('clicking a name loads the posts of the search that name them (the name is added to the words)', viralCalls.length > before && /q=iran war "Trump"/.test(u2) && !/entity_type/.test(u2), u2.slice(0, 140));
-  check('the person\'s posts appear under the name with a button to narrow the whole search', /Ladakh border talks/.test(who.querySelector('.ex-who-posts').textContent) && /Narrow the whole search to posts naming Trump/.test(who.textContent));
-  [...who.querySelectorAll('.ex-who-posts .df-preset-btn')].find((b) => /Narrow/.test(b.textContent)).click(); await wait(800);
+  check('a "Who is involved" group appears with the type and subtype in its title', !!who && /Who is involved · People · /.test(who.querySelector('.ex-rel-title').textContent), who && who.querySelector('.ex-rel-title').textContent);
+  check('the scenario search is asked for the typed words, the days and the type', scnCalls.length === 1 && /scenario=iran%20war/.test(scnCalls[0]) && /entity_type=PERSON/.test(scnCalls[0]) && /entity_subtype=political_leader/.test(scnCalls[0]) && /from=/.test(scnCalls[0]), scnCalls[0]);
+  const scn = who.querySelector('.ex-who-scn');
+  const rowsS = [...scn.querySelectorAll('.ex-rel-row')].map((r) => r.textContent);
+  check('it lists only the people verified as directly involved, with their role and the checked counts', rowsS.length === 2 && /Trump — planning strikes.*18 of 44 checked direct · about 154 of 372 posts/.test(rowsS[0]) && /Central/.test(rowsS[1]), rowsS.join(' | '));
+  check('a person who was named but never direct is not listed as involved, only named as excluded', !rowsS.some((t) => /Putin/.test(t)) && /not involved \(checked, none direct\): Putin/.test(scn.textContent));
+  check('how the list was found is collapsed and states that views play no part', !!scn.querySelector('details.ex-explain') && /Views and engagement play no part/.test(scn.textContent) && !scn.querySelector('details').open);
+  check('the keyword-based names are hidden while the scenario list is shown', who.querySelector('.ex-who-fallback').style.display === 'none');
+  scn.querySelector('.ex-rel-row').click(); await wait(300);
+  const pbx = scn.querySelector('.ex-who-posts').textContent;
+  check('clicking a person shows the verified direct posts with the reason and evidence, not the merely mentioned ones', /Reports Trump weighing new strikes/.test(pbx) && /weighing new military options/.test(pbx) && /US weighing new military options on Iran/.test(pbx) && !/only tags Trump/.test(pbx), pbx.slice(0, 160));
+  [...scn.querySelectorAll('.ex-who-posts .df-preset-btn')].find((b) => /Narrow/.test(b.textContent)).click(); await wait(800);
   check('narrowing puts the name into the search words and returns to the normal panel', /q=iran%20war%20%22Trump%22/.test(trendCalls.at(-1)) && !doc.querySelector('.ex-rel-who'), trendCalls.at(-1));
+  // when the scenario search is down the page says so and shows the name-in-text list
+  scnMode = 'down';
+  { const r1 = [...doc.querySelectorAll('#explore-view .df-preset-btn')].find((b) => b.textContent === 'Reset'); r1.click(); await wait(300); }
+  await tile('topics');
+  { const t3 = doc.getElementById('ex-ent-type'); t3.value = 'PERSON'; t3.dispatchEvent(new win.Event('change')); await wait(400); }
+  await search('iran war'); await wait(500);
+  const who2 = doc.querySelector('.ex-rel-who');
+  check('scenario search down: the page says so and falls back to the names counted in the matching posts', /Scenario search is not available/.test(who2.textContent) && who2.querySelector('.ex-who-fallback').style.display === '' && /Trump/.test(who2.querySelector('.ex-who-fallback').textContent), who2.textContent.slice(0, 160));
+  scnMode = 'ok';
 }
 
 // ---- Show all ----
