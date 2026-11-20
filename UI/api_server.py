@@ -890,7 +890,19 @@ def explore_viral(qs: dict) -> dict:
     def clean(rows):
         return _clean_posts(rows, terms)
 
-    return {"total_posts": int(total), "with_views": clean(with_views), "without_views": clean(no_views), "terms": terms}
+    out = {"total_posts": int(total), "with_views": clean(with_views), "without_views": clean(no_views), "terms": terms}
+    try:
+        nl = max(0, min(int(qs.get("latest", ["0"])[0]), 50))
+    except ValueError:
+        nl = 0
+    if nl:                      # the newest matching posts, whatever their counters (search page: "what was posted last")
+        cur2 = _main_con.cursor()
+        try:
+            out["latest"] = clean(cur2.execute(base + " AND p.posted_at IS NOT NULL ORDER BY p.posted_at DESC, p.post_uid LIMIT ?",
+                                               params_join + params + [nl]).fetchdf().to_dict(orient="records"))
+        finally:
+            cur2.close()
+    return out
 
 
 SEARCH_TREND_MIN = 20     # fewer matching posts in the selected days than this: the page says "too few posts to call a trend"
@@ -900,6 +912,7 @@ def explore_search_trend(qs: dict) -> dict:
     """Explore > a keyword, entity or theme search: how much it is posted per day, against the previous period and against all posts of the same
     days and platforms (so a collector ramp-up does not look like a surge), where it is posted, and which topics and themes the matching posts fall in.
     Read-only. Day rule = posted day, else scraped day (the one the metrics use). Posts are counted with repeats and, separately, as distinct messages."""
+    import numpy as np
     import pandas as pd
     d_from, d_to = qs.get("from", [""])[0], qs.get("to", [""])[0]
     p_from, p_to = qs.get("prev_from", [""])[0], qs.get("prev_to", [""])[0]
@@ -941,24 +954,40 @@ def explore_search_trend(qs: dict) -> dict:
         daily = daily.merge(tot.rename(columns={"n": "total"}), on="d", how="outer").fillna(0).sort_values("d")
         plat = [{"platform": k, "n_cur": int(v), "n_prev": int(((m["platform"] == k) & in_prev).sum())}
                 for k, v in cm.groupby("platform").size().sort_values(ascending=False).items()]
-        topics, themes = [], []
-        if len(cm):
-            cur.register("m_cur", cm[["post_uid"]])
-            topics = [{"topic_id": r[0], "n": int(r[1])} for r in cur.execute(
-                "SELECT pt.topic_id, count(*) FROM analytics.post_topic pt JOIN m_cur ON m_cur.post_uid = pt.post_uid GROUP BY 1 ORDER BY 2 DESC").fetchall()]
+        topics, themes, entities, tags = [], [], [], []
+        mm = m[in_cur | in_prev][["post_uid"]].assign(per=lambda x: "cur")
+        mm["per"] = np.where(in_cur[in_cur | in_prev].to_numpy(), "cur", "prev")
+        if len(mm):
+            cur.register("m_per", mm)
+            topics = [{"topic_id": r[0], "n": int(r[1]), "n_prev": int(r[2])} for r in cur.execute(
+                "SELECT pt.topic_id, count(*) FILTER (WHERE per = 'cur') AS c, count(*) FILTER (WHERE per = 'prev') AS pv "
+                "FROM analytics.post_topic pt JOIN m_per ON m_per.post_uid = pt.post_uid GROUP BY 1 HAVING c > 0 ORDER BY c DESC").fetchall()]
             if POST_THEME.exists():
-                sql = (f"SELECT t.theme, t.tier, count(*) AS n FROM read_parquet('{POST_THEME.as_posix()}') t JOIN m_cur ON m_cur.post_uid = t.post_uid "
-                       "WHERE t.theme <> 'unassigned' GROUP BY 1, 2")
+                sql = (f"SELECT t.theme AS theme, t.tier AS tier, count(*) FILTER (WHERE per = 'cur') AS c, count(*) FILTER (WHERE per = 'prev') AS pv "
+                       f"FROM read_parquet('{POST_THEME.as_posix()}') t JOIN m_per ON m_per.post_uid = t.post_uid WHERE t.theme <> 'unassigned' GROUP BY 1, 2")
                 if POST_THEME_KNN.exists():      # untagged posts that took a theme from their nearest neighbours (disjoint from the rows above)
-                    sql += (f" UNION ALL SELECT k.knn_theme, 'neighbour', count(*) FROM read_parquet('{POST_THEME_KNN.as_posix()}') k "
-                            "JOIN m_cur ON m_cur.post_uid = k.post_uid WHERE k.knn_theme <> 'unassigned' GROUP BY 1")
-                themes = [{"theme": r[0], "tier": r[1], "n": int(r[2])} for r in cur.execute(f"SELECT * FROM ({sql}) ORDER BY n DESC").fetchall()]
-            cur.unregister("m_cur")
+                    sql += (f" UNION ALL SELECT k.knn_theme, 'neighbour', count(*) FILTER (WHERE per = 'cur'), count(*) FILTER (WHERE per = 'prev') "
+                            f"FROM read_parquet('{POST_THEME_KNN.as_posix()}') k JOIN m_per ON m_per.post_uid = k.post_uid WHERE k.knn_theme <> 'unassigned' GROUP BY 1")
+                themes = [{"theme": r[0], "tier": r[1], "n": int(r[2]), "n_prev": int(r[3])} for r in cur.execute(
+                    f"SELECT * FROM ({sql}) WHERE c > 0 ORDER BY c DESC").fetchall()]
+            # people, organisations, places named in the matching posts (production entity extract; some platforms stop earlier, see coverage)
+            entities = [{"entity_uid": r[0], "name": r[1], "type": r[2], "corpus": int(r[3] or 0), "n": int(r[4]), "n_prev": int(r[5])} for r in cur.execute(
+                "SELECT e.entity_uid, any_value(d.canonical_name), any_value(d.entity_type), any_value(d.distinct_posts), "
+                "count(DISTINCT m_per.post_uid) FILTER (WHERE per = 'cur') AS c, count(DISTINCT m_per.post_uid) FILTER (WHERE per = 'prev') AS pv "
+                "FROM geo.entity_mentions e JOIN m_per ON m_per.post_uid = e.post_uid JOIN geo.entity_dim d ON d.entity_uid = e.entity_uid "
+                "WHERE e.entity_uid <> ? GROUP BY e.entity_uid HAVING c >= 5 ORDER BY c DESC LIMIT 12", [ent or ""]).fetchall()]
+            tags = [{"tag": r[0], "n": int(r[1]), "n_prev": int(r[2])} for r in cur.execute(
+                "WITH t AS (SELECT m_per.per AS per, m_per.post_uid AS uid, unnest(list_distinct(regexp_extract_all(lower(coalesce(p.text, '')), '#[\\p{L}\\p{N}_]+'))) AS tag "
+                "FROM m_per JOIN analytics.post_facts p ON p.post_uid = m_per.post_uid) "
+                "SELECT tag, count(*) FILTER (WHERE per = 'cur') AS c, count(*) FILTER (WHERE per = 'prev') AS pv FROM t "
+                "WHERE length(tag) > 2 GROUP BY tag HAVING c >= 5 ORDER BY c DESC LIMIT 12").fetchall()]
+            cur.unregister("m_per")
     finally:
         cur.close()
     return {"q": q, "theme": theme, "entity_uid": ent, "terms": terms, "min_posts": SEARCH_TREND_MIN,
             "n_cur": int(len(cm)), "n_prev": int(in_prev.sum()), "distinct_cur": int(cm["is_first"].sum()),
             "unassigned_cur": int(len(cm)) - int(sum(t["n"] for t in themes)),
+            "entities": entities, "hashtags": tags,
             "daily": [{"day": r.d, "n": int(r.n), "distinct": int(r.distinct), "total": int(r.total)} for r in daily.itertuples()],
             "platforms": plat, "topics": topics, "themes": themes}
 

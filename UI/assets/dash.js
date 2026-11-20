@@ -5882,13 +5882,24 @@
     if (EX.entityUid) { parts.push('naming ' + (EX.entityName || EX.entityUid)); }
     return parts.join(' · ');
   }
+  /* plain-language trend tag of a related item, from its count in the selected days against the same number of days before.
+     Same thresholds as the Stage rule (rise +25%, fall -20%); under 10 posts the tag says there are too few to call it. */
+  function exRelTag(n, prev) {
+    if (n < 10) { return { k: 'few', t: 'Few posts', o: 3 }; }
+    if (prev < 5) { return { k: 'new', t: 'New', o: 0 }; }
+    var r = n / prev;
+    if (r >= EX_RULES.rise) { return { k: 'rising', t: 'Rising', o: 0 }; }
+    if (r <= EX_RULES.fall) { return { k: 'declining', t: 'Declining', o: 2 }; }
+    return { k: 'steady', t: 'Steady', o: 1 };
+  }
   function exSearchTrendView(host) {
     var days = exDays(), prev = exPrevDays(days), plats = PLATFORMS.filter(exPlatOk).join(','), title = exSearchTitle();
-    exExplain(host, 'Trend for ' + title, 'Posts that contain your words (and/or carry the chosen theme) in the selected days, counted per day. "Share of all posts" divides by every post ' +
-      'collected on the same days and platforms, so a day with more collection does not look like more interest. Growth compares the selected days with the same number of days just before ' +
-      '(shown only with at least ' + EX_RULES.growthMinPrev + ' earlier and ' + EX_RULES.growthMinCur + ' current posts; under ' + EX_RULES.stageMinPosts + ' posts the page says there are too few to call a trend). ' +
-      'Stage uses the same rule as the topics list (last 3 days against the 3 before, as share of all posts). The match is on the words in the text, not on what the post is about; ' +
-      '"distinct" counts an exact copy once. Topics are the pipeline’s broad topics, so most posts of a niche subject sit in one or two of them. Counts are collected posts, not audience.');
+    exExplain(host, 'What is trending around ' + title, 'Everything below comes from the posts that match your search in the selected days. The tag on each related item compares its posts in the ' +
+      'selected days with the same number of days just before: Rising = at least +25%, Declining = at least -20%, New = fewer than ' + 5 + ' posts before, Few posts = under 10 now. ' +
+      'The number is how many of the search’s posts mention it. "Share of all posts" in the headline divides by every post collected on the same days and platforms, so more collection does ' +
+      'not look like more interest. Growth is shown only with enough posts (' + EX_RULES.growthMinPrev + ' earlier, ' + EX_RULES.growthMinCur + ' now); under ' + EX_RULES.stageMinPosts + ' matching posts there is no trend call. ' +
+      'The match is on the words in the post text, not on what the post is about. Topics are the pipeline’s broad topics; themes are automatic and provisional; people, organisations and places come ' +
+      'from the production entity extract (some platforms stop earlier); hashtags are read from the post text. Click an item to narrow the search to it.');
     if (EX.theme) { host.appendChild(h('p', { class: 'cs ex-warn', text: exThemeNote() })); }
     var body = h('div', { class: 'ex-search-trend' });
     host.appendChild(body);
@@ -5896,80 +5907,110 @@
       '&platforms=' + encodeURIComponent(plats) + '&q=' + encodeURIComponent(EX.q) + exThemeQs() + '&entity_uid=' + encodeURIComponent(EX.entityUid);
     var key = qs;
     function sumDays(d, list) { var set = exSet(list), n = 0, t = 0; d.daily.forEach(function (r) { if (set[r.day]) { n += r.n; t += r.total; } }); return { n: n, total: t }; }
-    function chip(label, count, onClick, tip) {
-      var b = h('button', { type: 'button', class: 'df-preset-btn ex-chip', text: label + ' · ' + fmtInt(count), title: tip || '' });
-      b.addEventListener('click', onClick); return b;
+    function pct(v) { return v == null ? '—' : (v >= 0 ? '+' : '') + Math.round(v * 100) + '%'; }
+    function chg(n, pv) { return pv >= 5 ? ' (' + pct((n - pv) / pv) + ')' : ''; }
+    /* one row: tag, name, count; clicking narrows the search */
+    function relRow(host2, tag, label, n, pv, tip, onClick) {
+      var b = h('button', { type: 'button', class: 'ex-rel-row', title: tip || '' }, [
+        h('span', { class: 'ex-rel-tag ex-rel-' + tag.k, text: tag.t }),
+        h('span', { class: 'ex-rel-name', text: label }),
+        h('span', { class: 'ex-rel-n', text: fmtInt(n) + ' posts' + chg(n, pv) })]);
+      b.addEventListener('click', onClick);
+      host2.appendChild(b);
+    }
+    function relGroup(titleText, note, rows, empty2) {
+      var g = h('div', { class: 'ex-rel-group' }, [h('div', { class: 'ex-rel-title', text: titleText })]);
+      rows.sort(function (a, b) { return a.tag.o - b.tag.o || b.n - a.n; });
+      rows.slice(0, 8).forEach(function (r) { relRow(g, r.tag, r.label, r.n, r.pv, r.tip, r.go); });
+      if (!rows.length) { g.appendChild(h('div', { class: 'cs', text: empty2 })); }
+      else if (note) { g.appendChild(h('div', { class: 'cs', text: note })); }
+      return g;
     }
     function paint(d) {
       body.textContent = '';
       if (!d.n_cur) { empty(body, 'No posts match in the selected days and platforms.'); return; }
       var c = sumDays(d, days), p = sumDays(d, prev);
       var enough = d.n_cur >= d.min_posts;
-      var share = c.total ? d.n_cur / c.total * 1000 : null;
-      body.appendChild(h('p', { class: 'cs', text: fmtInt(d.n_cur) + ' posts in the selected ' + days.length + ' days (' + fmtInt(d.distinct_cur) + ' distinct messages); ' +
-        fmtInt(d.n_prev) + ' in the ' + prev.length + ' days before' + (share != null ? '; ' + share.toFixed(share < 10 ? 1 : 0) + ' per 1,000 collected posts.' : '.') }));
-      if (!enough) {
-        body.appendChild(h('p', { class: 'cs ex-warn', text: 'Too few posts (' + d.n_cur + ', need ' + d.min_posts + ') to call a trend: growth and stage are not shown.' }));
-      } else {
+      // ---- headline: the answer in one sentence
+      var share = c.total ? d.n_cur / c.total * 1000 : null, stageTxt = '', gTxt = '';
+      if (enough) {
         var okG = d.n_prev >= EX_RULES.growthMinPrev && d.n_cur >= EX_RULES.growthMinCur;
-        var g = okG ? (d.n_cur - d.n_prev) / d.n_prev : null;
-        var gs = (okG && p.total && c.total && p.n) ? (d.n_cur / c.total) / (p.n / p.total) - 1 : null;
-        function pct(v) { return v == null ? '—' : (v >= 0 ? '+' : '') + Math.round(v * 100) + '%'; }
         var dm = {}; d.daily.forEach(function (r) { dm[r.day] = { V: r.n, eff: r.total / 1000 }; });
         var sd = exStageDetail(dm, days, d.n_prev);
-        body.appendChild(h('p', { class: 'cs', text: 'Growth in posts ' + pct(g) + ' · growth in share of all posts ' + pct(gs) + ' · stage: ' + sd.stage +
-          (sd.change != null ? ' (last 3 days ' + pct(sd.change) + ' vs the 3 before, per collected post)' : '') + '.' }));
+        var gs = (okG && p.total && c.total && p.n) ? (d.n_cur / c.total) / (p.n / p.total) - 1 : null;
+        stageTxt = sd.stage === 'too little data' ? 'not enough recent days to call a stage' : sd.stage;
+        gTxt = okG ? ', ' + pct((d.n_cur - d.n_prev) / d.n_prev) + ' on the ' + prev.length + ' days before' + (gs != null ? ' (' + pct(gs) + ' as a share of all posts)' : '') : '';
       }
+      var top2 = d.platforms.slice(0, 2).map(function (r) { return r.platform; }).join(' and ');
+      var head = h('div', { class: 'ex-rel-head' });
+      head.appendChild(h('div', { class: 'ex-rel-big', text: title + (enough ? ': ' + stageTxt : ': too few posts to call a trend') }));
+      head.appendChild(h('p', { class: 'cs', text: fmtInt(d.n_cur) + ' posts in the selected ' + days.length + ' days (' + fmtInt(d.distinct_cur) + ' distinct messages)' + gTxt +
+        (top2 ? ', mostly on ' + top2 : '') + (share != null ? '; ' + share.toFixed(share < 10 ? 1 : 0) + ' per 1,000 collected posts.' : '.') }));
+      body.appendChild(head);
       var plot = h('div', { class: 'ex-st-plot' });
       body.appendChild(plot);
-      var set = exSet(days), byDay = {}; d.daily.forEach(function (r) { byDay[r.day] = r.n; });
+      var byDay = {}; d.daily.forEach(function (r) { byDay[r.day] = r.n; });
       lineChart(plot, { days: days, series: [{ label: 'Posts per day', role: 'focal', kind: 'bar', pts: days.map(function (x, i) { return { i: i, v: byDay[x] || 0 }; }) }],
-        width: Math.max(280, plot.clientWidth || host.clientWidth || 520), height: 130, zeroBase: true, yFmt: fmtCompact, tipFmt: fmtInt, tipHead: 'Posts per day', yTicks: 3,
+        width: Math.max(280, plot.clientWidth || host.clientWidth || 520), height: 120, zeroBase: true, yFmt: fmtCompact, tipFmt: fmtInt, tipHead: 'Posts per day', yTicks: 3,
         xTicks: Math.min(5, days.length), margin: { t: 8, r: 10, b: 22, l: 36 } });
-      // where
+      // where it is posted
       var wr = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'WHERE' })]);
-      d.platforms.forEach(function (r) {
-        var ch = r.n_prev >= 5 ? ' (' + (r.n_cur >= r.n_prev ? '+' : '') + Math.round((r.n_cur - r.n_prev) / r.n_prev * 100) + '% vs before)' : '';
-        wr.appendChild(h('span', { class: 'ex-rt-tag', text: r.platform + ' · ' + fmtInt(r.n_cur) + ch }));
-      });
+      d.platforms.forEach(function (r) { wr.appendChild(h('span', { class: 'ex-rt-tag', text: r.platform + ' · ' + fmtInt(r.n_cur) + chg(r.n_cur, r.n_prev) })); });
       body.appendChild(wr);
-      // topics
+      // ---- related trending: topics, themes, people / organisations / places, hashtags
+      body.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Related trending' }));
+      var words = (d.terms || []).map(function (w) { return String(w).toLowerCase(); });
+      var whole = {}; exTopicRows().forEach(function (r) { whole[r.topic_id] = r; });
       var tmap = {};
-      d.topics.forEach(function (r) { var t = exTid(r.topic_id); tmap[t] = (tmap[t] || 0) + r.n; });
-      var tr = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'TOPICS' })]);
-      var tids = Object.keys(tmap).sort(function (a, b) { return tmap[b] - tmap[a]; });
-      tids.slice(0, 6).forEach(function (t) {
-        tr.appendChild(chip(topicLabel(t), tmap[t], function () { EX.topicId = t; EX.topicName = topicLabel(t); EX.tile = 'viral'; EX.viral = null; render(); },
-          Math.round(tmap[t] / d.n_cur * 100) + '% of these posts. Click to see them in Viral Posts, limited to this topic.'));
+      d.topics.forEach(function (r) { var t = exTid(r.topic_id), o = tmap[t] || (tmap[t] = { n: 0, pv: 0 }); o.n += r.n; o.pv += r.n_prev; });
+      var topicRows = Object.keys(tmap).map(function (t) {
+        var w = whole[t];
+        return { tag: exRelTag(tmap[t].n, tmap[t].pv), label: topicLabel(t), n: tmap[t].n, pv: tmap[t].pv,
+          tip: Math.round(tmap[t].n / d.n_cur * 100) + '% of these posts' + (w ? '. The whole topic is: ' + w.stage + (w.emergence != null ? ', emergence ' + Number(w.emergence).toFixed(2) : '') : '') + '. Click to open its posts.',
+          go: function () { EX.topicId = t; EX.topicName = topicLabel(t); EX.tile = 'viral'; EX.viral = null; render(); } };
       });
-      if (!tids.length) { tr.appendChild(h('span', { class: 'cs', text: 'none of these posts is assigned to a topic' })); }
-      body.appendChild(tr);
-      // themes
       var thm = {};
-      d.themes.forEach(function (r) { var o = thm[r.theme] || (thm[r.theme] = { high: 0, medium: 0, neighbour: 0 }); o[r.tier] += r.n; });
-      var hr = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'THEMES' })]);
-      Object.keys(thm).sort(function (a, b) { return (thm[b].high + thm[b].neighbour + thm[b].medium) - (thm[a].high + thm[a].neighbour + thm[a].medium); }).forEach(function (k) {
-        var o = thm[k];
-        hr.appendChild(chip(exThemeName(k), o.high + o.neighbour + (EX.themeAll ? o.medium : 0), function () { EX.theme = k; EX.viral = null; EX.st = null; render(); },
-          o.high + ' clear keyword match(es), ' + o.neighbour + ' via nearest neighbours, ' + o.medium + ' lower-confidence. Automatic and provisional. Click to filter by this theme.'));
+      d.themes.forEach(function (r) { var o = thm[r.theme] || (thm[r.theme] = { n: 0, pv: 0, med: 0 }); if (r.tier === 'medium') { o.med += r.n; if (EX.themeAll) { o.n += r.n; o.pv += r.n_prev; } } else { o.n += r.n; o.pv += r.n_prev; } });
+      var themeRows = Object.keys(thm).filter(function (k) { return thm[k].n > 0; }).map(function (k) {
+        return { tag: exRelTag(thm[k].n, thm[k].pv), label: exThemeName(k), n: thm[k].n, pv: thm[k].pv,
+          tip: 'Automatic and provisional (about 75% right for the clear matches). Click to filter by this theme.',
+          go: function () { EX.theme = k; EX.viral = null; EX.st = null; render(); } };
       });
-      hr.appendChild(h('span', { class: 'cs', text: fmtInt(d.unassigned_cur) + ' of these posts have no theme (most posts are not security posts or have no clear cue).' }));
-      body.appendChild(hr);
-      // posts
-      body.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Top posts for this search' }));
-      var pbox = h('div', { class: 'ex-col' }, [h('div', { class: 'empty', text: 'Loading…' })]);
+      var entRows = d.entities.filter(function (r) { return words.indexOf(String(r.name).toLowerCase()) < 0; }).map(function (r) {
+        return { tag: exRelTag(r.n, r.n_prev), label: r.name + ' · ' + String(r.type).toLowerCase(), n: r.n, pv: r.n_prev,
+          tip: 'Mentioned in ' + Math.round(r.n / d.n_cur * 100) + '% of these posts, and in ' + fmtInt(r.corpus) + ' posts overall. Click to narrow the search to posts naming it.',
+          go: function () { EX.entityUid = r.entity_uid; EX.entityName = r.name; EX.viral = null; EX.st = null; render(); } };
+      });
+      var tagRows = d.hashtags.filter(function (r) { return words.indexOf(r.tag.slice(1)) < 0; }).map(function (r) {
+        return { tag: exRelTag(r.n, r.n_prev), label: r.tag, n: r.n, pv: r.n_prev, tip: 'Used in ' + Math.round(r.n / d.n_cur * 100) + '% of these posts. Click to search this hashtag instead.',
+          go: function () { EX.q = r.tag.slice(1); EX.topicId = ''; EX.entityUid = ''; EX.entityName = ''; EX.viral = null; EX.st = null; render(); } };
+      });
+      var grid = h('div', { class: 'ex-rel-grid' });
+      grid.appendChild(relGroup('Topics', 'Broad topics: most posts of a niche subject sit in one or two of them.', topicRows, 'No topic assigned to these posts.'));
+      grid.appendChild(relGroup('Security themes', fmtInt(d.unassigned_cur) + ' of these posts have no theme. Automatic and provisional.', themeRows, 'No theme assigned to these posts.'));
+      grid.appendChild(relGroup('People, organisations and places', 'From the production entity extract; some platforms stop earlier.', entRows, 'No entity is named in at least 5 of these posts.'));
+      grid.appendChild(relGroup('Hashtags', '', tagRows, 'No hashtag appears in at least 5 of these posts.'));
+      body.appendChild(grid);
+      // ---- the posts behind it
+      body.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Posts behind it' }));
+      var pbox = h('div', { class: 'ex-cols' }, [h('div', { class: 'empty', text: 'Loading…' })]);
       body.appendChild(pbox);
       var more = h('button', { type: 'button', class: 'df-preset-btn', text: 'Open all in Viral Posts' });
       more.addEventListener('click', function () { EX.tile = 'viral'; EX.viral = null; render(); });
-      var url = '/api/explore/viral?limit=6' + qs.replace(/&prev_from=[^&]*&prev_to=[^&]*/, '');
+      var url = '/api/explore/viral?limit=6&latest=4' + qs.replace(/&prev_from=[^&]*&prev_to=[^&]*/, '');
       fetch(url, { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (v) {
         if (v.error) { throw new Error(v.error); }
         pbox.textContent = '';
         EX.terms = v.terms || [];
-        v.with_views.forEach(function (x) { pbox.appendChild(exPostCard(x, true)); });
-        v.without_views.slice(0, v.with_views.length ? 2 : 6).forEach(function (x) { pbox.appendChild(exPostCard(x, false)); });
-        if (!v.with_views.length && !v.without_views.length) { empty(pbox, 'No posts with a view or engagement counter match.'); }
-        pbox.appendChild(more);
+        var a = h('div', { class: 'ex-col' }, [h('div', { class: 'ct', text: 'Most viewed' })]);
+        v.with_views.forEach(function (x) { a.appendChild(exPostCard(x, true)); });
+        v.without_views.slice(0, v.with_views.length ? 2 : 6).forEach(function (x) { a.appendChild(exPostCard(x, false)); });
+        if (!v.with_views.length && !v.without_views.length) { empty(a, 'No posts with a view or engagement counter match.'); }
+        var b = h('div', { class: 'ex-col' }, [h('div', { class: 'ct', text: 'Latest' })]);
+        (v.latest || []).forEach(function (x) { b.appendChild(exPostCard(x, !!x.views)); });
+        if (!(v.latest || []).length) { empty(b, 'None.'); }
+        pbox.appendChild(a); pbox.appendChild(b);
+        body.appendChild(more);
       }).catch(function (err) { pbox.textContent = ''; empty(pbox, 'Could not load posts: ' + err.message); });
     }
     if (EX.st && EX.stKey === key) { paint(EX.st); return; }

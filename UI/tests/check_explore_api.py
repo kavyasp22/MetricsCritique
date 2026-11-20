@@ -250,6 +250,22 @@ def main() -> int:
         except (ValueError, a.KQ.KeywordError):
             chk(f"search trend refuses {label}", True)
 
+    # ---------------- related trending (entities, hashtags, previous-period counts, latest posts)
+    t3 = a.explore_search_trend(q(q="ladakh", **pf))
+    chk("related: topic counts split by period never exceed the matches of each period",
+        sum(r["n"] for r in t3["topics"]) <= t3["n_cur"] and sum(r["n_prev"] for r in t3["topics"]) <= t3["n_prev"])
+    chk("related: entities carry a name, a type and a count of at least 5, none above the matches",
+        t3["entities"] and all(e["name"] and e["type"] and 5 <= e["n"] <= t3["n_cur"] and e["n_prev"] <= t3["n_prev"] for e in t3["entities"]), len(t3["entities"]))
+    chk("related: hashtags start with # and are counted once per post", t3["hashtags"] and all(h["tag"].startswith("#") and 5 <= h["n"] <= t3["n_cur"] for h in t3["hashtags"]), [h["tag"] for h in t3["hashtags"][:3]])
+    chk("related: theme rows carry the previous-period count", all("n_prev" in r for r in t3["themes"]))
+    ent_uid = t3["entities"][0]["entity_uid"]
+    t4 = a.explore_search_trend(q(q="ladakh", entity_uid=ent_uid, **pf))
+    chk("related: narrowing to an entity keeps only posts naming it and does not list it back", t4["n_cur"] <= t3["n_cur"] and ent_uid not in {e["entity_uid"] for e in t4["entities"]}, (t3["n_cur"], t4["n_cur"]))
+    vl = a.explore_viral(q(q="ladakh", limit=2, latest=4, **w))
+    days_l = [str(p["posted_at"])[:19] for p in vl["latest"]]
+    chk("latest: the newest matching posts, newest first, at most the number asked", 0 < len(vl["latest"]) <= 4 and days_l == sorted(days_l, reverse=True), days_l)
+    chk("latest: absent when not asked for", "latest" not in a.explore_viral(q(q="ladakh", limit=2, **w)))
+
     n_ok = sum(RESULTS)
     print(f"\n  {n_ok}/{len(RESULTS)} checks passed")
     return 0 if n_ok == len(RESULTS) else 1

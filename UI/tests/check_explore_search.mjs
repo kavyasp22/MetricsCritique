@@ -28,12 +28,17 @@ const dom = new JSDOM(html, {
         return J({ q: 'ladakh', theme: '', entity_uid: '', terms: ['ladakh'], min_posts: 20, n_cur: few ? 7 : 120, n_prev: few ? 3 : 60, distinct_cur: few ? 7 : 118,
           unassigned_cur: 70, daily: days('2026-09-01', 80).map((d) => ({ day: d, n: few ? 0 : 5, distinct: few ? 0 : 5, total: 3000 })),
           platforms: [{ platform: 'twitter', n_cur: 60, n_prev: 10 }, { platform: 'telegram', n_cur: 60, n_prev: 50 }],
-          topics: [{ topic_id: 't004', n: 40 }, { topic_id: 't005', n: 10 }, { topic_id: 't007', n: 70 }],
-          themes: [{ theme: 'D06', tier: 'high', n: 30 }, { theme: 'D06', tier: 'neighbour', n: 4 }, { theme: 'D06', tier: 'medium', n: 5 }, { theme: 'D05', tier: 'high', n: 8 }] });
+          topics: [{ topic_id: 't004', n: 40, n_prev: 10 }, { topic_id: 't005', n: 10, n_prev: 5 }, { topic_id: 't007', n: 70, n_prev: 70 }],
+          themes: [{ theme: 'D06', tier: 'high', n: 30, n_prev: 10 }, { theme: 'D06', tier: 'neighbour', n: 4, n_prev: 0 }, { theme: 'D06', tier: 'medium', n: 5, n_prev: 1 }, { theme: 'D05', tier: 'high', n: 8, n_prev: 8 }],
+          entities: [{ entity_uid: 'location:ladakh', name: 'Ladakh', type: 'LOCATION', corpus: 290, n: 100, n_prev: 40 },
+                     { entity_uid: 'location:china', name: 'China', type: 'LOCATION', corpus: 17000, n: 30, n_prev: 5 },
+                     { entity_uid: 'org:indianarmy', name: 'Indianarmy', type: 'ORG', corpus: 900, n: 12, n_prev: 12 }],
+          hashtags: [{ tag: '#ladakh', n: 37, n_prev: 12 }, { tag: '#indiachina', n: 19, n_prev: 3 }, { tag: '#lac', n: 14, n_prev: 30 }] });
       }
       if (u.includes('/api/explore/viral')) {
         viralCalls.push(u);
-        return J({ total_posts: 1, terms: ['ladakh'], with_views: [{ post_uid: 'a', platform: 'twitter', posted_at: '2026-10-20 10:00:00+00', author_name: 'x', text: 'Ladakh border talks', url: '', views: 5000, likes: 1, comments: 0, shares: 0, engagement: 1, is_retweet: false }], without_views: [] });
+        return J({ total_posts: 1, terms: ['ladakh'], with_views: [{ post_uid: 'a', platform: 'twitter', posted_at: '2026-10-20 10:00:00+00', author_name: 'x', text: 'Ladakh border talks', url: '', views: 5000, likes: 1, comments: 0, shares: 0, engagement: 1, is_retweet: false }], without_views: [],
+          latest: [{ post_uid: 'z', platform: 'snapchat', posted_at: '2026-10-26 09:00:00+00', author_name: 'y', text: 'Newest ladakh clip', url: '', views: null, likes: 0, comments: 0, shares: 0, engagement: 0, is_retweet: false }] });
       }
       return J(u.includes('metrics.json') ? base : {});
     };
@@ -67,24 +72,32 @@ check('the lower-confidence switch is hidden until a theme is chosen', !doc.getE
 // ---- keyword search on Trending Topics ----
 await search('ladakh');
 const st = doc.querySelector('.ex-search-trend');
-check('a keyword on Trending Topics shows the trend panel, not an empty topic list', !!st, view().textContent.slice(0, 80));
+check('a keyword on Trending Topics shows the search panel, not an empty topic list', !!st, view().textContent.slice(0, 80));
 check('the call carries the keyword, both periods and no theme', trendCalls.length > 0 && /q=ladakh/.test(trendCalls.at(-1)) && /prev_from=\d{4}/.test(trendCalls.at(-1)) && !/theme=/.test(trendCalls.at(-1)), trendCalls.at(-1));
 const txt = st.textContent;
-check('counts are shown: posts in range, distinct messages, previous period', /120 posts/.test(txt) && /118 distinct/.test(txt) && /60 in the/.test(txt), txt.slice(0, 160));
-check('growth and stage are shown with enough posts', /Growth in posts \+100%/.test(txt) && /stage: /.test(txt), (txt.match(/Growth[^.]*\./) || [''])[0]);
+check('the headline answers in words: "ladakh" with its counts, distinct messages and the main platforms', /“ladakh”: /.test(txt) && /120 posts/.test(txt) && /118 distinct/.test(txt) && /mostly on twitter and telegram/.test(txt), txt.slice(0, 220));
 check('a bar chart of posts per day is drawn', !!st.querySelector('.ex-st-plot svg'));
-check('platforms are listed with the change against the previous period', /twitter · 60 \(\+500% vs before\)/.test(txt) && /telegram · 60/.test(txt));
-const chips = [...st.querySelectorAll('.ex-chip')].map((c) => c.textContent);
-check('the two neighbourhood topics are merged into one chip (50)', chips.some((c) => /Neighbourhood/.test(c) && /· 50$/.test(c)), chips.join(' | '));
-check('theme chips count clear matches and neighbour votes, not the lower-confidence tier (D06 = 30 + 4)', chips.some((c) => /^D06 · .* · 34$/.test(c)), chips.join(' | '));
-check('posts without a theme are counted and explained', /70 of these posts have no theme/.test(txt));
-check('top posts for the search are listed', st.querySelectorAll('.ex-post, .ex-post-card, .ex-row').length > 0 && /Ladakh border talks/.test(txt));
-check('the posts call carries the same keyword', viralCalls.some((u) => /q=ladakh/.test(u)));
+check('platforms are listed with the change against the previous period', /twitter · 60 \(\+500%\)/.test(txt) && /telegram · 60/.test(txt));
+const titles = [...st.querySelectorAll('.ex-rel-title')].map((e) => e.textContent);
+check('Related trending has four groups: topics, themes, people/organisations/places, hashtags', titles.join('|') === 'Topics|Security themes|People, organisations and places|Hashtags', titles.join('|'));
+const rows = (g) => [...st.querySelectorAll('.ex-rel-group')][g].querySelectorAll('.ex-rel-row');
+const rowTxt = (g) => [...rows(g)].map((r) => r.textContent);
+check('the two neighbourhood topics are merged into one row of 50 posts, with a Rising tag', rowTxt(0).some((t) => /Neighbourhood/.test(t) && /50 posts/.test(t) && /^Rising/.test(t)), rowTxt(0).join(' | '));
+check('a topic that did not change reads Steady', rowTxt(0).some((t) => /^Steady.*China/.test(t)), rowTxt(0).join(' | '));
+check('theme rows count clear matches and neighbour votes (D06 = 34 posts), not the lower-confidence tier', rowTxt(1).some((t) => /D06/.test(t) && /34 posts/.test(t)), rowTxt(1).join(' | '));
+check('the searched word is not listed back as an entity, a related place is', !rowTxt(2).some((t) => /Ladakh/.test(t)) && rowTxt(2).some((t) => /China/.test(t) && /^Rising/.test(t)), rowTxt(2).join(' | '));
+check('an unchanged entity reads Steady and a falling hashtag reads Declining', rowTxt(2).some((t) => /^Steady.*Indianarmy/.test(t)) && rowTxt(3).some((t) => /^Declining.*#lac/.test(t)), rowTxt(3).join(' | '));
+check('the searched hashtag is not listed back; a related one is', !rowTxt(3).some((t) => /#ladakh/.test(t)) && rowTxt(3).some((t) => /#indiachina/.test(t)), rowTxt(3).join(' | '));
+check('rising items come before declining ones', rowTxt(3)[0].startsWith('New') || rowTxt(3)[0].startsWith('Rising'), rowTxt(3)[0]);
+check('no raw metric names are on the page (emergence, surprise, q-value)', !/emergence|surprise|q-value/i.test(txt.replace(/What is trending around[\s\S]*?narrow the search to it\./, '')));
+const cols = [...st.querySelectorAll('.ex-cols .ex-col')].map((c) => c.textContent);
+check('"Posts behind it" shows the most viewed and the latest posts', cols.length === 2 && /Ladakh border talks/.test(cols[0]) && /Newest ladakh clip/.test(cols[1]), cols.join(' || ').slice(0, 120));
+check('the posts call carries the same keyword and asks for the latest posts', viralCalls.some((u) => /q=ladakh/.test(u) && /latest=4/.test(u)));
 
 // ---- chips act as filters ----
-const d06 = [...st.querySelectorAll('.ex-chip')].find((c) => /^D06/.test(c.textContent));
+const d06 = [...st.querySelectorAll('.ex-rel-row')].find((c) => /D06/.test(c.textContent));
 d06.click(); await wait(900);
-check('clicking a theme chip filters the search by that theme (clear matches only)', /theme=D06/.test(trendCalls.at(-1)) && !/theme_all/.test(trendCalls.at(-1)), trendCalls.at(-1));
+check('clicking a theme row filters the search by that theme (clear matches only)', /theme=D06/.test(trendCalls.at(-1)) && !/theme_all/.test(trendCalls.at(-1)), trendCalls.at(-1));
 check('the page warns that the theme is provisional and gives the precision', /provisional/.test(view().textContent) && /75% right/.test(view().textContent));
 const all = doc.getElementById('ex-theme-all');
 check('the lower-confidence switch appears once a theme is chosen', !!all);
@@ -104,8 +117,8 @@ check('Reset clears the theme', doc.getElementById('ex-theme').value === '');
 await tile('topics');
 await search('rareword');
 const st2 = doc.querySelector('.ex-search-trend');
-check('under 20 posts the page says there are too few to call a trend', /Too few posts \(7, need 20\)/.test(st2.textContent), st2.textContent.slice(0, 140));
-check('...and shows no growth or stage', !/Growth in posts/.test(st2.textContent) && !/stage: /.test(st2.textContent));
+check('under 20 posts the page says there are too few to call a trend', /too few posts to call a trend/.test(st2.textContent), st2.textContent.slice(0, 140));
+check('...and gives no growth or stage', !/on the \d+ days before/.test(st2.textContent) && !/: (rising|peak|steady|declining|starting)/.test(st2.textContent));
 
 // ---- Show all ----
 await tile('viral');
