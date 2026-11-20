@@ -5904,30 +5904,42 @@
     function paint(r) {
       status.textContent = '';
       box.textContent = '';
-      var st = r.stats;
+      var st = r.stats, g = r.grounding || {};
       var det = h('details', { class: 'ex-explain' });
       det.appendChild(h('summary', null, [h('b', { text: 'How this list was found' }), h('span', { class: 'ex-explain-hint', text: ' — click to see explanation' })]));
-      det.appendChild(h('p', { class: 'cs', text: 'Scenario understood as: ' + r.brief.summary + ' ' + (r.brief.actors && r.brief.actors.length ? 'Main actors seen: ' + r.brief.actors.slice(0, 10).join(', ') + '. ' : '') +
-        'Posts were ranked by meaning against ' + r.brief.anchors_used + ' descriptions of the scenario (not by its words); ' + fmtInt(st.naming_a_person) + ' of the ' + fmtInt(st.semantic_candidates) +
-        ' closest posts name a known person of this kind; ' + st.verified_ok + ' of them (the best few for each person) were checked by Gemma, ' + st.relevant + ' were about the scenario. ' +
-        'Direct = the post is about what that person does, decides, says or threatens in the scenario. "About N posts" applies the share of direct posts among the checked ones to all the scenario posts that name them, so it is an estimate. ' +
-        'Views and engagement play no part. Names are matched with spelling variants merged; a person called only by a title (“the president”) is not found.' }));
+      var devs = (g.developments || []).map(function (x) { return x.title + (x.time ? ' (' + x.time + ')' : '') + ' — ' + (x.post_ids || []).length + ' supporting posts'; });
+      det.appendChild(h('p', { class: 'cs', text: 'The event was read from ' + fmtInt(g.sample_size || 0) + ' real posts of this data, chosen to differ in platform, day and meaning (not the top posts, not keyword hits), in ' +
+        ((g.rounds || []).length || 1) + ' round(s): ' + (g.event_summary || '') + (devs.length ? ' Developments seen: ' + devs.join('; ') + '.' : '') +
+        (g.contradictions && g.contradictions.length ? ' Where the posts disagree: ' + g.contradictions.join(' ') : '') }));
+      det.appendChild(h('p', { class: 'cs', text: 'Posts were then ranked by meaning against that event (not by the typed words); ' + fmtInt(st.naming_a_person) + ' of the ' + fmtInt(st.semantic_candidates) +
+        ' closest posts name a known person of this kind; the best few for each person (' + st.verified_ok + ' posts) were checked by Gemma against the event, ' + st.relevant + ' were about it. ' +
+        'Direct = the post says what that person did, plans, decided, ordered, threatened or said about the event. Indirect = connected through someone or something else (their government, a subordinate, a response or negotiation). ' +
+        'Both need a phrase from the post as evidence; a name that is only a tag or a list entry is not involvement. People are ordered by how many of their 5 best posts show involvement; ' +
+        'mention counts, views and engagement play no part. A person called only by a title is found only when the event posts show who the title means.' }));
       box.appendChild(det);
-      var involved = r.people.filter(function (o) { return o.direct > 0; }), other = r.people.filter(function (o) { return o.direct === 0; });
+      if (g.assessment && g.assessment !== 'clear') {
+        box.appendChild(h('p', { class: 'cs ex-warn', text: g.assessment === 'multiple_developments'
+          ? 'The posts show several developments, not one story (see the explanation above); posts are judged against any of them.'
+          : 'The posts do not establish a single clear event (' + g.assessment + '): treat this list with caution. ' + (g.needs_more_reason || '') }));
+      }
+      var inv = function (o) { return o.direct + o.indirect; };
+      var involved = r.people.filter(function (o) { return inv(o) > 0; }), other = r.people.filter(function (o) { return inv(o) === 0; });
       involved.forEach(function (o) {
         var wrap = h('div', { class: 'ex-who-item' });
-        var b = h('button', { type: 'button', class: 'ex-rel-row', title: 'Click to see the posts about their part in it.' }, [
-          h('span', { class: 'ex-rel-tag ex-rel-' + (o.involvement >= 0.6 ? 'rising' : 'steady'), text: o.involvement >= 0.6 ? 'Central' : 'Involved' }),
+        var b = h('button', { type: 'button', class: 'ex-rel-row', title: 'Click to see the posts that show their part in it.' }, [
+          h('span', { class: 'ex-rel-tag ex-rel-' + (o.direct > 0 ? 'rising' : 'steady'), text: o.direct > 0 ? 'Direct' : 'Indirect' }),
           h('span', { class: 'ex-rel-name', text: o.name + (o.top_role ? ' — ' + o.top_role : '') }),
-          h('span', { class: 'ex-rel-n', text: o.direct + ' of ' + o.checked + ' checked direct · about ' + fmtInt(o.est_direct_posts) + ' of ' + fmtInt(o.candidates) + ' posts' })]);
+          h('span', { class: 'ex-rel-n', text: o.direct + ' direct · ' + o.indirect + ' indirect of ' + o.checked + ' checked' })]);
         var open = false, pbox = null;
         b.addEventListener('click', function () {
           if (open) { pbox.remove(); open = false; return; }
           open = true; pbox = h('div', { class: 'ex-who-posts' }); wrap.appendChild(pbox);
-          r.posts.filter(function (x) { return x.name === o.name && x.involvement === 'direct'; }).sort(function (x, y) { return y.score - x.score; }).slice(0, 5).forEach(function (x) {
-            pbox.appendChild(h('div', { class: 'cs ex-who-why', text: (x.role ? x.role + '. ' : '') + (x.reason || '') + (x.evidence_ok ? ' “' + x.evidence + '”' : '') }));
-            pbox.appendChild(exPostCard(x, !!x.views));
-          });
+          r.posts.filter(function (x) { return x.name === o.name && (x.involvement === 'direct' || x.involvement === 'indirect'); })
+            .sort(function (x, y) { return (y.involvement === 'direct') - (x.involvement === 'direct') || y.score - x.score; }).slice(0, 5).forEach(function (x) {
+              pbox.appendChild(h('div', { class: 'cs ex-who-why', text: (x.involvement === 'direct' ? 'Direct' : 'Indirect') + (x.role ? ' — ' + x.role : '') + '. ' + (x.reason || '') + (x.evidence_ok ? ' “' + x.evidence + '”' : '') +
+                (x.via_title ? ' (found through the title “' + x.via_title + '”)' : '') }));
+              pbox.appendChild(exPostCard(x, !!x.views));
+            });
           var nb = h('button', { type: 'button', class: 'df-preset-btn', text: 'Narrow the keyword search to posts naming ' + o.name });
           nb.addEventListener('click', function () { EX.q = (EX.q ? EX.q + ' ' : '') + '"' + o.name + '"'; EX.entType = ''; EX.entSub = ''; EX.topicId = ''; EX.viral = null; EX.st = null; render(); });
           pbox.appendChild(nb);
@@ -5935,9 +5947,9 @@
         wrap.insertBefore(b, wrap.firstChild);
         box.appendChild(wrap);
       });
-      if (!involved.length) { box.appendChild(h('div', { class: 'cs', text: 'No one of this kind was found directly involved in the checked posts.' })); }
+      if (!involved.length) { box.appendChild(h('div', { class: 'cs', text: 'No one of this kind was shown to be involved in the checked posts.' })); }
       if (other.length) {
-        box.appendChild(h('div', { class: 'cs', text: 'Named in scenario posts but not involved (checked, none direct): ' + other.slice(0, 12).map(function (o) { return o.name; }).join(', ') + '.' }));
+        box.appendChild(h('div', { class: 'cs', text: 'Named in event posts but not shown to be involved (checked): ' + other.slice(0, 12).map(function (o) { return o.name; }).join(', ') + '.' }));
       }
       box.appendChild(h('div', { class: 'cs', text: 'Checked ' + st.verified_ok + ' posts with Gemma in ' + r.total_s + ' s' + (r.cached ? ' (saved result)' : '') + '. Relevance and involvement come from the post’s meaning, not from keywords.' }));
     }

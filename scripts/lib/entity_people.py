@@ -17,7 +17,7 @@ _FIRST_NAMES = {"donald", "joe", "benjamin", "narendra", "rahul", "hillary", "ba
                 "justin", "keir", "scott", "pete", "marco", "mark", "sergey", "recep", "ali", "mohammed", "mohammad", "ahmed", "abdul", "imran", "shehbaz"}
 _DEMONYM = re.compile(r"(ian|ish|ese|eli|ians|ans)$", re.I)
 NICKNAMES = {"bibi": "benjamin netanyahu", "mbs": "mohammed bin salman"}
-_JUNK = {"https", "http", "www", "rt", "potus", "rep", "mps", "pm", "prime", "of state", "state", "foreign", "defense", "defence", "home", "representative", "deputy", "vice", "national"}
+_JUNK = {"sec", "mr", "mrs", "dr", "gen", "col", "lt", "sir", "madam", "hon", "amb", "gov", "sen", "https", "http", "www", "rt", "potus", "rep", "mps", "pm", "prime", "of state", "state", "foreign", "defense", "defence", "home", "representative", "deputy", "vice", "national"}
 
 
 def clean_candidates(cand):

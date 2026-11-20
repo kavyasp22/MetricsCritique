@@ -27,13 +27,15 @@ const dom = new JSDOM(html, {
         scnCalls.push(u);
         if (scnMode === 'down') return J({ error: 'scenario search failed: embedding service not running' }, false, 503);
         return J({ scenario: 'iran war', entity_type: 'PERSON', entity_subtype: 'political_leader', cached: false, total_s: 42.1,
-          brief: { summary: 'A US/Israel-Iran confrontation with strikes and Hormuz shipping attacks.', actors: ['Donald Trump', 'Benjamin Netanyahu'], not_this: ['games'], anchors_used: 17 },
+          grounding: { assessment: 'multiple_developments', event_summary: 'Escalating US-Iran military tension with strikes and Hormuz shipping attacks.', sample_size: 100, rounds: [{ round: 0 }, { round: 1 }],
+            developments: [{ title: 'Maritime escalation', time: '2026-10-22', post_ids: ['a', 'b', 'c'] }, { title: 'Mediation', time: '2026-10-20', post_ids: ['d'] }], contradictions: ['Posts disagree on how many ships were hit.'], needs_more_reason: '' },
           stats: { semantic_candidates: 1500, naming_a_person: 449, verified: 84, verified_ok: 80, relevant: 62, people_candidates: 120 },
-          people: [{ entity_uid: 'person:trump', name: 'Trump', candidates: 372, checked: 44, direct: 18, mentioned: 14, unrelated: 12, involvement: 0.41, est_direct_posts: 154, score: 154, top_role: 'planning strikes' },
-                   { entity_uid: 'person:netanyahu', name: 'Benjamin Netanyahu', candidates: 38, checked: 12, direct: 9, mentioned: 2, unrelated: 1, involvement: 0.75, est_direct_posts: 27, score: 27, top_role: 'renewed strikes' },
-                   { entity_uid: 'person:putin', name: 'Putin', candidates: 24, checked: 10, direct: 0, mentioned: 3, unrelated: 7, involvement: 0, est_direct_posts: 2, score: 2, top_role: '' }],
+          people: [{ entity_uid: 'person:trump', name: 'Trump', candidates: 372, checked: 44, direct: 9, indirect: 8, mention: 14, unrelated: 13, strength: 0.9, top_role: 'planning strikes' },
+                   { entity_uid: 'person:netanyahu', name: 'Benjamin Netanyahu', candidates: 38, checked: 12, direct: 0, indirect: 6, mention: 5, unrelated: 1, strength: 0.4, top_role: 'meeting on renewed strikes' },
+                   { entity_uid: 'person:putin', name: 'Putin', candidates: 24, checked: 10, direct: 0, indirect: 0, mention: 3, unrelated: 7, strength: 0, top_role: '' }],
           posts: [{ post_uid: 'p1', name: 'Trump', involvement: 'direct', role: 'planning strikes', reason: 'Reports Trump weighing new strikes.', evidence: 'weighing new military options', evidence_ok: true, relevant: true, score: 0.9, platform: 'twitter', posted_at: '2026-10-20 10:00:00+00', author_name: 'x', url: '', views: 5000, text: 'US weighing new military options on Iran' },
-                  { post_uid: 'p2', name: 'Trump', involvement: 'mentioned', role: '', reason: 'tag only', evidence: '', evidence_ok: false, relevant: true, score: 0.2, platform: 'twitter', posted_at: '2026-10-20 10:00:00+00', author_name: 'x', url: '', views: 10, text: 'a post that only tags Trump' }] });
+                  { post_uid: 'p3', name: 'Trump', involvement: 'indirect', role: 'administration ordering staff out', reason: 'His administration ordered evacuations.', evidence: 'ordered personnel departure', evidence_ok: true, relevant: true, score: 0.5, platform: 'twitter', posted_at: '2026-10-21 10:00:00+00', author_name: 'x', url: '', views: 100, text: 'US ordered personnel departure from the region' },
+                  { post_uid: 'p2', name: 'Trump', involvement: 'mention', role: '', reason: 'tag only', evidence: '', evidence_ok: false, relevant: true, score: 0.2, platform: 'twitter', posted_at: '2026-10-20 10:00:00+00', author_name: 'x', url: '', views: 10, text: 'a post that only tags Trump' }] });
       }
       if (u.includes('/api/explore/search_trend')) {
         trendCalls.push(u);
@@ -160,13 +162,14 @@ await tile('topics');
   check('the scenario search is asked for the typed words, the days and the type', scnCalls.length === 1 && /scenario=iran%20war/.test(scnCalls[0]) && /entity_type=PERSON/.test(scnCalls[0]) && /entity_subtype=political_leader/.test(scnCalls[0]) && /from=/.test(scnCalls[0]), scnCalls[0]);
   const scn = who.querySelector('.ex-who-scn');
   const rowsS = [...scn.querySelectorAll('.ex-rel-row')].map((r) => r.textContent);
-  check('it lists only the people verified as directly involved, with their role and the checked counts', rowsS.length === 2 && /Trump — planning strikes.*18 of 44 checked direct · about 154 of 372 posts/.test(rowsS[0]) && /Central/.test(rowsS[1]), rowsS.join(' | '));
-  check('a person who was named but never direct is not listed as involved, only named as excluded', !rowsS.some((t) => /Putin/.test(t)) && /not involved \(checked, none direct\): Putin/.test(scn.textContent));
-  check('how the list was found is collapsed and states that views play no part', !!scn.querySelector('details.ex-explain') && /Views and engagement play no part/.test(scn.textContent) && !scn.querySelector('details').open);
+  check('it lists only the people verified as involved (direct or indirect), with role and the checked counts, strongest first', rowsS.length === 2 && /^Direct.*Trump — planning strikes.*9 direct · 8 indirect of 44 checked/.test(rowsS[0]) && /^Indirect.*Benjamin Netanyahu.*0 direct · 6 indirect of 12 checked/.test(rowsS[1]), rowsS.join(' | '));
+  check('a person who was named but never shown to be involved is not listed as involved, only named as excluded', !rowsS.some((t) => /Putin/.test(t)) && /not shown to be involved \(checked\): Putin/.test(scn.textContent));
+  check('how the list was found is collapsed, says the event was read from real sample posts and that mention counts and views play no part', !!scn.querySelector('details.ex-explain') && /read from 100 real posts of this data/.test(scn.textContent) && /mention counts, views and engagement play no part/.test(scn.textContent) && !scn.querySelector('details').open);
+  check('several developments are shown as several developments and the contradiction is reported, not hidden', /Developments seen: Maritime escalation/.test(scn.textContent) && /Posts disagree on how many ships were hit/.test(scn.textContent) && /several developments, not one story/.test(scn.textContent));
   check('the keyword-based names are hidden while the scenario list is shown', who.querySelector('.ex-who-fallback').style.display === 'none');
   scn.querySelector('.ex-rel-row').click(); await wait(300);
   const pbx = scn.querySelector('.ex-who-posts').textContent;
-  check('clicking a person shows the verified direct posts with the reason and evidence, not the merely mentioned ones', /Reports Trump weighing new strikes/.test(pbx) && /weighing new military options/.test(pbx) && /US weighing new military options on Iran/.test(pbx) && !/only tags Trump/.test(pbx), pbx.slice(0, 160));
+  check('clicking a person shows the direct and indirect posts with the reason and evidence, direct first, not the merely mentioned ones', /Direct — planning strikes\. Reports Trump weighing new strikes/.test(pbx) && /weighing new military options/.test(pbx) && /Indirect — administration ordering staff out/.test(pbx) && pbx.indexOf('Direct —') < pbx.indexOf('Indirect —') && !/only tags Trump/.test(pbx), pbx.slice(0, 200));
   [...scn.querySelectorAll('.ex-who-posts .df-preset-btn')].find((b) => /Narrow/.test(b.textContent)).click(); await wait(800);
   check('narrowing puts the name into the search words and returns to the normal panel', /q=iran%20war%20%22Trump%22/.test(trendCalls.at(-1)) && !doc.querySelector('.ex-rel-who'), trendCalls.at(-1));
   // when the scenario search is down the page says so and shows the name-in-text list
