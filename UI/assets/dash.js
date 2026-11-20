@@ -5901,12 +5901,13 @@
       '"Unusual" compares each selected day with the same search over the 28 days before it (the same count model and false-alarm control as the topic alerts, scaled to how much was collected that day); a day gets no verdict with fewer than 3 matching posts or a usual level under 0.5 posts a day. ' +
       'By platform: when the search first showed up there (first day with at least 3 matching posts) and whether it is rising there (last 3 days against the 3 before, per collected post of that platform). ' +
       'The match is on the words in the post text, not on what the post is about. Topics are the pipeline’s broad topics; themes are automatic and provisional; people, organisations and places come ' +
-      'from the production entity extract (some platforms stop earlier); hashtags are read from the post text. Click an item to narrow the search to it.');
+      'from the production entity extract (some platforms stop earlier); hashtags are read from the post text. To ask "who is involved", choose a type (for example People, then Political leader) next to the search: the page lists the people named in the matching posts, counted by name in the post text on every platform, and a click on a name shows the posts that name them. Click any other item to narrow the search to it.');
     if (EX.theme) { host.appendChild(h('p', { class: 'cs ex-warn', text: exThemeNote() })); }
     var body = h('div', { class: 'ex-search-trend' });
     host.appendChild(body);
     var qs = '&from=' + encodeURIComponent(S.from) + '&to=' + encodeURIComponent(S.to) + '&prev_from=' + encodeURIComponent(prev[0] || '') + '&prev_to=' + encodeURIComponent(prev[prev.length - 1] || '') +
-      '&platforms=' + encodeURIComponent(plats) + '&q=' + encodeURIComponent(EX.q) + exThemeQs() + '&entity_uid=' + encodeURIComponent(EX.entityUid);
+      '&platforms=' + encodeURIComponent(plats) + '&q=' + encodeURIComponent(EX.q) + exThemeQs() + '&entity_uid=' + encodeURIComponent(EX.entityUid) +
+      (EX.entType ? '&entity_type=' + encodeURIComponent(EX.entType) + (EX.entSub ? '&entity_subtype=' + encodeURIComponent(EX.entSub) : '') : '');
     var key = qs;
     function sumDays(d, list) { var set = exSet(list), n = 0, t = 0; d.daily.forEach(function (r) { if (set[r.day]) { n += r.n; t += r.total; } }); return { n: n, total: t }; }
     function pct(v) { return v == null ? '—' : (v >= 0 ? '+' : '') + Math.round(v * 100) + '%'; }
@@ -5965,6 +5966,35 @@
         xTicks: Math.min(5, days.length), margin: { t: 8, r: 10, b: 22, l: 36 },
         ribbon: days.map(function (x, i) { return { i: i, on: !!alertSet[x] }; }) });
       // by platform
+      // ---- who is involved: asked for by choosing a type (and subtype) next to the search
+      if (d.people) {
+        var KIND = { PERSON: 'People', ORG: 'Organisations', LOCATION: 'Places', EVENT: 'Events' };
+        var pg = h('div', { class: 'ex-rel-group ex-rel-who' }, [h('div', { class: 'ex-rel-title', text: 'Who is involved · ' + (KIND[d.people.type] || d.people.type) + (d.people.subtype ? ' · ' + subtypeName(d.people.subtype) : '') })]);
+        var qBase = function (name) { return (EX.q ? EX.q + ' ' : '') + '"' + name + '"'; };
+        d.people.rows.forEach(function (r) {
+          var wrap = h('div', { class: 'ex-who-item' });
+          var open = false, box = null;
+          relRow(wrap, exRelTag(r.n, r.n_prev), r.name, r.n, r.n_prev, 'Mentioned in ' + Math.round(r.n / d.n_cur * 100) + '% of these posts (' + fmtInt(r.corpus) + ' posts overall). Click to see the posts that name them.', function () {
+            if (open) { box.remove(); open = false; return; }
+            open = true; box = h('div', { class: 'ex-who-posts' }, [h('div', { class: 'empty', text: 'Loading…' })]); wrap.appendChild(box);
+            var u = '/api/explore/viral?limit=3' + qs.replace(/&prev_from=[^&]*&prev_to=[^&]*/, '').replace(/&q=[^&]*/, '&q=' + encodeURIComponent(qBase(r.name))).replace(/&entity_(type|subtype)=[^&]*/g, '');
+            fetch(u, { cache: 'no-store' }).then(function (x) { return x.json(); }).then(function (v) {
+              if (v.error) { throw new Error(v.error); }
+              box.textContent = '';
+              EX.terms = v.terms || [];
+              v.with_views.concat(v.without_views).slice(0, 3).forEach(function (x) { box.appendChild(exPostCard(x, !!x.views)); });
+              if (!v.with_views.length && !v.without_views.length) { empty(box, 'No post with a view or engagement counter names them in this search.'); }
+              var nb = h('button', { type: 'button', class: 'df-preset-btn', text: 'Narrow the whole search to posts naming ' + r.name });
+              nb.addEventListener('click', function () { EX.q = qBase(r.name); EX.entType = ''; EX.entSub = ''; EX.topicId = ''; EX.viral = null; EX.st = null; render(); });
+              box.appendChild(nb);
+            }).catch(function (err) { box.textContent = ''; empty(box, 'Could not load posts: ' + err.message); });
+          });
+          pg.appendChild(wrap);
+        });
+        if (!d.people.rows.length) { pg.appendChild(h('div', { class: 'cs', text: 'No one of this kind is named in at least 3 of these posts.' })); }
+        pg.appendChild(h('div', { class: 'cs', text: 'Counted by name in the post text on every platform (' + d.people.candidates + ' best-known ' + (KIND[d.people.type] || 'entities').toLowerCase() + ' checked). Titles like "President", first names and spelling variants are merged or left out. The same surname can belong to two people.' }));
+        body.appendChild(pg);
+      }
       var prevOf = {}; d.platforms.forEach(function (r) { prevOf[r.platform] = r.n_prev; });
       var spd = d.platform_speed || [];
       var wr = h('div', { class: 'ex-rel-group ex-rel-plat' }, [h('div', { class: 'ex-rel-title', text: 'By platform' })]);

@@ -982,6 +982,76 @@ def _platform_speed(m, tot_plat, d_from: str, d_to: str) -> list:
     return out[:8]
 
 
+# titles that the entity extract stores as if they were people ("President", "Prime Minister"): never a "who"
+GENERIC_PERSON = re.compile(r"^(the )?(vice[ -])?(president|prime minister|minister|secretary|chief|general|governor|mayor|chancellor|king|queen|leader|"
+                            r"commander|senator|spokesman|spokesperson|officials?|officer|premier|speaker|judge|ambassador|director|chairman)s?$", re.I)
+
+
+_FIRST_NAMES = {"donald", "joe", "benjamin", "narendra", "rahul", "hillary", "barack", "bill", "george", "vladimir", "volodymyr", "emmanuel", "boris", "angela",
+                "justin", "keir", "scott", "pete", "marco", "mark", "sergey", "recep", "ali", "mohammed", "mohammad", "ahmed", "abdul", "imran", "shehbaz"}
+_DEMONYM = re.compile(r"(ian|ish|ese|eli|ians|ans)$", re.I)
+_JUNK = {"https", "http", "www", "rt", "potus", "rep", "mps", "pm", "prime", "of state", "state", "foreign", "defense", "defence", "home", "representative", "deputy"}
+
+
+def _clean_candidates(cand):
+    """Entity extract noise removed before anything is counted: titles ("Foreign Minister"), links, nationalities ("Israeli"), plurals ("Trumps"), bare first names,
+    and the same person under several spellings (Xijinping / Xi Jinping, Obama / Barack Obama) merged under the longest name. Returns [(uid, display, subtype, corpus, [patterns])]."""
+    rows = []
+    for r in cand.itertuples():
+        name = str(r.canonical_name).strip()
+        low = name.lower()
+        toks = low.split()
+        if len(name) < 3 or low in _JUNK or GENERIC_PERSON.match(name) or re.search(r"\b(minister|president|secretary|commander|spokes\w+|officials?|ambassador|chief|governor|senator|mps)\b", low):
+            continue
+        if len(toks) == 1 and (low in _FIRST_NAMES or _DEMONYM.search(low)):
+            continue
+        rows.append([r.entity_uid, name, r.entity_subtype, int(r.distinct_posts or 0), [low]])
+    names = {r[1].lower(): r for r in rows}
+    keep = {}
+    for r in sorted(rows, key=lambda x: -len(x[1].split())):
+        low = r[1].lower(); toks = low.split()
+        if low.endswith("s") and low[:-1] in names:                       # plural / possessive of another candidate
+            continue
+        collapsed = re.sub(r"[^a-z0-9]", "", low)
+        tgt = next((k for k, v in keep.items() if re.sub(r"[^a-z0-9]", "", k) == collapsed), None)
+        if tgt is None and len(toks) == 1:                                 # a single token is merged into a longer name that starts or ends with it
+            tgt = next((k for k in keep if len(k.split()) > 1 and (k.split()[0] == low or k.split()[-1] == low)), None)
+        if tgt is None and len(toks) == 1 and len(low) >= 6:                # a handle written as one word (vladimirputin, pmmodi) goes to the person whose surname it ends with
+            tgt = next((k for k in keep if len(k.split()[-1]) >= 4 and low != k.split()[-1] and low.endswith(k.split()[-1])), None)
+        if tgt is not None:
+            keep[tgt][3] += r[3]; keep[tgt][4].append(low)
+        else:
+            keep[low] = [r[0], r[1], r[2], r[3], [low]]
+    return list(keep.values())
+
+
+def _people_involved(cur, tx, etype: str, esub: str, limit: int = 20) -> dict:
+    """"Who is involved": the entities of one type (and subtype) named in the matching posts, counted BY NAME IN THE POST TEXT so that every platform counts
+    (the production entity extract stops earlier on some platforms). Candidates: the 200 best-known entities of that type / subtype in entity_dim, cleaned by
+    `_clean_candidates`, then the 80 most frequent. `tx` = one row per matching post of the two periods (`t` = lower-cased text, `per` = 'cur' | 'prev').
+    A name is matched as a whole word; a post counts once per person."""
+    import pandas as pd
+    where, params = ["entity_type = ?"], [etype]
+    if esub:
+        where.append("entity_subtype = ?"); params.append(esub)
+    cand = cur.execute(f"SELECT entity_uid, canonical_name, entity_type, entity_subtype, distinct_posts FROM geo.entity_dim WHERE {' AND '.join(where)} "
+                       "ORDER BY distinct_posts DESC LIMIT 200", params).fetchdf()
+    cl = sorted(_clean_candidates(cand), key=lambda x: -x[3])[:80]
+    rows = []
+    for uid, name, sub, corpus, pats in cl:
+        hit = pd.Series(False, index=tx.index)
+        for x in dict.fromkeys(pats):
+            pre = tx["t"].str.contains(x, regex=False)                    # plain substring first (fast), whole-word check only on those rows
+            if pre.any():
+                w = re.compile(r"(?<![^\W_])" + re.escape(x) + r"(?![^\W_])")
+                hit |= pre & tx["t"].where(pre, "").map(lambda t: bool(w.search(t)))
+        n, pv = int((hit & (tx["per"] == "cur")).sum()), int((hit & (tx["per"] == "prev")).sum())
+        if n >= 3:
+            rows.append({"entity_uid": uid, "name": name, "subtype": sub, "corpus": corpus, "n": n, "n_prev": pv})
+    rows.sort(key=lambda x: -x["n"])
+    return {"type": etype, "subtype": esub, "method": "name in the post text, all platforms", "candidates": len(cl), "rows": rows[:limit]}
+
+
 SEARCH_TREND_MIN = 20     # fewer matching posts in the selected days than this: the page says "too few posts to call a trend"
 
 
@@ -1020,7 +1090,9 @@ def explore_search_trend(qs: dict) -> dict:
     first = "coalesce(dd.is_first, TRUE)" if dd else "TRUE"
     cur = _main_con.cursor()
     try:
-        m = cur.execute(f"SELECT p.post_uid, p.platform, {expr} AS d, {first} AS is_first FROM analytics.post_facts p {join} {dd} "
+        etype = qs.get("entity_type", [""])[0].strip()
+        want_text = ", left(lower(coalesce(p.text, '')), 1500) AS t" if etype else ""                 # only the typed "who is involved" search needs the text
+        m = cur.execute(f"SELECT p.post_uid, p.platform, {expr} AS d, {first} AS is_first{want_text} FROM analytics.post_facts p {join} {dd} "
                         f"WHERE {' AND '.join(where)}", pj + params).fetchdf()
         tot_plat = cur.execute(f"SELECT {expr} AS d, p.platform AS platform, count(*) AS n FROM analytics.post_facts p WHERE {' AND '.join(base_where)} GROUP BY 1, 2",
                                base_params).fetchdf()
@@ -1035,7 +1107,7 @@ def explore_search_trend(qs: dict) -> dict:
                 for k, v in cm.groupby("platform").size().sort_values(ascending=False).items()]
         anomaly = _search_anomaly(daily, d_from, d_to)
         speed = _platform_speed(m, tot_plat, d_from, d_to)
-        topics, themes, entities, tags = [], [], [], []
+        topics, themes, entities, tags, people = [], [], [], [], None
         mm = m[in_cur | in_prev][["post_uid"]].assign(per=lambda x: "cur")
         mm["per"] = np.where(in_cur[in_cur | in_prev].to_numpy(), "cur", "prev")
         if len(mm):
@@ -1056,7 +1128,12 @@ def explore_search_trend(qs: dict) -> dict:
                 "SELECT e.entity_uid, any_value(d.canonical_name), any_value(d.entity_type), any_value(d.distinct_posts), "
                 "count(DISTINCT m_per.post_uid) FILTER (WHERE per = 'cur') AS c, count(DISTINCT m_per.post_uid) FILTER (WHERE per = 'prev') AS pv "
                 "FROM geo.entity_mentions e JOIN m_per ON m_per.post_uid = e.post_uid JOIN geo.entity_dim d ON d.entity_uid = e.entity_uid "
-                "WHERE e.entity_uid <> ? GROUP BY e.entity_uid HAVING c >= 5 ORDER BY c DESC LIMIT 12", [ent or ""]).fetchall()]
+                "WHERE e.entity_uid <> ? GROUP BY e.entity_uid HAVING c >= 5 ORDER BY c DESC LIMIT 20", [ent or ""]).fetchall()]
+            entities = [e for e in entities if not (e["type"] == "PERSON" and GENERIC_PERSON.match(e["name"] or ""))][:12]
+            esub = qs.get("entity_subtype", [""])[0].strip()
+            tx = m.loc[in_cur | in_prev, ["t"]].assign(per=np.where(in_cur[in_cur | in_prev].to_numpy(), "cur", "prev")) if "t" in m else None
+            if etype and tx is not None and re.fullmatch(r"[A-Z]+", etype) and re.fullmatch(r"[a-z_]*", esub):
+                people = _people_involved(cur, tx, etype, esub)
             tags = [{"tag": r[0], "n": int(r[1]), "n_prev": int(r[2])} for r in cur.execute(
                 "WITH t AS (SELECT m_per.per AS per, m_per.post_uid AS uid, unnest(list_distinct(regexp_extract_all(lower(coalesce(p.text, '')), '#[\\p{L}\\p{N}_]+'))) AS tag "
                 "FROM m_per JOIN analytics.post_facts p ON p.post_uid = m_per.post_uid) "
@@ -1068,7 +1145,7 @@ def explore_search_trend(qs: dict) -> dict:
     return {"q": q, "theme": theme, "entity_uid": ent, "terms": terms, "min_posts": SEARCH_TREND_MIN,
             "n_cur": int(len(cm)), "n_prev": int(in_prev.sum()), "distinct_cur": int(cm["is_first"].sum()),
             "unassigned_cur": int(len(cm)) - int(sum(t["n"] for t in themes)),
-            "entities": entities, "hashtags": tags, "anomaly": anomaly, "platform_speed": speed,
+            "entities": entities, "hashtags": tags, "anomaly": anomaly, "platform_speed": speed, "people": people, "entity_coverage": _entity_cover(),
             "daily": [{"day": r.d, "n": int(r.n), "distinct": int(r.distinct), "total": int(r.total)} for r in daily.itertuples()],
             "platforms": plat, "topics": topics, "themes": themes}
 

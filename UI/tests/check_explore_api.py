@@ -7,6 +7,7 @@ Read-only. Calls the server functions directly (no HTTP), against the real data 
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -278,6 +279,20 @@ def main() -> int:
     chk("platform speed: counts add up to the matches of the selected days (top 8 platforms)", sp and sum(r["n"] for r in sp) <= t3["n_cur"] and all(r["trend"] in ("rising", "steady", "declining", "few") for r in sp))
     chk("platform speed: first day is a selected-day date or flagged as already active before", all((r["first_day"] is None) or (r["before"] == (r["first_day"] < FROM)) for r in sp))
     chk("platform speed: peak day lies inside the selected days", all(FROM <= r["peak_day"] <= TO for r in sp))
+
+    # ---------------- "who is involved": a search plus an entity type / subtype
+    pw = a.explore_search_trend(q(q="iran war", entity_type="PERSON", entity_subtype="political_leader", **{"from": "2026-10-12", "to": "2026-10-26"}, prev_from="2026-09-27", prev_to="2026-10-11"))
+    rows_p = (pw["people"] or {}).get("rows", [])
+    names_p = [r["name"].lower() for r in rows_p]
+    chk("who: a typed search returns a people list, most named first, each named in at least 3 posts and never above the matches",
+        rows_p and [r["n"] for r in rows_p] == sorted([r["n"] for r in rows_p], reverse=True) and all(3 <= r["n"] <= pw["n_cur"] for r in rows_p), len(rows_p))
+    chk("who: titles, links and bare nationalities are not people", not any(n in ("president", "prime minister", "minister", "https", "israeli", "russian", "representative", "deputy") for n in names_p), names_p[:8])
+    collapsed = [re.sub(r"[^a-z0-9]", "", n) for n in names_p]
+    chk("who: one person is listed once (no 'Xijinping' beside 'Xi Jinping')", len(collapsed) == len(set(collapsed)))
+    chk("who: the main figures of the Iran war appear (Trump and Putin)", "trump" in names_p and "putin" in names_p, names_p[:6])
+    chk("who: a search without a type has no people list", a.explore_search_trend(q(q="iran war", **pf))["people"] is None)
+    pm = a._people_involved(a._main_con.cursor(), __import__("pandas").DataFrame({"t": ["trump said hello", "no one here", "donald trump spoke"], "per": ["cur", "cur", "prev"]}), "PERSON", "political_leader")
+    chk("who: name matching is per post and splits the two periods", [(r["name"], r["n"], r["n_prev"]) for r in pm["rows"] if r["name"] == "Trump"] in ([], [("Trump", 1, 1)]))
 
     n_ok = sum(RESULTS)
     print(f"\n  {n_ok}/{len(RESULTS)} checks passed")

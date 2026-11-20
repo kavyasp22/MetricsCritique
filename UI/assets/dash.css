@@ -2954,3 +2954,6 @@ body[data-mode="explore"] #global-filters { display: none !important; }
 .ex-rel-tag { font-size: 0.72rem; padding: 0.05rem 0.4rem; border-radius: 3px; border: 1px solid currentColor; white-space: nowrap; }
 .ex-rel-rising, .ex-rel-new { font-weight: 600; }
 .ex-rel-declining, .ex-rel-few { opacity: 0.6; }
+
+.ex-rel-who { margin: 0.8rem 0; }
+.ex-who-posts { margin: 0.2rem 0 0.6rem 1.2rem; padding-left: 0.6rem; border-left: 2px solid currentColor; }

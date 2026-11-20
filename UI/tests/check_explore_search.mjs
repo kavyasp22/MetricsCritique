@@ -38,6 +38,8 @@ const dom = new JSDOM(html, {
           platform_speed: [{ platform: 'twitter', n: 60, first_day: '2026-10-20', before: false, peak_day: '2026-10-24', peak_n: 12, trend: 'rising', ratio: 2.1 },
                            { platform: 'telegram', n: 60, first_day: '2026-09-20', before: true, peak_day: '2026-10-22', peak_n: 9, trend: 'steady', ratio: 1.0 },
                            { platform: 'reddit', n: 3, first_day: null, before: false, peak_day: '2026-10-21', peak_n: 2, trend: 'few', ratio: null }],
+          people: /entity_type=PERSON/.test(u) ? { type: 'PERSON', subtype: /entity_subtype=political_leader/.test(u) ? 'political_leader' : '', method: 'name in the post text, all platforms', candidates: 80,
+            rows: [{ entity_uid: 'person:trump', name: 'Trump', subtype: 'political_leader', corpus: 14111, n: 90, n_prev: 40 }, { entity_uid: 'person:putin', name: 'Putin', subtype: 'political_leader', corpus: 2769, n: 30, n_prev: 30 }] } : null,
           hashtags: [{ tag: '#ladakh', n: 37, n_prev: 12 }, { tag: '#indiachina', n: 19, n_prev: 3 }, { tag: '#lac', n: 14, n_prev: 30 }] });
       }
       if (u.includes('/api/explore/viral')) {
@@ -129,6 +131,29 @@ const st2 = doc.querySelector('.ex-search-trend');
 check('under 20 posts the page says there are too few to call a trend', /too few posts to call a trend/.test(st2.textContent), st2.textContent.slice(0, 140));
 check('...and says it cannot judge whether it is unusual', /Cannot say whether it is unusual/.test(st2.textContent));
 check('...and gives no growth or stage', !/on the \d+ days before/.test(st2.textContent) && !/: (rising|peak|steady|declining|starting)/.test(st2.textContent));
+
+// ---- the "who is involved" scenario: search "iran war", type People -> Political leader ----
+await tile('topics');
+{
+  const r0 = [...doc.querySelectorAll('#explore-view .df-preset-btn')].find((b) => b.textContent === 'Reset'); r0.click(); await wait(400);
+  await tile('topics');
+  const tsel2 = doc.getElementById('ex-ent-type'); tsel2.value = 'PERSON'; tsel2.dispatchEvent(new win.Event('change')); await wait(500);
+  const ssel3 = doc.getElementById('ex-ent-sub'); ssel3.value = 'political_leader'; ssel3.dispatchEvent(new win.Event('change')); await wait(500);
+  await search('iran war');
+  check('with a type chosen the call asks for the people involved (type and subtype)', /entity_type=PERSON/.test(trendCalls.at(-1)) && /entity_subtype=political_leader/.test(trendCalls.at(-1)), trendCalls.at(-1));
+  const who = doc.querySelector('.ex-rel-who');
+  check('a "Who is involved" list appears with the type and subtype in its title', !!who && /Who is involved · People · /.test(who.querySelector('.ex-rel-title').textContent), who && who.querySelector('.ex-rel-title').textContent);
+  const names = who ? [...who.querySelectorAll('.ex-rel-name')].map((e) => e.textContent) : [];
+  check('it lists the people, most mentioned first, with a Rising tag for the one that grew', names.join(',') === 'Trump,Putin' && /Rising/.test(who.querySelector('.ex-rel-row').textContent), names.join(','));
+  check('the list says how it is counted (name in the post text, all platforms)', /by name in the post text on every platform/.test(who.textContent));
+  const before = viralCalls.length;
+  who.querySelector('.ex-rel-row').click(); await wait(700);
+  const u2 = decodeURIComponent(viralCalls.at(-1));
+  check('clicking a name loads the posts of the search that name them (the name is added to the words)', viralCalls.length > before && /q=iran war "Trump"/.test(u2) && !/entity_type/.test(u2), u2.slice(0, 140));
+  check('the person\'s posts appear under the name with a button to narrow the whole search', /Ladakh border talks/.test(who.querySelector('.ex-who-posts').textContent) && /Narrow the whole search to posts naming Trump/.test(who.textContent));
+  [...who.querySelectorAll('.ex-who-posts .df-preset-btn')].find((b) => /Narrow/.test(b.textContent)).click(); await wait(800);
+  check('narrowing puts the name into the search words and returns to the normal panel', /q=iran%20war%20%22Trump%22/.test(trendCalls.at(-1)) && !doc.querySelector('.ex-rel-who'), trendCalls.at(-1));
+}
 
 // ---- Show all ----
 await tile('viral');
