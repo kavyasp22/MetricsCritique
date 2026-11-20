@@ -266,6 +266,19 @@ def main() -> int:
     chk("latest: the newest matching posts, newest first, at most the number asked", 0 < len(vl["latest"]) <= 4 and days_l == sorted(days_l, reverse=True), days_l)
     chk("latest: absent when not asked for", "latest" not in a.explore_viral(q(q="ladakh", limit=2, **w)))
 
+    # ---------------- anomaly against the 28-day baseline and per-platform speed
+    an = t3["anomaly"]
+    chk("anomaly: rows cover exactly the selected days, with the gates (no verdict under 3 posts)", [r["day"] for r in an["rows"]][0] == FROM and [r["day"] for r in an["rows"]][-1] == TO and
+        all(r["surprise"] is None for r in an["rows"] if r["n"] < 3), len(an["rows"]))
+    chk("anomaly: a verdict has expected, surprise and q; alert means q < 0.05",
+        all((r["surprise"] is None) == (r["q"] is None) == (r["expected"] is None) for r in an["rows"]) and all(r["alert"] == (r["q"] is not None and r["q"] < 0.05) for r in an["rows"]))
+    ts = a.explore_search_trend(q(q="hormuz", **{"from": "2026-10-01", "to": "2026-10-26"}, prev_from="2026-09-05", prev_to="2026-09-30"))
+    chk("anomaly: a busy search gets a verdict on most days and q-values in 0..1", ts["anomaly"]["ok"] and ts["anomaly"]["judged_days"] >= 20 and all(0 <= r["q"] <= 1 for r in ts["anomaly"]["rows"] if r["q"] is not None), ts["anomaly"]["judged_days"])
+    sp = t3["platform_speed"]
+    chk("platform speed: counts add up to the matches of the selected days (top 8 platforms)", sp and sum(r["n"] for r in sp) <= t3["n_cur"] and all(r["trend"] in ("rising", "steady", "declining", "few") for r in sp))
+    chk("platform speed: first day is a selected-day date or flagged as already active before", all((r["first_day"] is None) or (r["before"] == (r["first_day"] < FROM)) for r in sp))
+    chk("platform speed: peak day lies inside the selected days", all(FROM <= r["peak_day"] <= TO for r in sp))
+
     n_ok = sum(RESULTS)
     print(f"\n  {n_ok}/{len(RESULTS)} checks passed")
     return 0 if n_ok == len(RESULTS) else 1

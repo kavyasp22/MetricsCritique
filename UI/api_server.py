@@ -905,6 +905,83 @@ def explore_viral(qs: dict) -> dict:
     return out
 
 
+ANOM_WINDOW, ANOM_MIN_DAYS, ANOM_MIN_MEAN, ANOM_MIN_V = 28, 14, 0.5, 3   # the F3 gates of the metrics pipeline (docs/METRICS_V2_SPEC.md)
+
+
+def _search_anomaly(daily, d_from: str, d_to: str) -> dict:
+    """Is a search unusual against its own recent past? Same primitives and gates as the metrics pipeline (scripts/lib/stats_v2.py):
+    for each selected day a Negative Binomial baseline is fitted on the 28 days BEFORE it (never including it, at least 14 days), on counts
+    rescaled to the same collection volume (a day that collected more posts does not look like more interest); surprise = -log10 P(X >= observed);
+    Benjamini-Hochberg q-values over the selected days; alert day = q < 0.05. A day gets no verdict (NULL, never 0) with fewer than 3 matching
+    posts or a usual level under 0.5 posts a day."""
+    import numpy as np
+    import pandas as pd
+    import stats_v2 as SV
+    D = daily.set_index("d")
+    start = (pd.Timestamp(d_from) - pd.Timedelta(days=ANOM_WINDOW)).strftime("%Y-%m-%d")
+    cal = pd.date_range(start, d_to).strftime("%Y-%m-%d")
+    n = D["n"].reindex(cal).fillna(0).to_numpy(float)
+    tot = D["total"].reindex(cal).to_numpy(float)
+    valid = np.isfinite(tot) & (tot > 0)
+    if valid.sum() < ANOM_MIN_DAYS + 1:
+        return {"ok": False, "reason": "not enough collected days before the selected range", "rows": []}
+    tbar = float(np.mean(tot[valid]))
+    scaled = np.where(valid, n * tbar / np.where(valid, tot, 1.0), np.nan)
+    idx = [i for i, d in enumerate(cal) if d_from <= d <= d_to]
+    rows, ps = [], []
+    for i in idx:
+        base = scaled[max(0, i - ANOM_WINDOW):i]
+        base = base[np.isfinite(base)]
+        r = {"day": cal[i], "n": int(n[i]), "expected": None, "ratio": None, "surprise": None, "q": None, "alert": False}
+        if valid[i] and base.size >= ANOM_MIN_DAYS and n[i] >= ANOM_MIN_V:
+            fit = SV.fit_negbinom(base)
+            if fit.ok and fit.mu >= ANOM_MIN_MEAN:
+                r["expected"] = round(float(fit.mu * tot[i] / tbar), 2)
+                r["ratio"] = round(float(n[i] / max(r["expected"], 1e-9)), 2) if r["expected"] else None
+                r["surprise"] = round(float(SV.surprise_from_p(SV.exceedance_p(scaled[i], fit))), 2)
+                ps.append((len(rows), SV.exceedance_p(scaled[i], fit, midp=True)))
+        rows.append(r)
+    if ps:
+        qv = SV.bh_qvalues([p for _, p in ps])
+        for (k, _), q in zip(ps, qv):
+            rows[k]["q"] = round(float(q), 4) if np.isfinite(q) else None
+            rows[k]["alert"] = bool(np.isfinite(q) and q < 0.05)
+    judged = sum(1 for r in rows if r["surprise"] is not None)
+    return {"ok": judged > 0, "reason": None if judged else "too few matching posts a day, or a usual level under 0.5 a day, to judge", "judged_days": judged,
+            "alert_days": [r["day"] for r in rows if r["alert"]], "max_ratio": max([r["ratio"] for r in rows if r["alert"] and r["ratio"]] or [None]) if any(r["alert"] for r in rows) else None,
+            "window": ANOM_WINDOW, "rows": rows}
+
+
+def _platform_speed(m, tot_plat, d_from: str, d_to: str) -> list:
+    """Per platform: volume in the selected days, when the search first showed up there (first day with at least 3 matching posts, looking back
+    up to 28 days before the range: `before` = already active when the range starts), its peak day, and whether it is rising on that platform
+    (last 3 days against the 3 before, per collected post of that platform; needs 10 posts in the last 6 days)."""
+    import pandas as pd
+    back = (pd.Timestamp(d_from) - pd.Timedelta(days=ANOM_WINDOW)).strftime("%Y-%m-%d")
+    all_days = pd.date_range(back, d_to).strftime("%Y-%m-%d").tolist()
+    days = [d for d in all_days if d >= d_from]
+    out = []
+    for plat, g in m[m["d"] >= back].groupby("platform"):
+        da = g.groupby("d").size().reindex(all_days).fillna(0)
+        daily = da[da.index >= d_from]
+        if daily.sum() == 0:
+            continue
+        tt = tot_plat[tot_plat["platform"] == plat].set_index("d")["n"].reindex(days).fillna(0)
+        hit = da[da >= 3]
+        row = {"platform": plat, "n": int(daily.sum()), "first_day": hit.index[0] if len(hit) else None, "before": bool(len(hit) and hit.index[0] < d_from),
+               "peak_day": daily.idxmax(), "peak_n": int(daily.max()), "trend": "few", "ratio": None}
+        if len(days) >= 6 and daily.iloc[-6:].sum() >= 10:
+            a, b = daily.iloc[-3:].sum(), daily.iloc[-6:-3].sum()
+            ta, tb = tt.iloc[-3:].sum(), tt.iloc[-6:-3].sum()
+            if b > 0 and ta > 0 and tb > 0:
+                ratio = (a / ta) / (b / tb)
+                row["ratio"] = round(float(ratio), 2)
+                row["trend"] = "rising" if ratio >= 1.25 else ("declining" if ratio <= 0.8 else "steady")
+        out.append(row)
+    out.sort(key=lambda r: -r["n"])
+    return out[:8]
+
+
 SEARCH_TREND_MIN = 20     # fewer matching posts in the selected days than this: the page says "too few posts to call a trend"
 
 
@@ -919,7 +996,8 @@ def explore_search_trend(qs: dict) -> dict:
     if not (d_from and d_to):
         raise ValueError("from and to required")
     expr = "CAST(coalesce(p.posted_at, p.scraped_at) AS DATE)"
-    lo = p_from or d_from
+    back = (pd.Timestamp(d_from) - pd.Timedelta(days=ANOM_WINDOW)).strftime("%Y-%m-%d")      # the anomaly baseline needs the 28 days before the range
+    lo = min(p_from or d_from, back)
     base_where, base_params = [f"{expr} >= ?", f"{expr} <= ?"], [lo, d_to]
     _platform_clause(qs, base_where, base_params)
     where, params = list(base_where), list(base_params)
@@ -944,9 +1022,10 @@ def explore_search_trend(qs: dict) -> dict:
     try:
         m = cur.execute(f"SELECT p.post_uid, p.platform, {expr} AS d, {first} AS is_first FROM analytics.post_facts p {join} {dd} "
                         f"WHERE {' AND '.join(where)}", pj + params).fetchdf()
-        tot = cur.execute(f"SELECT {expr} AS d, count(*) AS n FROM analytics.post_facts p WHERE {' AND '.join(base_where)} GROUP BY 1",
-                          base_params).fetchdf()
-        m["d"] = m["d"].astype(str); tot["d"] = tot["d"].astype(str)
+        tot_plat = cur.execute(f"SELECT {expr} AS d, p.platform AS platform, count(*) AS n FROM analytics.post_facts p WHERE {' AND '.join(base_where)} GROUP BY 1, 2",
+                               base_params).fetchdf()
+        m["d"] = m["d"].astype(str); tot_plat["d"] = tot_plat["d"].astype(str)
+        tot = tot_plat.groupby("d", as_index=False)["n"].sum()
         in_cur = (m["d"] >= d_from) & (m["d"] <= d_to)
         in_prev = (m["d"] >= p_from) & (m["d"] <= p_to) if (p_from and p_to) else pd.Series(False, index=m.index)
         cm = m[in_cur]
@@ -954,6 +1033,8 @@ def explore_search_trend(qs: dict) -> dict:
         daily = daily.merge(tot.rename(columns={"n": "total"}), on="d", how="outer").fillna(0).sort_values("d")
         plat = [{"platform": k, "n_cur": int(v), "n_prev": int(((m["platform"] == k) & in_prev).sum())}
                 for k, v in cm.groupby("platform").size().sort_values(ascending=False).items()]
+        anomaly = _search_anomaly(daily, d_from, d_to)
+        speed = _platform_speed(m, tot_plat, d_from, d_to)
         topics, themes, entities, tags = [], [], [], []
         mm = m[in_cur | in_prev][["post_uid"]].assign(per=lambda x: "cur")
         mm["per"] = np.where(in_cur[in_cur | in_prev].to_numpy(), "cur", "prev")
@@ -987,7 +1068,7 @@ def explore_search_trend(qs: dict) -> dict:
     return {"q": q, "theme": theme, "entity_uid": ent, "terms": terms, "min_posts": SEARCH_TREND_MIN,
             "n_cur": int(len(cm)), "n_prev": int(in_prev.sum()), "distinct_cur": int(cm["is_first"].sum()),
             "unassigned_cur": int(len(cm)) - int(sum(t["n"] for t in themes)),
-            "entities": entities, "hashtags": tags,
+            "entities": entities, "hashtags": tags, "anomaly": anomaly, "platform_speed": speed,
             "daily": [{"day": r.d, "n": int(r.n), "distinct": int(r.distinct), "total": int(r.total)} for r in daily.itertuples()],
             "platforms": plat, "topics": topics, "themes": themes}
 

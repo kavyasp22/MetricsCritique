@@ -5898,6 +5898,8 @@
       'selected days with the same number of days just before: Rising = at least +25%, Declining = at least -20%, New = fewer than ' + 5 + ' posts before, Few posts = under 10 now. ' +
       'The number is how many of the search’s posts mention it. "Share of all posts" in the headline divides by every post collected on the same days and platforms, so more collection does ' +
       'not look like more interest. Growth is shown only with enough posts (' + EX_RULES.growthMinPrev + ' earlier, ' + EX_RULES.growthMinCur + ' now); under ' + EX_RULES.stageMinPosts + ' matching posts there is no trend call. ' +
+      '"Unusual" compares each selected day with the same search over the 28 days before it (the same count model and false-alarm control as the topic alerts, scaled to how much was collected that day); a day gets no verdict with fewer than 3 matching posts or a usual level under 0.5 posts a day. ' +
+      'By platform: when the search first showed up there (first day with at least 3 matching posts) and whether it is rising there (last 3 days against the 3 before, per collected post of that platform). ' +
       'The match is on the words in the post text, not on what the post is about. Topics are the pipeline’s broad topics; themes are automatic and provisional; people, organisations and places come ' +
       'from the production entity extract (some platforms stop earlier); hashtags are read from the post text. Click an item to narrow the search to it.');
     if (EX.theme) { host.appendChild(h('p', { class: 'cs ex-warn', text: exThemeNote() })); }
@@ -5946,16 +5948,37 @@
       head.appendChild(h('div', { class: 'ex-rel-big', text: title + (enough ? ': ' + stageTxt : ': too few posts to call a trend') }));
       head.appendChild(h('p', { class: 'cs', text: fmtInt(d.n_cur) + ' posts in the selected ' + days.length + ' days (' + fmtInt(d.distinct_cur) + ' distinct messages)' + gTxt +
         (top2 ? ', mostly on ' + top2 : '') + (share != null ? '; ' + share.toFixed(share < 10 ? 1 : 0) + ' per 1,000 collected posts.' : '.') }));
+      var an = d.anomaly, anTxt;
+      if (an && an.ok) {
+        anTxt = an.alert_days.length
+          ? 'Unusual: ' + an.alert_days.length + ' of the ' + an.judged_days + ' days judged stood out from the last 28 days (' + an.alert_days.slice(0, 4).join(', ') + (an.alert_days.length > 4 ? ' \u2026' : '') + '), up to ' + Number(an.max_ratio).toFixed(1) + '\u00d7 the usual number of posts.'
+          : 'Within the usual range: none of the ' + an.judged_days + ' days judged stood out from the last 28 days.';
+      } else { anTxt = 'Cannot say whether it is unusual: ' + ((an && an.reason) || 'no baseline') + '.'; }
+      head.appendChild(h('p', { class: 'cs ex-rel-anom' + (an && an.ok && an.alert_days.length ? ' ex-rel-rising' : ''), text: anTxt }));
       body.appendChild(head);
+      var alertSet = exSet((an && an.alert_days) || []);
       var plot = h('div', { class: 'ex-st-plot' });
       body.appendChild(plot);
       var byDay = {}; d.daily.forEach(function (r) { byDay[r.day] = r.n; });
       lineChart(plot, { days: days, series: [{ label: 'Posts per day', role: 'focal', kind: 'bar', pts: days.map(function (x, i) { return { i: i, v: byDay[x] || 0 }; }) }],
         width: Math.max(280, plot.clientWidth || host.clientWidth || 520), height: 120, zeroBase: true, yFmt: fmtCompact, tipFmt: fmtInt, tipHead: 'Posts per day', yTicks: 3,
-        xTicks: Math.min(5, days.length), margin: { t: 8, r: 10, b: 22, l: 36 } });
-      // where it is posted
-      var wr = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'WHERE' })]);
-      d.platforms.forEach(function (r) { wr.appendChild(h('span', { class: 'ex-rt-tag', text: r.platform + ' · ' + fmtInt(r.n_cur) + chg(r.n_cur, r.n_prev) })); });
+        xTicks: Math.min(5, days.length), margin: { t: 8, r: 10, b: 22, l: 36 },
+        ribbon: days.map(function (x, i) { return { i: i, on: !!alertSet[x] }; }) });
+      // by platform
+      var prevOf = {}; d.platforms.forEach(function (r) { prevOf[r.platform] = r.n_prev; });
+      var spd = d.platform_speed || [];
+      var wr = h('div', { class: 'ex-rel-group ex-rel-plat' }, [h('div', { class: 'ex-rel-title', text: 'By platform' })]);
+      var TAGS = { rising: { k: 'rising', t: 'Rising', o: 0 }, steady: { k: 'steady', t: 'Steady', o: 1 }, declining: { k: 'declining', t: 'Declining', o: 2 }, few: { k: 'few', t: 'Few posts', o: 3 } };
+      spd.forEach(function (r) {
+        relRow(wr, TAGS[r.trend] || TAGS.few, r.platform + ' \u00b7 ' + (r.before ? 'already active before' : (r.first_day ? 'first seen ' + r.first_day : 'too few to date')), r.n, prevOf[r.platform] || 0,
+          'Peak day ' + (r.peak_day || '\u2014') + ' with ' + r.peak_n + ' posts' + (r.ratio != null ? '; last 3 days against the 3 before, per collected post: ' + r.ratio + '\u00d7' : '') + '. Click to search only this platform.',
+          function () { EX.platforms = {}; EX.platforms[r.platform] = true; EX.viral = null; EX.st = null; render(); });
+      });
+      var starts = spd.filter(function (r) { return !r.before && r.first_day; }).sort(function (x, y) { return x.first_day < y.first_day ? -1 : (x.first_day > y.first_day ? 1 : y.n - x.n); });
+      var olds = spd.filter(function (r) { return r.before; }).map(function (r) { return r.platform; });
+      var lead = (olds.length ? 'Already active before the selected days on ' + olds.slice(0, 3).join(', ') + '. ' : '') +
+        (starts.length ? 'First seen on ' + starts.slice(0, 3).map(function (r) { return r.platform + ' (' + r.first_day + ')'; }).join(', then ') + '.' : '');
+      if (lead) { wr.appendChild(h('div', { class: 'cs', text: lead })); }
       body.appendChild(wr);
       // ---- related trending: topics, themes, people / organisations / places, hashtags
       body.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Related trending' }));

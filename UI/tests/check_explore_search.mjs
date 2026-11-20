@@ -33,6 +33,11 @@ const dom = new JSDOM(html, {
           entities: [{ entity_uid: 'location:ladakh', name: 'Ladakh', type: 'LOCATION', corpus: 290, n: 100, n_prev: 40 },
                      { entity_uid: 'location:china', name: 'China', type: 'LOCATION', corpus: 17000, n: 30, n_prev: 5 },
                      { entity_uid: 'org:indianarmy', name: 'Indianarmy', type: 'ORG', corpus: 900, n: 12, n_prev: 12 }],
+          anomaly: few ? { ok: false, reason: 'too few matching posts a day, or a usual level under 0.5 a day, to judge', rows: [], alert_days: [] }
+                       : { ok: true, reason: null, judged_days: 20, alert_days: ['2026-10-24', '2026-10-25'], max_ratio: 4.2, window: 28, rows: [] },
+          platform_speed: [{ platform: 'twitter', n: 60, first_day: '2026-10-20', before: false, peak_day: '2026-10-24', peak_n: 12, trend: 'rising', ratio: 2.1 },
+                           { platform: 'telegram', n: 60, first_day: '2026-09-20', before: true, peak_day: '2026-10-22', peak_n: 9, trend: 'steady', ratio: 1.0 },
+                           { platform: 'reddit', n: 3, first_day: null, before: false, peak_day: '2026-10-21', peak_n: 2, trend: 'few', ratio: null }],
           hashtags: [{ tag: '#ladakh', n: 37, n_prev: 12 }, { tag: '#indiachina', n: 19, n_prev: 3 }, { tag: '#lac', n: 14, n_prev: 30 }] });
       }
       if (u.includes('/api/explore/viral')) {
@@ -77,10 +82,14 @@ check('the call carries the keyword, both periods and no theme', trendCalls.leng
 const txt = st.textContent;
 check('the headline answers in words: "ladakh" with its counts, distinct messages and the main platforms', /“ladakh”: /.test(txt) && /120 posts/.test(txt) && /118 distinct/.test(txt) && /mostly on twitter and telegram/.test(txt), txt.slice(0, 220));
 check('a bar chart of posts per day is drawn', !!st.querySelector('.ex-st-plot svg'));
-check('platforms are listed with the change against the previous period', /twitter · 60 \(\+500%\)/.test(txt) && /telegram · 60/.test(txt));
+check('the page says whether the search is unusual: alert days against the last 28 days, with how far above normal', /Unusual: 2 of the 20 days judged stood out from the last 28 days \(2026-10-24, 2026-10-25\), up to 4\.2× the usual number of posts/.test(txt), (txt.match(/Unusual[^.]*\./) || [''])[0]);
+check('the two alert days are marked on the chart ribbon (only when they fall inside the selected days)', [...st.querySelectorAll('.ex-st-plot svg rect')].filter((r) => r.getAttribute('height') === '4').length <= 2);
+const plat = [...st.querySelectorAll('.ex-rel-plat .ex-rel-row')].map((r) => r.textContent);
+check('By platform: each platform says when it started and whether it is rising there', plat.length === 3 && /^Rising.*twitter · first seen 2026-10-20/.test(plat[0]) && /^Steady.*telegram · already active before/.test(plat[1]) && /^Few posts.*reddit · too few to date/.test(plat[2]), plat.join(' | '));
+check('a one-line lead says which platform came first', /Already active before the selected days on telegram\. First seen on twitter \(2026-10-20\)\./.test(txt));
 const titles = [...st.querySelectorAll('.ex-rel-title')].map((e) => e.textContent);
-check('Related trending has four groups: topics, themes, people/organisations/places, hashtags', titles.join('|') === 'Topics|Security themes|People, organisations and places|Hashtags', titles.join('|'));
-const rows = (g) => [...st.querySelectorAll('.ex-rel-group')][g].querySelectorAll('.ex-rel-row');
+check('after By platform, Related trending has four groups: topics, themes, people/organisations/places, hashtags', titles.join('|') === 'By platform|Topics|Security themes|People, organisations and places|Hashtags', titles.join('|'));
+const rows = (g) => [...st.querySelectorAll('.ex-rel-group')][g + 1].querySelectorAll('.ex-rel-row');
 const rowTxt = (g) => [...rows(g)].map((r) => r.textContent);
 check('the two neighbourhood topics are merged into one row of 50 posts, with a Rising tag', rowTxt(0).some((t) => /Neighbourhood/.test(t) && /50 posts/.test(t) && /^Rising/.test(t)), rowTxt(0).join(' | '));
 check('a topic that did not change reads Steady', rowTxt(0).some((t) => /^Steady.*China/.test(t)), rowTxt(0).join(' | '));
@@ -118,6 +127,7 @@ await tile('topics');
 await search('rareword');
 const st2 = doc.querySelector('.ex-search-trend');
 check('under 20 posts the page says there are too few to call a trend', /too few posts to call a trend/.test(st2.textContent), st2.textContent.slice(0, 140));
+check('...and says it cannot judge whether it is unusual', /Cannot say whether it is unusual/.test(st2.textContent));
 check('...and gives no growth or stage', !/on the \d+ days before/.test(st2.textContent) && !/: (rising|peak|steady|declining|starting)/.test(st2.textContent));
 
 // ---- Show all ----
