@@ -237,6 +237,24 @@ def classifier_metadata() -> dict[str, dict[str, dict[str, str]]]:
     return out
 
 
+# ---- the A01-A10 event topics (theme_code, 41 sub-codes in theme_subcode) placed under the D01-D09 security themes -------------------
+# One primary D theme per code (the filter hierarchy: D theme -> A code -> sub-code) and, where a code plainly straddles two themes, a
+# secondary one (documentation only, not used to count). Keyed by the CAMEO code string. A parent code takes the theme most of its
+# sub-codes share; a sub-code that belongs elsewhere is mapped on its own (08.x is the mixed one). Decided 2026-11-20; a change is a spec change.
+CODE_TO_DOMAIN: dict[str, tuple[str, tuple[str, ...]]] = {
+    "01": ("D02", ()), "01.1": ("D02", ()), "01.2": ("D02", ()), "01.3": ("D02", ()), "01.4": ("D02", ("D05",)),
+    "02": ("D03", ()), "02.1": ("D03", ()), "02.2": ("D03", ()), "02.3": ("D03", ()), "02.4": ("D03", ("D02",)),
+    "03": ("D03", ()), "03.1": ("D03", ()), "03.2": ("D03", ()), "03.3": ("D03", ()), "03.4": ("D03", ("D02",)),
+    "04": ("D03", ()), "04.1": ("D03", ()), "04.2": ("D03", ()), "04.3": ("D03", ("D01",)), "04.4": ("D03", ("D04",)),
+    "05": ("D04", ()), "05.1": ("D04", ("D05",)), "05.2": ("D04", ("D06",)), "05.3": ("D04", ()), "05.4": ("D04", ("D03",)), "05.5": ("D04", ()),
+    "06": ("D05", ()), "06.1": ("D05", ()), "06.2": ("D05", ("D03",)), "06.3": ("D05", ()), "06.4": ("D05", ("D02",)),
+    "07": ("D06", ()), "07.1": ("D06", ()), "07.2": ("D06", ()), "07.3": ("D06", ("D02",)), "07.4": ("D06", ("D01",)),
+    "08": ("D09", ("D01",)), "08.1": ("D02", ()), "08.2": ("D01", ("D09",)), "08.3": ("D09", ("D02",)), "08.4": ("D08", ("D09",)),
+    "09": ("D07", ()), "09.1": ("D07", ("D03",)), "09.2": ("D07", ()), "09.3": ("D07", ("D01",)), "09.4": ("D07", ("D03",)),
+    "10": ("D08", ()), "10.1": ("D08", ()), "10.2": ("D08", ()), "10.3": ("D08", ("D01",)), "10.4": ("D08", ()),
+}
+
+
 # ==========================================================================
 # build
 # ==========================================================================
@@ -373,6 +391,16 @@ def build() -> dict:
     for c in groups["theme_subcode"]:
         axes["theme_subcode"]["groups"].setdefault(c["parent_key"], []).append(c["key"])
 
+    # event topics placed under the security themes (theme_code / theme_subcode entries get `domain` + `domain_also`; the theme gets its codes)
+    dom_groups: dict[str, list[str]] = {d: [] for d in axes["security_domain"]["order"]}
+    for axis in ("theme_code", "theme_subcode"):
+        for k, e in axes[axis]["entries"].items():
+            dom, also = CODE_TO_DOMAIN.get(e["code"], (None, ()))
+            e["domain"], e["domain_also"] = dom, list(also)
+            if dom in dom_groups:
+                dom_groups[dom].append(k)
+    axes["security_domain"]["groups"] = dom_groups
+
     return {
         "$schema_version": "1.0",
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -456,6 +484,19 @@ def validate(tax: dict) -> list[str]:
         for k, e in ax["entries"].items():
             if not e["alertable"] and not e.get("alertable_reason"):
                 errs.append(f"{name}.{k}: alertable=false with no stated reason")
+
+    # 6. Every event topic sits under exactly one security theme, every theme has at least one event topic, secondaries are real themes.
+    doms = set(axes["security_domain"]["order"])
+    for axis in ("theme_code", "theme_subcode"):
+        for k, e in axes[axis]["entries"].items():
+            if e.get("domain") not in doms:
+                errs.append(f"{axis}.{k}: no security theme (domain={e.get('domain')!r}); add its code to CODE_TO_DOMAIN")
+            for x in e.get("domain_also", []):
+                if x not in doms or x == e.get("domain"):
+                    errs.append(f"{axis}.{k}: bad secondary theme {x!r}")
+    for d, ks in axes["security_domain"].get("groups", {}).items():
+        if not ks:
+            errs.append(f"security_domain.{d}: no event topic placed under it")
 
     return errs
 
