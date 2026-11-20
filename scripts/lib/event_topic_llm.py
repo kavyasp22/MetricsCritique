@@ -75,3 +75,30 @@ def validate(obj: dict) -> Optional[str]:
 
 def parent_of(sub: str) -> Optional[str]:
     return sub.split(".")[0] if re.fullmatch(r"\d\d\.\d", sub or "") else None
+
+
+# ---- several posts in one call (the fixed code list is sent once for the whole batch) -------------------------------------------------
+def batch_system_prompt() -> str:
+    base = system_prompt()
+    i = base.index("Reply with ONE JSON object")
+    return (base[:i] + "You will get several numbered posts. Label each one independently (an earlier post must not influence a later one). "
+            'Reply with ONE JSON object: {"answers": [{"id": <post number>, "subcode": "<code or none or conflict_unmapped>", '
+            '"confidence": <0..1>, "evidence": "<a short phrase copied exactly from that post, or empty for none>"}, ...]} '
+            "with exactly one answer per post, in order.")
+
+
+def batch_user_prompt(texts: list[str]) -> str:
+    return "\n\n".join(f"Post {i + 1}:\n{(t or '')[:MAX_TEXT_CHARS]}" for i, t in enumerate(texts))
+
+
+def validate_batch(obj: dict, n: int) -> Optional[str]:
+    a = obj.get("answers")
+    if not isinstance(a, list) or len(a) != n:
+        return f"answers must be a list of {n}"
+    for i, x in enumerate(a):
+        if not isinstance(x, dict) or x.get("id") != i + 1:
+            return f"answer {i + 1}: wrong id"
+        bad = validate(x)
+        if bad:
+            return f"answer {i + 1}: {bad}"
+    return None

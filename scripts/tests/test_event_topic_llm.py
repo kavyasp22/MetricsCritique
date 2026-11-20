@@ -23,3 +23,13 @@ def test_validate():
 def test_parent_of_and_truncation():
     assert E.parent_of("05.3") == "05" and E.parent_of("none") is None
     assert len(E.user_prompt("x" * 5000)) < 1600
+
+
+def test_batch_prompt_and_validation():
+    assert "Post 1:" in E.batch_user_prompt(["a", "b"]) and "Post 2:" in E.batch_user_prompt(["a", "b"])
+    assert '"answers"' in E.batch_system_prompt() and "Reply with ONE JSON object: {\"subcode\"" not in E.batch_system_prompt()
+    ok = {"answers": [{"id": 1, "subcode": "05.3", "confidence": 0.9}, {"id": 2, "subcode": "none", "confidence": 1}]}
+    assert E.validate_batch(ok, 2) is None
+    assert E.validate_batch(ok, 3)                                     # wrong count
+    assert E.validate_batch({"answers": [{"id": 2, "subcode": "none", "confidence": 1}]}, 1)   # wrong id
+    assert E.validate_batch({"answers": [{"id": 1, "subcode": "zz", "confidence": 1}]}, 1)     # bad code
