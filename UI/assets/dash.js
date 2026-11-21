@@ -6107,11 +6107,27 @@
       var topicHidden = allTopicRows.length - topicRows.length;
       var thm = {};
       d.themes.forEach(function (r) { var o = thm[r.theme] || (thm[r.theme] = { n: 0, pv: 0, med: 0 }); if (r.tier === 'medium') { o.med += r.n; if (EX.themeAll) { o.n += r.n; o.pv += r.n_prev; } } else { o.n += r.n; o.pv += r.n_prev; } });
-      var themeRows = Object.keys(thm).filter(function (k) { return thm[k].n > 0; }).map(function (k) {
-        return { tag: exRelTag(thm[k].n, thm[k].pv), label: exThemeName(k), n: thm[k].n, pv: thm[k].pv,
+      var thRule = d.theme_rule || {};
+      var thMinM = thRule.min_matches || 3, thMinS = thRule.min_kw_share || 0.03;
+      var allThemeRows = Object.keys(thm).filter(function (k) { return thm[k].n > 0; }).map(function (k) {
+        var passes = !thRule.applies || (thm[k].n >= thMinM && thm[k].n / (d.n_cur || 1) >= thMinS);
+        return { tag: exRelTag(thm[k].n, thm[k].pv), label: exThemeName(k), n: thm[k].n, pv: thm[k].pv, passes: passes,
           tip: 'Automatic and provisional (about 75% right for the clear matches). Click to filter by this theme.',
           go: function () { EX.theme = k; EX.viral = null; EX.st = null; render(); } };
       });
+      var themeRows = allThemeRows.filter(function (r) { return r.passes; });
+      var themeHidden = allThemeRows.length - themeRows.length;
+      var subRule = d.subtopic_rule || {};
+      var subMinM = subRule.min_matches || 3, subMinS = subRule.min_sub_share || 0.15;
+      var allSubRows = (d.subtopics || []).map(function (s) {
+        var passes = !subRule.applies || (s.n >= subMinM && (s.n_sub_total ? s.n / s.n_sub_total : 0) >= subMinS);
+        var subSharePct = s.n_sub_total ? Math.round(s.n / s.n_sub_total * 100) : 0;
+        return { tag: exRelTag(s.n, s.n_prev), label: s.subcode + ' ' + (s.name || s.subcode), n: s.n, pv: s.n_prev, passes: passes,
+          tip: s.subcode + ' ' + (s.name || '') + ': ' + s.n + ' posts (' + subSharePct + '% of this subtopic in this period).',
+          go: function () { EX.q = s.name || s.subcode; EX.topicId = ''; EX.entityUid = ''; EX.entityName = ''; EX.viral = null; EX.st = null; render(); } };
+      });
+      var subtopicRows = allSubRows.filter(function (r) { return r.passes; });
+      var subtopicHidden = allSubRows.length - subtopicRows.length;
       var entRows = d.entities.filter(function (r) { return words.indexOf(String(r.name).toLowerCase()) < 0; }).map(function (r) {
         return { tag: exRelTag(r.n, r.n_prev), label: r.name + ' · ' + String(r.type).toLowerCase(), n: r.n, pv: r.n_prev,
           tip: 'Mentioned in ' + Math.round(r.n / d.n_cur * 100) + '% of these posts, and in ' + fmtInt(r.corpus) + ' posts overall. Click to narrow the search to posts naming it.',
@@ -6125,7 +6141,14 @@
       var topicNote = 'Broad topics: most posts of a niche subject sit in one or two of them.' +
         (topicHidden > 0 ? ' ' + topicHidden + ' topic' + (topicHidden > 1 ? 's' : '') + ' hidden as passing mentions (< 5% of these posts).' : '');
       grid.appendChild(relGroup('Topics', topicNote, topicRows, 'No topic assigned to these posts.'));
-      grid.appendChild(relGroup('Security themes', fmtInt(d.unassigned_cur) + ' of these posts have no theme. Automatic and provisional.', themeRows, 'No theme assigned to these posts.'));
+      var themeNote = fmtInt(d.unassigned_cur) + ' of these posts have no theme. Automatic and provisional.' +
+        (themeHidden > 0 ? ' ' + themeHidden + ' theme' + (themeHidden > 1 ? 's' : '') + ' hidden as passing mentions (< 3% of these posts).' : '');
+      grid.appendChild(relGroup('Security themes', themeNote, themeRows, 'No theme assigned to these posts.'));
+      if (allSubRows.length > 0) {
+        var subNote = 'Granular event topics (A01–A10).' +
+          (subtopicHidden > 0 ? ' ' + subtopicHidden + ' subtopic' + (subtopicHidden > 1 ? 's' : '') + ' hidden as passing mentions (< 15% of subtopic).' : '');
+        grid.appendChild(relGroup('Subtopics (Event topics)', subNote, subtopicRows, 'No subtopic with sufficient activity.'));
+      }
       grid.appendChild(relGroup('People, organisations and places', 'From the production entity extract; some platforms stop earlier.', entRows, 'No entity is named in at least 5 of these posts.'));
       grid.appendChild(relGroup('Hashtags', '', tagRows, 'No hashtag appears in at least 5 of these posts.'));
       body.appendChild(grid);

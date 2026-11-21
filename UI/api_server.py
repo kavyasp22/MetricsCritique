@@ -44,6 +44,7 @@ MAX_LIMIT = 300
 POST_VIRALITY = DATA / "post_virality.parquet"   # scripts/24_post_virality.py; optional, the page works without it
 POST_THEME = DATA / "post_theme_v1.parquet"      # scripts/27_post_theme.py: hybrid security theme D01..D09; optional
 POST_THEME_KNN = DATA / "post_theme_knn_v1.parquet"   # scripts/28_theme_knn.py: theme spread to untagged posts by nearest-neighbour voting; optional
+POST_EVENT_TOPIC = DATA / "post_event_topic_v1.parquet" # scripts/29_post_event_topic.py: event topic A01..A10 (41 subcodes); optional
 POST_DEDUP = DATA / "post_dedup.parquet"         # scripts/25_post_dedup.py: is_first = the first post of an exact-copy group
 RETWEET_SQL = "(coalesce(p.text, '') ILIKE 'RT @%')"      # a retweet starts "RT @user:"; only Twitter / Truth Social mark reposts this way in the data
 VIRALITY_MIN_REF = 20                            # a percentile needs at least this many reference posts to be shown
@@ -1021,6 +1022,21 @@ SEARCH_TREND_MIN = 20     # fewer matching posts in the selected days than this:
 #   5% cleanly separates the 1–4 genuinely-related topics from the 4–6 minor-mention ones.
 KW_TOPIC_MIN_MATCHES = 3    # at least this many keyword-matching posts in the topic
 KW_TOPIC_MIN_KW_SHARE = 0.05  # those posts must be >= 5% of ALL keyword-matching posts in the period
+KW_THEME_MIN_KW_SHARE = 0.03  # security themes: >= 3% of search results
+KW_SUBTOPIC_MIN_SUB_SHARE = 0.15  # fine-grained subtopics: >= 15% of that subtopic's posts in period
+
+
+def _subcode_names() -> dict[str, str]:
+    try:
+        sys.path.insert(0, str(EDA_ROOT / "scripts"))
+        from lib.taxonomy import build
+        tsc = build()["axes"]["theme_subcode"]["entries"]
+        return {e["code"]: e.get("display", e["code"]) for e in tsc.values() if "code" in e}
+    except Exception:
+        return {}
+
+
+_SUBCODE_NAMES = _subcode_names()
 
 
 def explore_search_trend(qs: dict) -> dict:
@@ -1107,6 +1123,32 @@ def explore_search_trend(qs: dict) -> dict:
                 "FROM m_per JOIN analytics.post_facts p ON p.post_uid = m_per.post_uid) "
                 "SELECT tag, count(*) FILTER (WHERE per = 'cur') AS c, count(*) FILTER (WHERE per = 'prev') AS pv FROM t "
                 "WHERE length(tag) > 2 GROUP BY tag HAVING c >= 5 ORDER BY c DESC LIMIT 12").fetchall()]
+            subtopics = []
+            if POST_EVENT_TOPIC.exists():
+                sql_sub = (f"SELECT s.subcode, "
+                           f"count(*) FILTER (WHERE per = 'cur') AS c, "
+                           f"count(*) FILTER (WHERE per = 'prev') AS pv "
+                           f"FROM read_parquet('{POST_EVENT_TOPIC.as_posix()}') s "
+                           f"JOIN m_per ON m_per.post_uid = s.post_uid "
+                           f"WHERE s.subcode IS NOT NULL AND s.subcode <> '' "
+                           f"GROUP BY 1 HAVING c > 0 ORDER BY c DESC LIMIT 20")
+                raw_sub = cur.execute(sql_sub).fetchall()
+                if raw_sub:
+                    sc_codes = [r[0] for r in raw_sub]
+                    tot_sql = (f"SELECT s.subcode, count(*) "
+                               f"FROM read_parquet('{POST_EVENT_TOPIC.as_posix()}') s "
+                               f"JOIN analytics.post_facts p ON p.post_uid = s.post_uid "
+                               f"WHERE {expr} >= ? AND {expr} <= ? AND s.subcode IN ({','.join(['?']*len(sc_codes))}) "
+                               f"GROUP BY 1")
+                    tot_sub = dict(cur.execute(tot_sql, [d_from, d_to] + sc_codes).fetchall())
+                    subtopics = [{
+                        "subcode": r[0],
+                        "name": _SUBCODE_NAMES.get(r[0], r[0]),
+                        "n": int(r[1]),
+                        "n_prev": int(r[2]),
+                        "n_sub_total": tot_sub.get(r[0], int(r[1])),
+                        "n_keyword": int(len(cm)),
+                    } for r in raw_sub]
             cur.unregister("m_per")
             if q and topics:       # n_keyword = total matching posts in the period (all topics), so the UI can apply the share gate
                 n_keyword = int(len(cm))   # cm is already filtered to the current period
@@ -1116,11 +1158,13 @@ def explore_search_trend(qs: dict) -> dict:
         cur.close()
     return {"q": q, "theme": theme, "entity_uid": ent, "terms": terms, "min_posts": SEARCH_TREND_MIN,
             "topic_rule": {"applies": bool(q), "min_matches": KW_TOPIC_MIN_MATCHES, "min_kw_share": KW_TOPIC_MIN_KW_SHARE},
+            "theme_rule": {"applies": bool(q), "min_matches": KW_TOPIC_MIN_MATCHES, "min_kw_share": KW_THEME_MIN_KW_SHARE},
+            "subtopic_rule": {"applies": bool(q), "min_matches": KW_TOPIC_MIN_MATCHES, "min_sub_share": KW_SUBTOPIC_MIN_SUB_SHARE},
             "n_cur": int(len(cm)), "n_prev": int(in_prev.sum()), "distinct_cur": int(cm["is_first"].sum()),
             "unassigned_cur": int(len(cm)) - int(sum(t["n"] for t in themes)),
             "entities": entities, "hashtags": tags, "anomaly": anomaly, "platform_speed": speed, "people": people, "entity_coverage": _entity_cover(),
             "daily": [{"day": r.d, "n": int(r.n), "distinct": int(r.distinct), "total": int(r.total)} for r in daily.itertuples()],
-            "platforms": plat, "topics": topics, "themes": themes}
+            "platforms": plat, "topics": topics, "themes": themes, "subtopics": subtopics}
 
 
 def explore_scenario_people(qs: dict) -> dict:
