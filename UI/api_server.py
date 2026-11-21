@@ -28,6 +28,7 @@ from urllib.parse import urlparse, parse_qs
 
 import duckdb
 
+import audience_view as AUD       # Explore > Audience Sentiment (v2 audience tables); read-only, isolated
 import keyword_query as KQ
 from feedback_store import FeedbackError, FeedbackStore
 
@@ -1013,6 +1014,13 @@ def _people_involved(cur, tx, etype: str, esub: str, limit: int = 20) -> dict:
 
 
 SEARCH_TREND_MIN = 20     # fewer matching posts in the selected days than this: the page says "too few posts to call a trend"
+# Keyword search: a topic counts as "about" the typed words only when enough of its posts match.
+# Our topics are macro-buckets (10k–234k posts each), so the news-project rule (share-of-topic >= 30%) never fires.
+# Instead we use: topic must have >= min_matches posts AND those posts are >= min_kw_share of the keyword's OWN result set.
+# Hand-checked on flood / Hormuz / drone / ceasefire / Modi (2024-01-01→2026-10-26):
+#   5% cleanly separates the 1–4 genuinely-related topics from the 4–6 minor-mention ones.
+KW_TOPIC_MIN_MATCHES = 3    # at least this many keyword-matching posts in the topic
+KW_TOPIC_MIN_KW_SHARE = 0.05  # those posts must be >= 5% of ALL keyword-matching posts in the period
 
 
 def explore_search_trend(qs: dict) -> dict:
@@ -1100,9 +1108,14 @@ def explore_search_trend(qs: dict) -> dict:
                 "SELECT tag, count(*) FILTER (WHERE per = 'cur') AS c, count(*) FILTER (WHERE per = 'prev') AS pv FROM t "
                 "WHERE length(tag) > 2 GROUP BY tag HAVING c >= 5 ORDER BY c DESC LIMIT 12").fetchall()]
             cur.unregister("m_per")
+            if q and topics:       # n_keyword = total matching posts in the period (all topics), so the UI can apply the share gate
+                n_keyword = int(len(cm))   # cm is already filtered to the current period
+                for t in topics:
+                    t["n_keyword"] = n_keyword   # share = t["n"] / n_keyword; pass when >= KW_TOPIC_MIN_KW_SHARE
     finally:
         cur.close()
     return {"q": q, "theme": theme, "entity_uid": ent, "terms": terms, "min_posts": SEARCH_TREND_MIN,
+            "topic_rule": {"applies": bool(q), "min_matches": KW_TOPIC_MIN_MATCHES, "min_kw_share": KW_TOPIC_MIN_KW_SHARE},
             "n_cur": int(len(cm)), "n_prev": int(in_prev.sum()), "distinct_cur": int(cm["is_first"].sum()),
             "unassigned_cur": int(len(cm)) - int(sum(t["n"] for t in themes)),
             "entities": entities, "hashtags": tags, "anomaly": anomaly, "platform_speed": speed, "people": people, "entity_coverage": _entity_cover(),
@@ -1483,6 +1496,19 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json({"error": str(e)}, status=400)
             except Exception as e:
                 self._json({"error": f"query failed: {e}"}, status=500)
+            return
+        if parsed.path == "/api/explore/audience":
+            cur = _main_con.cursor()
+            try:
+                self._json(AUD.explore_audience(parse_qs(parsed.query), cur))
+            except ValueError as e:
+                self._json({"error": str(e)}, status=400)
+            except AUD.AudienceUnavailable as e:
+                self._json({"error": str(e), "unavailable": True}, status=503)
+            except Exception as e:
+                self._json({"error": f"query failed: {type(e).__name__}: {e}"}, status=500)
+            finally:
+                cur.close()
             return
         if parsed.path == "/api/feedback/votes":
             q = parse_qs(parsed.query)

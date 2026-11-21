@@ -5637,7 +5637,7 @@
   var EX_ALL = 100000;     // "Show all": every row of a list; post lists are cut to the server limit below
   var EX_POST_CAP = 300;   // api_server MAX_LIMIT: most posts one list can fetch
   var EX = { tile: 'topics', platforms: {}, q: '', entityUid: '', entityName: '', entType: '', entSub: '', terms: [], spreadMode: 'cards', spreadLimit: 10, top: 25, unclass: false, minPlat: 0, entTop: null, vrank: 'views', vper: 0, rt: 'include', floor: 'top10', vorder: 'biggest', topicId: '', topicName: '', theme: '', themeAll: false,
-             viral: null, viralKey: '', st: null, stKey: '', scn: null, scnKey: '' };
+             viral: null, viralKey: '', st: null, stKey: '', scn: null, scnKey: '', aud: null, audKey: '', audBasis: 'post', audDates: { from: '', to: '' }, audMin: 5, audGapPlat: 'all' };
   var EX_TILES = [
     { k: 'topics', t: 'Trending Topics', s: "What's gaining attention?",
       i: '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>' },
@@ -5648,7 +5648,9 @@
     { k: 'life', t: 'Trend Lifecycle', s: 'Is it rising, peaking or declining?',
       i: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 14l3-3 3 3 4-5"/>' },
     { k: 'sent', t: 'Sentiment Analysis', s: 'How is the tone shifting?',
-      i: '<circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9.5h.01M15 9.5h.01"/>' }
+      i: '<circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9.5h.01M15 9.5h.01"/>' },
+    { k: 'aud', t: 'Audience Sentiment', s: 'How do people react to posts?',
+      i: '<path d="M21 12a8 8 0 0 1-11.5 7.2L4 20l1-4.2A8 8 0 1 1 21 12z"/><path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01"/>' }
   ];
 
   /* Explore opens on the LAST DAY of data; the Overview / Detailed pages keep their own range (default last 7 days).
@@ -6091,13 +6093,18 @@
       var words = (d.terms || []).map(function (w) { return String(w).toLowerCase(); });
       var whole = {}; exTopicRows().forEach(function (r) { whole[r.topic_id] = r; });
       var tmap = {};
-      d.topics.forEach(function (r) { var t = exTid(r.topic_id), o = tmap[t] || (tmap[t] = { n: 0, pv: 0 }); o.n += r.n; o.pv += r.n_prev; });
-      var topicRows = Object.keys(tmap).map(function (t) {
-        var w = whole[t];
-        return { tag: exRelTag(tmap[t].n, tmap[t].pv), label: topicLabel(t), n: tmap[t].n, pv: tmap[t].pv,
-          tip: Math.round(tmap[t].n / d.n_cur * 100) + '% of these posts' + (w ? '. The whole topic is: ' + w.stage + (w.emergence != null ? ', emergence ' + Number(w.emergence).toFixed(2) : '') : '') + '. Click to open its posts.',
+      d.topics.forEach(function (r) { var t = exTid(r.topic_id), o = tmap[t] || (tmap[t] = { n: 0, pv: 0, nkw: r.n_keyword || 0 }); o.n += r.n; o.pv += r.n_prev; if (r.n_keyword) { o.nkw = r.n_keyword; } });
+      var rule = d.topic_rule || {};
+      var minM = rule.min_matches || 3, minKwS = rule.min_kw_share || 0.05;
+      var allTopicRows = Object.keys(tmap).map(function (t) {
+        var w = whole[t], nm = tmap[t].n, nkw = tmap[t].nkw || d.n_cur || 1;
+        var passes = !rule.applies || (nm >= minM && nm / nkw >= minKwS);
+        return { tag: exRelTag(nm, tmap[t].pv), label: topicLabel(t), n: nm, pv: tmap[t].pv, passes: passes,
+          tip: Math.round(nm / d.n_cur * 100) + '% of these posts' + (w ? '. The whole topic is: ' + w.stage + (w.emergence != null ? ', emergence ' + Number(w.emergence).toFixed(2) : '') : '') + '. Click to open its posts.',
           go: function () { EX.topicId = t; EX.topicName = topicLabel(t); EX.tile = 'viral'; EX.viral = null; render(); } };
       });
+      var topicRows = allTopicRows.filter(function (r) { return r.passes; });
+      var topicHidden = allTopicRows.length - topicRows.length;
       var thm = {};
       d.themes.forEach(function (r) { var o = thm[r.theme] || (thm[r.theme] = { n: 0, pv: 0, med: 0 }); if (r.tier === 'medium') { o.med += r.n; if (EX.themeAll) { o.n += r.n; o.pv += r.n_prev; } } else { o.n += r.n; o.pv += r.n_prev; } });
       var themeRows = Object.keys(thm).filter(function (k) { return thm[k].n > 0; }).map(function (k) {
@@ -6115,7 +6122,9 @@
           go: function () { EX.q = r.tag.slice(1); EX.topicId = ''; EX.entityUid = ''; EX.entityName = ''; EX.viral = null; EX.st = null; render(); } };
       });
       var grid = h('div', { class: 'ex-rel-grid' });
-      grid.appendChild(relGroup('Topics', 'Broad topics: most posts of a niche subject sit in one or two of them.', topicRows, 'No topic assigned to these posts.'));
+      var topicNote = 'Broad topics: most posts of a niche subject sit in one or two of them.' +
+        (topicHidden > 0 ? ' ' + topicHidden + ' topic' + (topicHidden > 1 ? 's' : '') + ' hidden as passing mentions (< 5% of these posts).' : '');
+      grid.appendChild(relGroup('Topics', topicNote, topicRows, 'No topic assigned to these posts.'));
       grid.appendChild(relGroup('Security themes', fmtInt(d.unassigned_cur) + ' of these posts have no theme. Automatic and provisional.', themeRows, 'No theme assigned to these posts.'));
       grid.appendChild(relGroup('People, organisations and places', 'From the production entity extract; some platforms stop earlier.', entRows, 'No entity is named in at least 5 of these posts.'));
       grid.appendChild(relGroup('Hashtags', '', tagRows, 'No hashtag appears in at least 5 of these posts.'));
@@ -6785,6 +6794,528 @@
     });
   }
 
+  /* ===================================================================== Audience Sentiment tile
+     How people react to YouTube videos and Instagram posts: the sentiment of the comments and, separately, of the replies, set against the
+     post's own tone. Reads the read-only /api/explore/audience (v2 audience tables). Post, comment and reply sentiment are three separate
+     layers and are never averaged together. A missing value is shown as a dash, never as zero. The topic filter is the existing D-theme
+     (provisional); the theme list comes from the data, so a later taxonomy change needs no change here. Nothing here writes anywhere. */
+  var AUD_PLAT = { youtube_video: 'YouTube', instagram: 'Instagram' };
+  var AUD_STATUS = [['has_comments', 'Comments collected'], ['confirmed_zero', 'Reported zero comments'],
+                    ['not_collected_known', 'Comments reported, none collected'], ['unknown_no_comment_data', 'No comment data, count unknown']];
+  function audPct(v) { return v == null ? '—' : Number(v).toFixed(0) + '%'; }
+  function audNet(v) { return v == null ? '—' : (v >= 0 ? '+' : '') + Math.round(v); }
+  function audTone(v) { return v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(2); }
+  function audN(v) { return v == null ? '—' : fmtInt(v); }
+  function audThemeName(k) {
+    if (k === 'unassigned') { return 'No theme (unassigned)'; }
+    if (k === 'post_not_available') { return 'Post not available'; }
+    var known = (TAX.axis('security_domain').order || []).indexOf(k) >= 0;
+    return known ? exThemeName(k) : k + ' (not in the current taxonomy)';
+  }
+  function audBar(neg, neu, pos) {
+    var bar = h('div', { class: 'aud-bar' });
+    if (neg == null || neu == null || pos == null) { bar.appendChild(h('span', { class: 'aud-na', text: 'too few to show shares' })); return bar; }
+    [['neg', neg], ['neu', neu], ['pos', pos]].forEach(function (x) {
+      var s = h('span', { class: 'aud-' + x[0] }); s.style.width = Math.max(0, x[1]) + '%';
+      s.setAttribute('title', ({ neg: 'Negative', neu: 'Neutral', pos: 'Positive' })[x[0]] + ' ' + Math.round(x[1]) + '%');
+      bar.appendChild(s);
+    });
+    return bar;
+  }
+  /* ---- Stage 2 helpers (audience tile only) ---- */
+  function audPl(n, one, many) { return fmtInt(n) + ' ' + (n === 1 ? one : (many || one + 's')); }
+  var audHints = [];
+  function audCheckHints() {
+    audHints = audHints.filter(function (x) { return x.wrap.isConnected !== false; });
+    audHints.forEach(function (x) { var sc = x.wrap.querySelector('.tbl-h'); x.hint.style.display = (sc && sc.scrollWidth > sc.clientWidth + 2) ? '' : 'none'; });
+  }
+  /* a table inside .aud-tbl: headers may wrap so it fits the page; when it still cannot fit, a scroll cue is shown */
+  function audTable(host, cols, rows, opts) {
+    var wrap = h('div', { class: 'aud-tbl' });
+    host.appendChild(wrap);
+    var r = tableView(wrap, cols, rows, opts);
+    var hint = h('div', { class: 'aud-scroll-hint', role: 'note', text: '↔ Wider than the screen: scroll sideways to see all columns.' });
+    hint.style.display = 'none'; wrap.appendChild(hint);
+    audHints.push({ wrap: wrap, hint: hint });
+    setTimeout(audCheckHints, 0);
+    if (!audTable.bound) { audTable.bound = true; window.addEventListener('resize', audCheckHints); }
+    return r;
+  }
+  function audDayLabel(s, gran) {
+    var p = String(s).slice(0, 10).split('-'), m = MON[(+p[1]) - 1];
+    return gran === 'month' ? m + ' ' + p[0] : m + ' ' + (+p[2]) + ', ' + p[0];
+  }
+  /* Trend chart for this tile: x labels carry the year, platform colours are fixed (YouTube gold, Instagram grey), and periods with 30-99 scored rows
+     (thin) are drawn on the line itself: hollow markers and dashed segments. Periods under 30 scored rows are not drawn (gaps). */
+  function audTrend(host, cfg) {
+    var days = cfg.days, thin = cfg.thin || 100, vals = [];
+    cfg.series.forEach(function (s) { s.pts.forEach(function (p) { if (isNum(p.v)) { vals.push(p.v); } }); });
+    if (!days.length || !extent(vals)) { empty(host, cfg.emptyMsg); return; }
+    var F = frame(host, { width: cfg.width, height: cfg.height || 170, margin: { t: 8, r: 12, b: 24, l: 40 }, title: cfg.title });
+    var dom = padDomain(extent(vals), { symmetric: true });
+    var y = linScale(dom[0], dom[1], F.ih, 0), x = linScale(0, Math.max(days.length - 1, 1), 0, F.iw);
+    yAxis(F, y, { count: 3, fmt: cfg.yFmt, zeroEmph: true });
+    F.g.appendChild(el('line', { x1: 0, x2: F.iw, y1: F.ih, y2: F.ih, stroke: K.axis, 'stroke-width': 1 }));
+    if (dom[0] < 0 && dom[1] > 0) { F.g.appendChild(el('line', { x1: 0, x2: F.iw, y1: y(0), y2: y(0), stroke: K.axis, 'stroke-width': 1 })); }
+    var want = Math.max(2, Math.min(Math.floor(F.iw / 84), days.length)), step = Math.max(1, Math.ceil((days.length - 1) / Math.max(1, want - 1)));
+    for (var i = 0; i < days.length; i += step) {
+      var xx = x(i);
+      F.g.appendChild(el('line', { x1: xx, x2: xx, y1: F.ih, y2: F.ih + 3, stroke: K.axis, 'stroke-width': 1 }));
+      F.g.appendChild(svgText(xx, F.ih + 14, audDayLabel(days[i], cfg.gran), { anchor: xx < 34 ? 'start' : (xx > F.iw - 34 ? 'end' : 'middle'), size: 9, tabular: true, fill: K.ink3 }));
+    }
+    cfg.series.forEach(function (s) {
+      var col = s.color, pts = s.pts;
+      for (var k = 0; k < pts.length - 1; k++) {            // a segment between two consecutive drawn periods; dashed when either end is thin
+        var a = pts[k], b = pts[k + 1];
+        if (!isNum(a.v) || !isNum(b.v)) { continue; }
+        var dash = (a.n < thin || b.n < thin);
+        var ln = el('line', { x1: x(k), y1: y(a.v), x2: x(k + 1), y2: y(b.v), stroke: col, 'stroke-width': 2, 'stroke-linecap': 'round', opacity: dash ? 0.75 : 1 });
+        if (dash) { ln.setAttribute('stroke-dasharray', '4 3'); }
+        F.g.appendChild(ln);
+      }
+      pts.forEach(function (pt, k) {
+        if (!isNum(pt.v)) { return; }
+        var isThin = pt.n < thin, left = k > 0 && isNum(pts[k - 1].v), right = k < pts.length - 1 && isNum(pts[k + 1].v);
+        var c = el('circle', { cx: x(k), cy: y(pt.v), r: isThin ? 3.4 : (left || right ? 0 : 2.8), fill: isThin ? K.sunken : col, stroke: col, 'stroke-width': isThin ? 1.6 : 0 });
+        var t = el('title'); t.textContent = s.label + ' · ' + audDayLabel(days[k], cfg.gran) + ': net ' + cfg.yFmt(pt.v) + ' (' + fmtInt(pt.n) + ' scored' + (isThin ? ', thin sample' : '') + ')';
+        c.appendChild(t); F.g.appendChild(c);
+        if (!isThin && (left || right)) {                     // an invisible, larger target so every period has a tooltip
+          var hit = el('circle', { cx: x(k), cy: y(pt.v), r: 6, fill: 'transparent' }); var t2 = el('title'); t2.textContent = t.textContent; hit.appendChild(t2); F.g.appendChild(hit);
+        }
+      });
+    });
+  }
+  function audTrendLegend(series, thin) {
+    var l = h('div', { class: 'aud-trend-key' });
+    series.forEach(function (s) { l.appendChild(h('span', { class: 'aud-trend-k' }, [h('span', { class: 'aud-trend-sw', style: 'background:' + s.color }), txt(' ' + s.label)])); });
+    l.appendChild(h('span', { class: 'aud-trend-k' }, [h('span', { class: 'aud-trend-hollow', style: 'border-color:' + (series[0] ? series[0].color : K.focal) }), txt(' hollow dot, dashed line = thin (30–' + (thin - 1) + ' scored rows)')]));
+    return l;
+  }
+  /* Posts behind a gap, by how many scored comments each has: amber = fewer than 10 (small sample), mid = 10-29, dark = 30 or more. */
+  function audSizeBar(g) {
+    var bar = h('div', { class: 'aud-bar aud-size' }), n = g.n || 0;
+    if (!n) { bar.appendChild(h('span', { class: 'aud-na', text: 'no posts with a gap' })); return bar; }
+    [['aud-s-small', g.small, 'fewer than 10 scored comments (small sample)'], ['aud-s-mid', g.n_10_29, '10 to 29 scored comments'], ['aud-s-ok', g.n_30_plus, '30 or more scored comments']].forEach(function (x) {
+      var sp = h('span', { class: x[0] }); sp.style.width = (100 * (x[1] || 0) / n) + '%';
+      sp.setAttribute('title', fmtInt(x[1] || 0) + ' posts: ' + x[2]); bar.appendChild(sp);
+    });
+    return bar;
+  }
+  /* Rows behind each trend period (both platforms together), drawn under the chart on the same x positions so a thin period cannot look as solid
+     as a busy one. Periods under 30 scored rows are not plotted at all (the chart's own support gate); 30-99 are plotted but marked thin. */
+  function audVolume(tr, days, layer, basis, thin) {
+    var vol = {};
+    tr.forEach(function (r) {
+      var n = basis === 'comment' ? (r.layer === layer ? r.scored : 0) : ((r[layer] || {}).scored || 0);
+      vol[r.period] = (vol[r.period] || 0) + (n || 0);
+    });
+    var mx = 0; days.forEach(function (d) { mx = Math.max(mx, vol[d] || 0); });
+    var box = h('div', { class: 'aud-vol-wrap' });
+    var strip = h('div', { class: 'aud-vol', role: 'img', 'aria-label': 'Scored rows per period' });
+    days.forEach(function (d, i) {
+      var n = vol[d] || 0, b = h('i', { class: n < 30 ? 'aud-vol-none' : (n < thin ? 'aud-vol-thin' : 'aud-vol-ok') });
+      b.style.left = (days.length > 1 ? 100 * i / (days.length - 1) : 50) + '%';
+      b.style.height = (mx ? Math.max(2, 100 * n / mx) : 2) + '%';
+      b.setAttribute('title', d + ': ' + fmtInt(n) + ' scored' + (n < 30 ? ' (too few: not plotted)' : (n < thin ? ' (thin: read the line here as indicative)' : '')));
+      strip.appendChild(b);
+    });
+    box.appendChild(strip);
+    box.appendChild(h('div', { class: 'fnote', text: 'Scored rows per period. Light bars: fewer than ' + thin + ' (thin, indicative only); no line under 30.' }));
+    return box;
+  }
+  function audCtl(label, items, current, onPick) {
+    var row = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: label })]);
+    items.forEach(function (x) {
+      var b = h('button', { type: 'button', class: 'df-preset-btn' + (String(current) === String(x[0]) ? ' active' : ''), text: x[1], title: x[2] || '' });
+      b.addEventListener('click', function () { onPick(x[0]); });
+      row.appendChild(b);
+    });
+    return row;
+  }
+  function audFullWindow() {        // the audience tile has its own date range: clear it (all dates); other filters are left as they are
+    EX.audDates = { from: '', to: '' }; render();
+  }
+
+  function exAudView(host) {
+    /* Compact "how to read" (always visible) + the detailed methodology (expandable). */
+    var howBox = h('div', { class: 'card aud-how' }, [h('div', { class: 'ct', text: 'How to read this dashboard' })]);
+    var howList = h('ul', { class: 'aud-how-l' });
+    [['Net sentiment', ' = Positive % − Negative % (−100 to +100).', 'Net sentiment = 100 × (positive share − negative share). 0 means as many positive as negative comments; it is not the average tone.'],
+     ['Tone score', ' runs from −1 (very negative wording) to +1 (very positive).', 'Tone = P(positive) − P(negative) from the same multilingual model for posts, comments and replies.'],
+     ['Gap score', ' = comment tone − post tone. Negative: the comments read more negative than the post.', 'The gap is the mean tone of the scored comments (or replies) minus the post’s own tone. A positive gap does not necessarily mean the audience supports the content.'],
+     ['Aligned', ' means the gap is within ±0.30. It does not mean the audience agrees.', '0.30 is an operational flag for triage, provisional and not a statistical test.'],
+     ['Sentiment reflects wording', ', not beliefs or intent.', 'War and news vocabulary pushes comments toward negative; the model agreed with a hand reader on about 7 of 10 comments (60 rows, one reviewer, 95% interval 61–83%).'],
+     ['Label confidence', ' is the model’s certainty about its label, not how often it is right.', 'Mean of the top label probability (0.33–1). A high value does not make the label correct.']].forEach(function (x) {
+      var li = h('li', { title: x[2] }, [h('b', { text: x[0] }), txt(x[1] + ' ')]);
+      var more = h('div', { class: 'aud-info-t', id: 'aud-info-' + x[0].replace(/\W+/g, '-').toLowerCase(), text: x[2] }); more.style.display = 'none';
+      var ib = h('button', { type: 'button', class: 'aud-info', 'aria-expanded': 'false', 'aria-controls': more.id, 'aria-label': 'More about ' + x[0], text: 'i' });
+      ib.addEventListener('click', function () { var open = more.style.display === 'none'; more.style.display = open ? '' : 'none'; ib.setAttribute('aria-expanded', open ? 'true' : 'false'); });
+      li.appendChild(ib); li.appendChild(more);
+      howList.appendChild(li);
+    });
+    howBox.appendChild(howList);
+    howBox.appendChild(h('div', { class: 'fnote', text: 'Press the \u201ci\u201d button (or hover a line) for detail. Dashes mean missing or too few, never zero. Sample sizes are shown next to every figure.' }));
+    howBox.appendChild(h('div', { class: 'fnote aud-lang', text: 'Language: comments come in many languages and mixed scripts (for example Hindi or Urdu written in Latin letters, Burmese, Arabic). One multilingual model scores them all and it was not calibrated per language, so transliterated or code-mixed text, sarcasm and very short or emoji-only comments are the most likely to be misread.' }));
+    host.appendChild(howBox);
+    exExplain(host, 'Detailed methodology', 'Audience sentiment covers YouTube and Instagram, the two platforms with comment text. Three layers are kept apart: ' +
+      'the post’s own tone, the comments, and the replies to comments (a reply is a second-level comment). Each is scored by the same multilingual ' +
+      'model, tone = P(positive) − P(negative). Net sentiment = 100 × (positive share − negative share), compared within a platform. ' +
+      'It reads wording, not attitude. Comment and reply shares and means are shown only with at least ' + 30 + ' scored rows; a gap needs a post tone and at least 5 scored comments (or replies), ' +
+      'and the minimum can be raised below. Post sentiment classes use the ±0.15 tone cut-off; comment and reply classes use the model’s top label. ' +
+      'The gap = the mean tone of the comments (or replies) minus the post’s tone; the 0.30 flag is an operational threshold, not a significance test. ' +
+      'A dash means missing or too few, never zero. The date range applies to the post’s publish date (except the trend when set to “Comment date”), ' +
+      'and the theme filter to the post’s D-theme, which is provisional. Platforms other than YouTube and Instagram have no comment text and are not shown here.');
+    var plats = PLATFORMS.filter(exPlatOk).join(',');
+    var dFrom = EX.audDates ? EX.audDates.from : S.from, dTo = EX.audDates ? EX.audDates.to : S.to;     // null = the page's range; {} = chosen here (may be open-ended)
+    var key = [dFrom, dTo, exAnyPlat() ? plats : '', EX.entityUid, EX.theme, EX.audBasis, EX.top, EX.audMin].join('|');
+    var dateBar = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'AUDIENCE DATES' })]);
+    var bPage = h('button', { type: 'button', class: 'df-preset-btn' + (!EX.audDates ? ' active' : ''), text: 'Page range (' + S.from + ' \u2192 ' + S.to + ')',
+      title: 'Use the date range chosen above. That range ends where the metrics snapshot ends, so newer posts are not in it.' });
+    bPage.addEventListener('click', function () { EX.audDates = null; render(); });
+    var bAll = h('button', { type: 'button', class: 'df-preset-btn' + (EX.audDates && !EX.audDates.from && !EX.audDates.to ? ' active' : ''), text: 'All dates',
+      title: 'Every post with comment data, including posts newer than the metrics snapshot.' });
+    bAll.addEventListener('click', function () { EX.audDates = { from: '', to: '' }; render(); });
+    var cFrom = h('input', { type: 'date', class: 'bds-date-input', id: 'aud-date-from', 'aria-label': 'Audience start date' }), cTo = h('input', { type: 'date', class: 'bds-date-input', id: 'aud-date-to', 'aria-label': 'Audience end date' });
+    cFrom.value = EX.audDates ? EX.audDates.from : ''; cTo.value = EX.audDates ? EX.audDates.to : '';
+    var cErr = h('span', { class: 'ex-date-err', role: 'status' });
+    var cGo = h('button', { type: 'button', class: 'df-preset-btn', id: 'aud-date-apply', text: 'Apply dates' });
+    cGo.addEventListener('click', function () {
+      if (cFrom.value && cTo.value && cFrom.value > cTo.value) { cErr.textContent = 'The start date is after the end date.'; return; }
+      if (!cFrom.value && !cTo.value) { cErr.textContent = 'Pick a date, or use All dates.'; return; }
+      EX.audDates = { from: cFrom.value, to: cTo.value }; render();
+    });
+    [bPage, bAll, cFrom, h('span', { class: 'bds-arrow', text: '\u2192' }), cTo, cGo, cErr].forEach(function (x) { dateBar.appendChild(x); });
+    host.appendChild(dateBar);
+    var basisBar = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'TREND BY' })]);
+    [['post', 'Post date'], ['comment', 'Comment date']].forEach(function (x) {
+      var b = h('button', { type: 'button', class: 'df-preset-btn' + (EX.audBasis === x[0] ? ' active' : ''), text: x[1],
+        title: x[0] === 'post' ? 'Group by the date the post was published.' : 'Group by the date each comment or reply was written.' });
+      b.addEventListener('click', function () { EX.audBasis = x[0]; render(); });
+      basisBar.appendChild(b);
+    });
+    host.appendChild(basisBar);
+    var body = h('div', { class: 'aud' });
+    host.appendChild(body);
+
+    function paint(d) {
+      body.textContent = '';
+      var f = d.filters || {};
+      var unsup = d.unsupported_platforms || [], ytc = unsup.indexOf('youtube_comment') >= 0, noText = unsup.filter(function (x) { return x !== 'youtube_comment'; });
+      var hasYtVideo = (f.platforms || []).indexOf('youtube_video') >= 0;
+      if (ytc) {        // YouTube Comments is not a source of its own: the comments are the audience layer of the YouTube videos
+        body.appendChild(h('p', { class: 'cs ex-warn', text: 'YouTube Comments is not a separate source here: YouTube comments are analysed as the audience layer of YouTube videos' +
+          (hasYtVideo ? ', so they are already included under youtube_video.' : '. Select youtube_video to see them; YouTube Comments on its own cannot give a platform-level audience analysis.') }));
+      }
+      if (noText.length) {
+        body.appendChild(h('p', { class: 'cs ex-warn', text: 'No comment text exists for ' + noText.join(', ') + ' (counts only), so they are not shown. Audience sentiment covers YouTube and Instagram.' }));
+      }
+      if (!(f.platforms && f.platforms.length)) {
+        empty(body, ytc && !noText.length ? 'YouTube Comments alone cannot be analysed here. Select youtube_video (and/or instagram) in the platform list.'
+                                          : 'Pick YouTube and/or Instagram in the platform list (the other platforms have no comment text).'); return;
+      }
+      body.appendChild(h('p', { class: 'cs', text: audPl(d.n_posts, 'post') + (d.n_posts === 1 ? ' matches' : ' match') + ' the filters; ' + fmtInt(d.n_posts_with_data) + ' of them ' + (d.n_posts_with_data === 1 ? 'has' : 'have') + ' comment or reply data.' +
+        (d.undated_posts_excluded_by_dates ? ' ' + audPl(d.undated_posts_excluded_by_dates, 'post') + ' without a date ' + (d.undated_posts_excluded_by_dates === 1 ? 'is' : 'are') + ' left out by the date range.' : '') }));
+      /* coverage at a glance: how much of what matches actually has comment data */
+      var covRows = [];
+      [['youtube_video', 'YouTube'], ['instagram', 'Instagram'], ['all', 'Both platforms']].forEach(function (pk) {
+        if (pk[0] === 'all' ? (f.platforms || []).length < 2 : (f.platforms || []).indexOf(pk[0]) < 0) { return; }
+        var C = (d.layers[pk[0]] || {}).coverage; if (!C) { return; }
+        covRows.push({ platform: pk[1], posts: C.posts, with_c: C.with_comments, scored: C.with_scored_comments, pct: C.coverage_pct, med: C.median_comments, rows: C.comments_scored,
+                       cap: pk[0] === 'instagram' ? null : (pk[0] === 'all' ? ((d.layers.youtube_video || {}).coverage || {}).at_cap : C.at_cap) });
+      });
+      if (covRows.length) {
+        body.appendChild(h('div', { class: 'ct', style: 'margin-top:0.8rem', text: 'Coverage at a glance' }));
+        audTable(body, [
+          { k: 'platform', label: 'Platform' }, { k: 'posts', label: 'Posts matching the filters', num: true, fmt: audN },
+          { k: 'with_c', label: 'With collected comments', num: true, fmt: audN }, { k: 'scored', label: 'With scored comments', num: true, fmt: audN },
+          { k: 'pct', label: 'Coverage', num: true, fmt: function (v) { return v == null ? '\u2014' : Number(v).toFixed(1) + '%'; } },
+          { k: 'rows', label: 'Comments scored', num: true, fmt: audN }, { k: 'med', label: 'Median comments per post', num: true, fmt: function (v) { return v == null ? '\u2014' : String(Math.round(v)); } },
+          { k: 'cap', label: 'At the ~100 limit', num: true, fmt: audN }
+        ], covRows, { rawTable: true });
+        body.appendChild(h('p', { class: 'fnote', text: 'Coverage = posts with at least one collected comment \u00f7 posts matching the filters. A post without collected comments is missing data, not a neutral audience.' }));
+        var yc = (d.layers.youtube_video || {}).coverage, ic = (d.layers.instagram || {}).coverage;
+        if ((f.platforms || []).indexOf('youtube_video') >= 0 && yc && yc.with_comments) {
+          body.appendChild(h('p', { class: 'cs ex-warn', text: 'YouTube collection limit: comments were collected up to about ' + ((d.limits || {}).yt_cap || 100) + ' per video. ' + fmtInt(yc.at_cap) + ' of ' + fmtInt(yc.with_comments) +
+            ' YouTube posts with comments (' + (100 * yc.at_cap / yc.with_comments).toFixed(0) + '%) are at that limit, so for them the comment tone describes only the comments collected and may not represent the whole thread. ' +
+            'Most videos hold far fewer (median ' + Math.round(yc.median_comments || 0) + '), so the limit mainly affects the most-discussed videos.' }));
+        }
+        if ((f.platforms || []).indexOf('instagram') >= 0 && ic && ic.posts && ic.coverage_pct != null && ic.coverage_pct < 25) {
+          body.appendChild(h('p', { class: 'cs ex-warn', text: 'Instagram coverage is low: only ' + ic.coverage_pct.toFixed(1) + '% of the matching Instagram posts have comment data, so Instagram results describe a small subset of posts.' }));
+        }
+      }
+      var db = d.date_bounds || {};
+      if (db.post_max && !EX.audDates && S.to < db.post_max) {
+        body.appendChild(h('p', { class: 'cs ex-warn', text: 'The audience data runs to ' + db.post_max + ' (comments to ' + (db.comment_max || '?') + '), later than the page range, which ends where the metrics snapshot ends (' + S.to +
+          '). Choose \u201cAll dates\u201d or a custom range above to include the newer posts.' }));
+      }
+      if (f.entity_uid) {
+        var cv = (d.entity || {}).coverage || {}, bits = [];
+        Object.keys(cv).forEach(function (k) {
+          var c = cv[k]; bits.push((AUD_PLAT[k] || k) + ': ' + fmtInt(c.with_entity_data) + ' of ' + fmtInt(c.posts_with_data) + ' posts with audience data have entity data');
+        });
+        body.appendChild(h('p', { class: 'cs ex-warn', text: 'Entity filter: ' + fmtInt((d.entity || {}).posts_in_entity_extract) + ' posts name ' + (EX.entityName || 'this entity') + ' in the production entity extract. ' +
+          'That extract is a snapshot, so the posts added after it (' + fmtInt(Object.keys(cv).reduce(function (a, k) { return a + (cv[k].enriched_posts || 0); }, 0)) + ' enriched posts) have no entity data and cannot match. ' + bits.join('; ') + '.' }));
+      }
+      var fc = d.filter_coverage || {}, nF = (f.theme ? 1 : 0) + (f.entity_uid ? 1 : 0), base = fc.posts_with_data || 0;
+      var pctOf = function (a, b, dp) { return b ? (100 * (a || 0) / b).toFixed(dp == null ? 0 : dp) : '0'; };
+      var themeShare = 'only ' + pctOf(fc.with_theme, base) + '% of posts with comment data have any theme';
+      if (nF === 2) {          // both filters: say what is left after ALL of them, then what each keeps on its own
+        body.appendChild(h('p', { class: 'cs ex-warn', text: 'All filters together leave ' + audPl(d.n_posts_with_data, 'post') + ' with comment data (' + pctOf(d.n_posts_with_data, base, 1) + '% of the ' + fmtInt(base) +
+          ' with comment data in these platforms and dates). Each on its own would keep: theme ' + audThemeName(f.theme) + ' ' + audN(fc.theme_kept) + ', entity ' + (EX.entityName || 'selected') + ' ' + audN(fc.entity_kept) + '. ' +
+          'Themes are assigned automatically and are provisional (' + themeShare + '). Small selections give unstable shares and gaps; check the sample sizes below.' }));
+      } else if (f.theme) {
+        body.appendChild(h('p', { class: 'cs ex-warn', text: 'Theme filter: ' + audThemeName(f.theme) + ' leaves ' + audPl(d.n_posts_with_data, 'post') + ' of ' + fmtInt(base) + ' with comment data (' + pctOf(d.n_posts_with_data, base) +
+          '%). Themes are assigned automatically and are provisional; ' + themeShare + ', so this view is a minority of the data.' }));
+      } else if (f.entity_uid) {
+        body.appendChild(h('p', { class: 'cs ex-warn', text: 'Entity filter leaves ' + audPl(d.n_posts_with_data, 'post') + ' of ' + fmtInt(base) + ' with comment data (' + pctOf(d.n_posts_with_data, base, 1) +
+          '%). Small selections give unstable shares and gaps; check the sample sizes below.' }));
+      }
+      if (!d.n_posts_with_data) {
+        var box = h('div', { class: 'empty' }, [txt('No posts with comment or reply data match these filters. ')]);
+        var wb = h('button', { type: 'button', class: 'df-preset-btn', text: 'Show all dates' });
+        wb.addEventListener('click', audFullWindow);
+        if (!EX.audDates || EX.audDates.from || EX.audDates.to) { box.appendChild(wb); }
+        body.appendChild(box);
+      }
+
+      /* only the platforms selected are shown (a platform that was not chosen would be a row of zeros); "both" only when two are selected */
+      var selP = f.platforms || [];
+      var showPk = function (pk) { return pk === 'all' ? selP.length > 1 : selP.indexOf(pk) >= 0; };
+      var PKS = [['youtube_video', 'YouTube'], ['instagram', 'Instagram'], ['all', 'Both platforms']].filter(function (pk) { return showPk(pk[0]) && d.layers[pk[0]]; });
+
+      /* 1. layers side by side: post, comments, replies, per platform */
+      body.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Post, comment and reply sentiment' }));
+      var rows = [];
+      PKS.forEach(function (pk) {
+        var L = d.layers[pk[0]];
+        rows.push({ platform: pk[1], layer: 'Post tone', posts: L.post.posts_with_data, n: L.post.with_tone, pos: L.post.pos_pct, neu: L.post.neu_pct, neg: L.post.neg_pct, net: L.post.net, tone: L.post.tone_mean,
+                    note: 'tone classes at ±0.15 (provisional); ' + fmtInt(L.post.without_tone) + ' posts with data have no post tone' });
+        ['comment', 'reply'].forEach(function (ly) {
+          var x = L[ly];
+          rows.push({ platform: pk[1], layer: ly === 'comment' ? 'Comments' : 'Replies', posts: x.posts_with_data, n: x.scored, pos: x.pos_pct, neu: x.neu_pct, neg: x.neg_pct, net: x.net, tone: x.tone_mean,
+                      note: x.supported ? '' : (x.scored ? 'fewer than 30 scored rows: shares not shown' : 'no scored rows'), conf: x.conf_mean, notScored: x.not_scored });
+        });
+      });
+      audTable(body, [
+        { k: 'platform', label: 'Platform' }, { k: 'layer', label: 'Layer' },
+        { k: 'posts', label: 'Posts', num: true, fmt: audN }, { k: 'n', label: 'Scored', num: true, fmt: audN },
+        { k: 'pos', label: 'Positive', num: true, fmt: audPct }, { k: 'neu', label: 'Neutral', num: true, fmt: audPct }, { k: 'neg', label: 'Negative', num: true, fmt: audPct },
+        { k: 'net', label: 'Net', num: true, fmt: audNet }, { k: 'tone', label: 'Mean tone', num: true, fmt: audTone },
+        { k: 'conf', label: 'Label confidence', num: true, fmt: function (v) { return v == null ? '—' : Number(v).toFixed(2); } },
+        { k: 'note', label: 'Note' }
+      ], rows, { rawTable: true });
+      var dist = h('div', { class: 'aud-dist' });
+      rows.forEach(function (r) {
+        dist.appendChild(h('div', { class: 'aud-dist-r' }, [h('span', { class: 'aud-dist-l', text: r.platform + ' · ' + r.layer }), audBar(r.neg, r.neu, r.pos),
+          h('span', { class: 'aud-dist-n', text: r.n == null ? '' : fmtInt(r.n) + ' scored' })]));
+      });
+      var dl = h('div', { class: 'aud-legend' }, [h('span', { class: 'aud-key aud-neg' }), txt(' negative '), h('span', { class: 'aud-key aud-neu' }), txt(' neutral '), h('span', { class: 'aud-key aud-pos' }), txt(' positive')]);
+      body.appendChild(dl); body.appendChild(dist);
+
+      /* 2. the gap between the audience and the post */
+      body.appendChild(h('div', { class: 'ct', style: 'margin-top:1.2rem', text: 'Audience vs post: the sentiment gap' }));
+      body.appendChild(h('div', { class: 'cs aud-gapdef' }, [h('b', { text: 'Audience gap = mean comment sentiment − original post sentiment.' }),
+        txt(' A positive gap does not necessarily mean the audience supports the content: a very negative news post with milder comments also gives a positive gap, and a negative gap can simply mean comments are blunter than a neutral caption. ' +
+            'The 0.30 line below is an operational flag for triage, not a statistical test: a gap built on a handful of comments can cross it by chance, and a gap inside it is not evidence of agreement.')]));
+      body.appendChild(audCtl('MIN COMMENTS PER GAP', [[5, '5 (default)', 'A gap needs at least 5 scored comments (or replies).'], [10, '10', ''], [20, '20', ''], [30, '30', ''], [50, '50', '']], EX.audMin,
+        function (v) { EX.audMin = v; render(); }));
+      if (EX.audMin > 5) {
+        body.appendChild(h('p', { class: 'fnote', text: 'Gaps built on fewer than ' + EX.audMin + ' scored comments (or replies) are left out of this section, the histogram and the theme table’s gap column; for Replies vs comments both the replies and the comments need ' + EX.audMin +
+          '. Gap values are unchanged; the divergent list always needs at least ' + ((d.limits || {}).min_top || 10) + ' comments and uses the larger of the two.' }));
+      }
+      var grows = [], dash = function (v, f2) { return v == null ? '—' : f2(v); };
+      PKS.forEach(function (pk) {
+        var G = (d.layers[pk[0]] || {}).gaps; if (!G) { return; }
+        [['comment_vs_post', 'Comments vs post'], ['reply_vs_post', 'Replies vs post']].forEach(function (g) {
+          var x = G[g[0]];
+          grows.push({ platform: pk[1], cmp: g[1], n: x.n, rows: x.rows, medrows: x.median_rows, small: x.small, mean: x.mean, median: x.median,
+                       neg: x.n ? x.more_negative / x.n * 100 : null, al: x.n ? x.aligned / x.n * 100 : null, pos: x.n ? x.more_positive / x.n * 100 : null, g: x,
+                       note: !x.n ? '' : (x.n < 30 ? 'few posts: read with care' : (x.small / x.n >= 0.25 ? fmtInt(x.small) + ' of ' + fmtInt(x.n) + ' posts rest on fewer than 10' : '')) });
+        });
+        grows.push({ platform: pk[1], cmp: 'Replies vs comments', n: G.reply_vs_comment.n, rows: G.reply_vs_comment.reply_rows, medrows: null, small: null, mean: G.reply_vs_comment.mean, median: null, neg: null, al: null, pos: null,
+                     note: 'rows = replies; needs replies and comments' });
+      });
+      var gfmt = function (v) { return v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(2); };
+      /* table A: the gap and its direction (the columns an analyst reads first), then table B: the sample behind each gap */
+      audTable(body, [
+        { k: 'platform', label: 'Platform' }, { k: 'cmp', label: 'Comparison' }, { k: 'n', label: 'Posts with a gap', num: true, fmt: audN },
+        { k: 'mean', label: 'Mean gap', num: true, fmt: gfmt }, { k: 'median', label: 'Median gap', num: true, fmt: gfmt },
+        { k: 'neg', label: 'More negative (gap ≤ −0.30)', num: true, fmt: audPct }, { k: 'al', label: 'Within ±0.30 (not “agree”)', num: true, fmt: audPct },
+        { k: 'pos', label: 'More positive (gap ≥ +0.30)', num: true, fmt: audPct }
+      ], grows, { rawTable: true });
+      body.appendChild(h('div', { class: 'fnote', style: 'margin-top:0.5rem', text: 'Sample behind each gap (scored comments, or replies for the reply rows):' }));
+      audTable(body, [
+        { k: 'platform', label: 'Platform' }, { k: 'cmp', label: 'Comparison' },
+        { k: 'rows', label: 'Scored comments / replies', num: true, fmt: audN }, { k: 'medrows', label: 'Median per post', num: true, fmt: function (v) { return dash(v, function (x) { return String(Math.round(x)); }); } },
+        { k: 'small', label: 'Posts with < 10 (small sample)', num: true, fmt: audN }, { k: 'note', label: 'Sample note' }
+      ], grows, { rawTable: true });
+      var sz = h('div', { class: 'aud-dist aud-sizes' });
+      grows.forEach(function (r) {
+        if (!r.g) { return; }
+        sz.appendChild(h('div', { class: 'aud-size-r' }, [h('span', { class: 'aud-dist-l', text: r.platform + ' · ' + r.cmp }), audSizeBar(r.g),
+          h('span', { class: 'aud-dist-n', text: audN(r.small) + ' of ' + audN(r.n) + ' < 10' })]));
+      });
+      body.appendChild(h('p', { class: 'fnote', text: 'Posts behind each gap, by number of scored comments (replies for the reply rows):' }));
+      body.appendChild(h('div', { class: 'aud-legend' }, [h('span', { class: 'aud-key aud-s-small' }), txt(' fewer than 10 (small sample) '), h('span', { class: 'aud-key aud-s-mid' }), txt(' 10–29 '), h('span', { class: 'aud-key aud-s-ok' }), txt(' 30 or more')]));
+      body.appendChild(sz);
+      body.appendChild(h('p', { class: 'fnote', text: 'Gap = mean tone of the audience layer − the post’s tone (both on the same −1 to +1 scale; range −2 to +2). “Clearly” means 0.30 or more (provisional). ' +
+        'Posts without a post tone (no caption, or not scored) have no gap: they are not treated as neutral. Replies vs comments compares the two audience layers and needs no post tone.' }));
+      var hist = ((d.layers.all || {}).gaps || {}).comment_vs_post ? (d.layers.all.gaps.comment_vs_post.hist || []) : [];
+      if (hist.some(function (x) { return x.n; })) {
+        var mx = Math.max.apply(null, hist.map(function (x) { return x.n; }));
+        var hb = h('div', { class: 'aud-hist' });
+        hist.forEach(function (x) {
+          var r = h('div', { class: 'aud-hist-r' }, [h('span', { class: 'aud-hist-l', text: x.bin }), h('span', { class: 'aud-hist-b' }, [h('span', { style: 'width:' + (mx ? x.n / mx * 100 : 0) + '%' })]), h('span', { class: 'aud-hist-n', text: fmtInt(x.n) })]);
+          hb.appendChild(r);
+        });
+        body.appendChild(h('div', { class: 'fnote', text: 'Comment gap per post (' + (selP.length > 1 ? 'both platforms' : (AUD_PLAT[selP[0]] || 'selected platform')) + '), number of posts:' })); body.appendChild(hb);
+      }
+
+      /* 3. trend over time */
+      body.appendChild(h('div', { class: 'ct', style: 'margin-top:1.2rem', text: 'Sentiment over time (by ' + (f.basis === 'comment' ? 'comment date' : 'post date') + ', per ' + d.granularity + ')' }));
+      var tr = d.trend || [];
+      if (!tr.length) { empty(body, 'No comment or reply data in these dates.'); }
+      else {
+        var periods = {}; tr.forEach(function (r) { periods[r.period] = true; });
+        var days = Object.keys(periods).sort();
+        var idx = {}; days.forEach(function (p, i) { idx[p] = i; });
+        var thinN0 = (d.limits || {}).thin_trend || 100;
+        function series(layer) {
+          return Object.keys(AUD_PLAT).filter(function (pk) { return selP.indexOf(pk) >= 0; }).map(function (pk) {
+            var by = {};
+            tr.forEach(function (r) {
+              if (r.platform !== pk) { return; }
+              var o = f.basis === 'comment' ? (r.layer === layer ? r : null) : r[layer];
+              if (o) { by[r.period] = o; }
+            });
+            return { label: AUD_PLAT[pk], color: pk === 'youtube_video' ? K.focal : K.context,
+                     pts: days.map(function (p) { var o = by[p]; return { v: o && o.net != null ? o.net : null, n: o ? o.scored : 0 }; }) };
+          });
+        }
+        var wrap = h('div', { class: 'aud-charts' });
+        body.appendChild(wrap);                                  // in the page before it is measured, so the charts use the width they really get
+        var cells = [];
+        [['comment', 'Comments — net sentiment'], ['reply', 'Replies — net sentiment']].forEach(function (x) {
+          var ser = series(x[0]);
+          var cell = h('div', { class: 'aud-chart' }, [h('div', { class: 'fnote', text: x[1] + ' (no point where fewer than 30 scored)' }), audTrendLegend(ser, thinN0)]);
+          var plot = h('div', { class: 'aud-plot' }); cell.appendChild(plot); wrap.appendChild(cell);
+          cell.appendChild(audVolume(tr, days, x[0], f.basis, thinN0));
+          cells.push({ plot: plot, ser: ser, title: x[1] });
+        });
+        var lastW = 0;
+        function drawCharts() {
+          cells.forEach(function (c) {
+            var w = Math.max(220, Math.floor(c.plot.clientWidth || wrap.clientWidth / 2 || 320));
+            lastW = w; c.plot.textContent = '';
+            audTrend(c.plot, { days: days, gran: d.granularity, series: c.ser, thin: thinN0, width: w, height: 170, title: c.title + ' over time', yFmt: function (v) { return (v >= 0 ? '+' : '') + Math.round(v); },
+                               emptyMsg: 'Fewer than 30 scored rows in every period, so no net value is shown.' });
+          });
+        }
+        drawCharts();
+        if (window.ResizeObserver) {                              // redraw when the width changes (rotation, window resize, side panels)
+          var ro = new ResizeObserver(function () {
+            if (!wrap.isConnected) { ro.disconnect(); return; }
+            var w = Math.floor(cells[0].plot.clientWidth || 0);
+            if (w && Math.abs(w - lastW) > 6) { drawCharts(); }
+          });
+          ro.observe(wrap);
+        }
+        var trows = tr.filter(function (r) { return selP.indexOf(r.platform) >= 0; }).map(function (r) {
+          var thinN = (d.limits || {}).thin_trend || 100, smp = function (n) { return n < 30 ? 'too few (not plotted)' : (n < thinN ? 'thin' : 'ok'); };
+          if (f.basis === 'comment') { return { period: r.period, platform: AUD_PLAT[r.platform], layer: r.layer === 'comment' ? 'Comments' : 'Replies', n: r.scored, net: r.net, tone: r.tone, smp: smp(r.scored) }; }
+          return [['comment', 'Comments'], ['reply', 'Replies']].map(function (ly) { var o = r[ly[0]]; return { period: r.period, platform: AUD_PLAT[r.platform], layer: ly[1], n: o.scored, net: o.net, tone: o.tone, smp: smp(o.scored) }; });
+        });
+        trows = [].concat.apply([], trows).sort(function (a, b) { return a.period < b.period ? -1 : a.period > b.period ? 1 : (a.platform + a.layer).localeCompare(b.platform + b.layer); });
+        audTable(body, [{ k: 'period', label: 'Period start' }, { k: 'platform', label: 'Platform' }, { k: 'layer', label: 'Layer' }, { k: 'n', label: 'Scored', num: true, fmt: audN },
+          { k: 'net', label: 'Net', num: true, fmt: audNet }, { k: 'tone', label: 'Mean tone', num: true, fmt: audTone }, { k: 'smp', label: 'Sample' }], trows, { label: 'Trend values (' + trows.length + ')' });
+      }
+
+      /* 4. by theme (the existing D-themes) */
+      body.appendChild(h('div', { class: 'ct', style: 'margin-top:1.2rem', text: 'By theme' }));
+      var th = (d.themes || []).slice(0, EX.top);
+      audTable(body, [
+        { k: 'name', label: 'Theme' }, { k: 'posts', label: 'Posts with data', num: true, fmt: audN },
+        { k: 'c_scored', label: 'Comments scored', num: true, fmt: audN }, { k: 'c_net', label: 'Comment net', num: true, fmt: audNet },
+        { k: 'r_scored', label: 'Replies scored', num: true, fmt: audN }, { k: 'r_net', label: 'Reply net', num: true, fmt: audNet },
+        { k: 'gap_n', label: 'Posts with a gap', num: true, fmt: audN }, { k: 'gap_mean', label: 'Mean comment gap', num: true, fmt: gfmt }
+      ], th.map(function (t) { return { name: audThemeName(t.theme), key: t.theme, posts: t.posts, c_scored: t.c_scored, c_net: t.c_net, r_scored: t.r_scored, r_net: t.r_net, gap_n: t.gap_n, gap_mean: t.gap_mean }; }),
+      { label: 'Audience sentiment by D-theme (' + th.length + ')', open: true });
+      var fcT = d.filter_coverage || {};
+      body.appendChild(h('p', { class: 'fnote', text: 'Themes are the existing provisional D-themes, shown as they are: only ' + (fcT.posts_with_data ? (100 * fcT.with_theme / fcT.posts_with_data).toFixed(0) : 0) +
+        '% of posts with comment data have a theme (theme accuracy was 81% lenient / 56% strict in the 2026-11-20 audit). Shares and nets appear only with at least 30 scored rows; the gap column uses the minimum comments chosen above.' }));
+
+      /* 5. what data exists: zero comments is not the same as missing comments */
+      body.appendChild(h('div', { class: 'ct', style: 'margin-top:1.2rem', text: 'Coverage: what comment data exists' }));
+      var srows = [];
+      [['youtube_video', 'YouTube'], ['instagram', 'Instagram']].filter(function (pk) { return showPk(pk[0]); }).forEach(function (pk) {
+        var s = (d.layers[pk[0]] || {}).status; if (!s) { return; }
+        var r = { platform: pk[1], posts: s.posts }; AUD_STATUS.forEach(function (a) { r[a[0]] = s[a[0]]; }); srows.push(r);
+      });
+      audTable(body, [{ k: 'platform', label: 'Platform' }, { k: 'posts', label: 'Posts', num: true, fmt: audN }].concat(AUD_STATUS.map(function (a) { return { k: a[0], label: a[1], num: true, fmt: audN }; })), srows, { rawTable: true });
+      body.appendChild(h('p', { class: 'fnote', text: 'Instagram reports a comment count, so “reported zero” is a real zero; “reported, none collected” means comments exist that were never collected. ' +
+        'YouTube’s reported count is mostly missing, so a video without collected comments is “unknown”, not zero. These posts are not counted as neutral anywhere.' }));
+
+      /* 6. the posts where audience and post disagree most */
+      var tg = d.top_gaps || { negative: [], positive: [] };
+      var gp = (f.platforms || []).filter(function (x) { return AUD_PLAT[x]; });
+      if (gp.indexOf(EX.audGapPlat) < 0) { EX.audGapPlat = 'all'; }
+      if (EX.audGapPlat !== 'all' && d.top_gaps_by_platform && d.top_gaps_by_platform[EX.audGapPlat]) { tg = d.top_gaps_by_platform[EX.audGapPlat]; }
+      var topMin = (d.top_gaps || {}).min_comments || 10;
+      body.appendChild(h('div', { class: 'ct', style: 'margin-top:1.2rem', text: 'Posts where the audience differs most from the post' }));
+      body.appendChild(h('p', { class: 'fnote', text: 'Posts with a post tone and at least ' + topMin + ' scored comments, ranked by the comment gap (the ranking is unchanged; the platform buttons only narrow the list). ' +
+        'Each card shows how many comments the gap rests on. Open a post to read it.' }));
+      if (gp.length > 1) {
+        body.appendChild(audCtl('PLATFORM', [['all', 'Both'], ['youtube_video', 'YouTube'], ['instagram', 'Instagram']], EX.audGapPlat, function (v) { EX.audGapPlat = v; render(); }));
+      }
+      body.appendChild(h('p', { class: 'fnote', text: 'Cards marked \u201cstrongly positive post\u201d or \u201cstrongly negative post\u201d have a post tone of \u00b1' + ((d.limits || {}).extreme_tone || 0.5).toFixed(1) +
+        ' or more (provisional, informational only; the ranking ignores it). A strongly negative post (often a news or war report) tends to show a positive gap, and a strongly positive post (for example a promotional Instagram caption) a negative one, because comments are usually milder than the post.' }));
+      var cols = h('div', { class: 'ex-cols' });
+      [['negative', 'Audience more negative than the post'], ['positive', 'Audience more positive than the post']].forEach(function (x) {
+        var col = h('div', { class: 'ex-col' }, [h('div', { class: 'ct', text: x[1] + ' (' + (tg[x[0]] || []).length + ')' })]);
+        (tg[x[0]] || []).forEach(function (p) {
+          var card = h('div', { class: 'aud-post' });
+          card.appendChild(h('div', { class: 'aud-post-h' }, [h('b', { text: AUD_PLAT[p.platform] || p.platform }), txt(' · ' + (p.date || 'no date') + (p.theme ? ' · ' + p.theme : ''))]));
+          if (p.text) { card.appendChild(h('div', { class: 'aud-post-t', text: p.text })); }
+          var chips = h('div', { class: 'aud-chips' }, [h('span', { class: 'aud-chip' + (p.small_sample ? ' aud-chip-warn' : ''), text: audPl(p.comments, 'comment') + (p.small_sample ? ' · small sample' : ''),
+            title: 'Scored comments this gap is built on.' })]);
+          if (p.replies) { chips.appendChild(h('span', { class: 'aud-chip', text: audPl(p.replies, 'reply', 'replies') })); }
+          var strong = p.extreme_post_tone != null ? p.extreme_post_tone : (p.post_tone != null && Math.abs(p.post_tone) >= ((d.limits || {}).extreme_tone || 0.5));
+          if (strong && p.post_tone != null) {
+            var pos = p.post_tone > 0;
+            chips.appendChild(h('span', { class: 'aud-chip aud-chip-cap aud-chip-' + (pos ? 'tpos' : 'tneg'), tabindex: '0', text: (pos ? 'strongly positive post ' : 'strongly negative post ') + audTone(p.post_tone),
+              title: pos ? 'A strongly positive post tone makes a negative gap likely: comments are usually milder than the post' + (p.platform === 'instagram' ? ' (on Instagram, often a promotional caption against emoji or neutral comments)' : '') + '.'
+                         : 'A strongly negative post tone (often a news or war report) makes a positive gap likely: comments are usually milder than the post.' }));
+          }
+          card.appendChild(chips);
+          card.appendChild(h('div', { class: 'aud-post-m', text: 'gap ' + audTone(p.gap) + ' = comments ' + audTone(p.comment_tone) + ' − post ' + audTone(p.post_tone) +
+            (p.reply_gap != null ? ' · reply gap ' + audTone(p.reply_gap) + ' (' + audPl(p.replies, 'reply', 'replies') + ')' : '') }));
+          if (p.url) { card.appendChild(h('a', { href: p.url, target: '_blank', rel: 'noopener noreferrer', text: 'open post' })); }
+          col.appendChild(card);
+        });
+        if (!(tg[x[0]] || []).length) { empty(col, 'None in this selection.'); }
+        cols.appendChild(col);
+      });
+      body.appendChild(cols);
+      body.appendChild(h('p', { class: 'fnote', text: 'Source: ' + d.source + (d.built ? ' (built ' + String(d.built).slice(0, 10) + ')' : '') + '. Version ' + d.version + '. ' +
+        'The model reads wording, not attitude; per comment it agreed with a reader about 7 times in 10 (small hand check).' }));
+    }
+    if (EX.aud && EX.audKey === key) { paint(EX.aud); return; }
+    body.appendChild(h('div', { class: 'empty', text: 'Loading…' }));
+    var url = '/api/explore/audience?' + (dFrom ? 'from=' + encodeURIComponent(dFrom) + '&' : '') + (dTo ? 'to=' + encodeURIComponent(dTo) + '&' : '') + 'x=1' + (exAnyPlat() ? '&platforms=' + encodeURIComponent(plats) : '') +
+      (EX.entityUid ? '&entity_uid=' + encodeURIComponent(EX.entityUid) : '') + (EX.theme ? '&theme=' + encodeURIComponent(EX.theme) : '') +
+      '&basis=' + EX.audBasis + '&limit=' + Math.min(EX.top, 10) + (EX.audMin > 5 ? '&min_comments=' + EX.audMin : '');
+    fetch(url, { cache: 'no-store' }).then(function (r) {
+      return r.json().then(function (j) { if (!r.ok) { throw new Error(j && j.error ? j.error : 'HTTP ' + r.status); } return j; });
+    }).then(function (d) {
+      if (d.error) { throw new Error(d.error); }
+      EX.aud = d; EX.audKey = key;
+      if (body.isConnected !== false) { paint(d); }
+    }).catch(function (err) {
+      body.textContent = '';
+      empty(body, /^HTTP|Failed|fetch|NetworkError/i.test(err.message) ? 'Audience sentiment needs the API server (' + err.message + '). The static snapshot has no audience data.' : 'Audience sentiment: ' + err.message);
+    });
+  }
+
   function exEntityOptions() {
     var rows = T('entity_dim').slice(0, 1500);
     var map = {};
@@ -6915,8 +7446,8 @@
     }
     q.addEventListener('keydown', function (e) { if (e.key === 'Enter') { applyQ(); } });
     q.addEventListener('change', function () { if (EX.tile === 'viral' && topicByLabel[q.value.trim().toLowerCase()]) { applyQ(); } });
-    row2.appendChild(q);
-    if (EX.tile === 'viral' || EX.tile === 'topics') {
+    if (EX.tile !== 'aud') { row2.appendChild(q); }
+    if (EX.tile === 'viral' || EX.tile === 'topics' || EX.tile === 'aud') {
       var TYPES = [['', 'Any type'], ['PERSON', 'People'], ['ORG', 'Organisations'], ['LOCATION', 'Places (incl. countries)'], ['EVENT', 'Events']];
       var tsel = h('select', { class: 'ex-top', id: 'ex-ent-type', 'aria-label': 'Entity type' });
       TYPES.forEach(function (x) { var o = h('option', { text: x[1], value: x[0] }); if (EX.entType === x[0]) { o.selected = true; } tsel.appendChild(o); });
@@ -6958,7 +7489,7 @@
       });
       thsel.addEventListener('change', function () { EX.theme = thsel.value; EX.viral = null; EX.st = null; render(); });
       row2.appendChild(thsel);
-      if (EX.theme) {
+      if (EX.theme && EX.tile !== 'aud') {
         var tb = h('input', { type: 'checkbox', id: 'ex-theme-all' }); tb.checked = !!EX.themeAll;
         tb.addEventListener('change', function () { EX.themeAll = tb.checked; EX.viral = null; EX.st = null; render(); });
         row2.appendChild(h('label', { class: 'ex-plat-opt', title: 'Also include posts with a weaker match (about 59% right)' }, [tb, h('span', { text: ' Include lower-confidence' })]));
@@ -6990,7 +7521,7 @@
     var go = h('button', { type: 'button', class: 'df-preset-btn', text: 'Search' });
     go.addEventListener('click', applyQ);
     var rs = h('button', { type: 'button', class: 'df-preset-btn', text: 'Reset' });
-    rs.addEventListener('click', function () { EX.platforms = {}; EX.minPlat = 0; EX.q = ''; EX.topicId = ''; EX.topicName = ''; EX.entityUid = ''; EX.entityName = ''; EX.entType = ''; EX.entSub = ''; EX.theme = ''; EX.themeAll = false; EX.viral = null; EX.st = null; render(); });
+    rs.addEventListener('click', function () { EX.platforms = {}; EX.minPlat = 0; EX.q = ''; EX.topicId = ''; EX.topicName = ''; EX.entityUid = ''; EX.entityName = ''; EX.entType = ''; EX.entSub = ''; EX.audDates = { from: '', to: '' }; EX.audMin = 5; EX.audGapPlat = 'all'; EX.theme = ''; EX.themeAll = false; EX.viral = null; EX.st = null; render(); });
     row2.appendChild(go); row2.appendChild(rs);
     card.appendChild(row2);
     host.appendChild(card);
@@ -7005,6 +7536,7 @@
     else if (EX.tile === 'viral') { exViralView(card); }
     else if (EX.tile === 'spread') { exSpreadView(card); }
     else if (EX.tile === 'sent') { exSentView(card); }
+    else if (EX.tile === 'aud') { exAudView(card); }
     else { exLifeView(card); }
   };
 
