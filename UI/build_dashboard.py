@@ -433,6 +433,69 @@ def load_geo_tables(path: Path, log) -> tuple[dict, dict, str]:
             shutil.rmtree(tmp.parent, ignore_errors=True)
 
 
+def load_dtheme_tables(log=print) -> dict:
+    """Load daily metrics and dim for D01-D09 security themes from post_theme_v1.parquet."""
+    post_theme = ROOT / "data" / "post_theme_v1.parquet"
+    analytics_db = ROOT / "data" / "analytics.duckdb"
+    if not post_theme.exists() or not analytics_db.exists():
+        log("  (post_theme_v1 or analytics.duckdb not found; dtheme tables omitted)")
+        return {}
+    import duckdb
+    import pandas as pd
+    try:
+        con = duckdb.connect()
+        con.execute(f"ATTACH '{analytics_db}' AS adb (READ_ONLY)")
+        df_daily = con.execute(f"""
+            SELECT 
+                strftime(p.posted_at, '%Y-%m-%d') AS day,
+                t.theme AS topic_id,
+                p.platform,
+                COUNT(*)::DOUBLE AS V,
+                1.0 AS effort,
+                TRUE AS in_window,
+                TRUE AS support_ok
+            FROM read_parquet('{post_theme.as_posix()}') t
+            JOIN adb.post_facts p ON t.post_uid = p.post_uid
+            WHERE t.tier IN ('high', 'medium') OR t.theme = 'unassigned'
+            GROUP BY 1, 2, 3
+        """).fetchdf()
+
+        import taxonomy as taxonomy_lib
+        tax = taxonomy_lib.build()
+        sd = tax.get("axes", {}).get("security_domain", {})
+        entries = sd.get("entries", {})
+        rows = []
+        for tid in sd.get("order", []):
+            name = entries.get(tid, {}).get("display", tid)
+            n = int(df_daily[df_daily["topic_id"] == tid]["V"].sum())
+            rows.append({
+                "topic_id": tid,
+                "domain": "Security Theme",
+                "topic": name,
+                "label": f"Security / {name}",
+                "n_posts": n,
+                "description": f"Security theme {tid}: {name}"
+            })
+        n_un = int(df_daily[df_daily["topic_id"] == "unassigned"]["V"].sum()) if "unassigned" in df_daily["topic_id"].values else 0
+        rows.append({
+            "topic_id": "unassigned",
+            "domain": "Unassigned",
+            "topic": "unassigned",
+            "label": "Unassigned / unassigned",
+            "n_posts": n_un,
+            "description": "no security theme assigned"
+        })
+        df_dim = pd.DataFrame(rows)
+        log(f"  {'dtheme_metrics_daily':22s} {len(df_daily):8,d} rows x {len(df_daily.columns):2d} cols")
+        log(f"  {'dtheme_dim':22s} {len(df_dim):8,d} rows x {len(df_dim.columns):2d} cols")
+        return {"dtheme_metrics_daily": df_daily, "dtheme_dim": df_dim}
+    except Exception as exc:
+        log(f"  !! could not build dtheme tables: {type(exc).__name__}: {exc}")
+        return {}
+    finally:
+        con.close()
+
+
 def check_contract(tables: dict, log) -> dict:
     """Report -- never enforce -- differences against §5."""
     report = {"missing_tables": [], "empty_tables": [], "column_diffs": {}}
@@ -1897,6 +1960,8 @@ def build_payload(db: Path | None = None, *, fixture: bool = False, log=print,
     geo_db = Path(geo_db) if geo_db is not None else DEFAULT_GEO_DB
     geo_tables, geo_kpi, geo_mode = load_geo_tables(geo_db, log)
     tables.update(geo_tables)  # additive; distinct table names, no collisions
+    dtheme_tables = load_dtheme_tables(log)
+    tables.update(dtheme_tables)
 
     win = {"start": None, "end": None}
     rm = tables.get("run_meta")
@@ -1982,7 +2047,7 @@ def main() -> int:
         shell["_embed_data"] = False
         shell["tables"] = {
             k: payload["tables"][k]
-            for k in ("topic_dim", "platform_dim", "metric_meta", "tag_dim", "run_meta")
+            for k in ("topic_dim", "platform_dim", "metric_meta", "tag_dim", "run_meta", "dtheme_dim")
             if k in payload["tables"]
         }
         html = build_html(shell, tables, mode, source_label, report)

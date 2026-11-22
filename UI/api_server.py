@@ -230,6 +230,26 @@ def build_query(view: str, qs: dict):
         platform = qs.get("platform", [None])[0]
         ent_uid = qs.get("entity_uid", [None])[0]
         ent_sql = "p.post_uid IN (SELECT post_uid FROM geo.entity_mentions WHERE entity_uid = ?)"
+        if re.match(r"^[Dd]\d\d$", topic_id):
+            if not POST_THEME.exists():
+                raise ValueError("themes are not built yet: run scripts/27_post_theme.py")
+            if platform == "youtube_comment":
+                raise ValueError("security themes do not apply to YouTube comments")
+            where.append("pt.theme = ? AND pt.tier IN ('high', 'medium')")
+            params.append(topic_id.upper())
+            _platform_clause(qs, where, params)
+            if ent_uid:
+                where.append(ent_sql); params.append(ent_uid)
+            _day_clause(qs, where, params)
+            sk = _sort_key(qs)
+            sql = f"""
+                SELECT {POST_COLS}{POST_METRICS}, pt.zs_best_score AS confidence, count(*) OVER () AS total_rows
+                FROM read_parquet('{POST_THEME.as_posix()}') pt
+                JOIN analytics.post_facts p ON p.post_uid = pt.post_uid
+                WHERE {' AND '.join(where)}
+                ORDER BY {_order_posts(sk)}
+            """
+            return sql, params
         if platform == "youtube_comment" and ent_uid:
             raise ValueError("the entity filter does not apply to YouTube comments (they carry no entity mentions)")
         if platform == "youtube_comment":

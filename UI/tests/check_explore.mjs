@@ -65,7 +65,7 @@ check('Explore view shown, others hidden',
   doc.getElementById('advanced-view').style.display === 'none');
 check('data-mode is explore', doc.body.getAttribute('data-mode') === 'explore');
 const tiles = doc.querySelectorAll('.ex-tile');
-check('five tiles', tiles.length === 5, String(tiles.length));
+check('six tiles (the five original ones plus Audience Sentiment)', tiles.length === 6, String(tiles.length));
 check('tile titles', ['Trending Topics', 'Viral Posts', 'Cross-Platform Spread', 'Trend Lifecycle', 'Sentiment Analysis']
   .every((t) => [...tiles].some((x) => x.textContent.includes(t))));
 check('Needs attention / status panel rendered', !!doc.querySelector('#explore-view .attn-box'));
@@ -174,6 +174,11 @@ check('a search with no match empties Trending Topics', view().querySelectorAll(
 {
   [...doc.querySelectorAll('#explore-view .df-preset-btn')].find((x) => x.textContent === 'Reset').click(); await wait(500);
   [...doc.querySelectorAll('#explore-view .df-preset-btn')].find((x) => x.textContent === 'Full window').click(); await wait(600);
+  if (doc.getElementById('ex-topic-grain')) {
+    doc.getElementById('ex-topic-grain').value = 'macro';
+    doc.getElementById('ex-topic-grain').dispatchEvent(new dom.window.Event('change'));
+    await wait(600);
+  }
   await rows('topics');
   const names = [...view().querySelectorAll('.tv table tbody tr')].map((tr) => tr.children[0].textContent);
   check('the merged t004 + t005 topic names both subjects in its label (pakistan + bangladesh)', names.some((n) => /^Geopolitics \/ Neighbourhood \(pakistan \+ bangladesh\)$/.test(n)), names.join(' | '));

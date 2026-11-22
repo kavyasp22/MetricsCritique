@@ -1828,6 +1828,7 @@
     PLATMETA = {};
     T('metric_meta').forEach(function (m) { META[m.metric_key] = m; });
     T('topic_dim').forEach(function (t) { TOPIC[t.topic_id] = t; });
+    (T('dtheme_dim') || []).forEach(function (t) { TOPIC[t.topic_id] = t; });
     T('tag_dim').forEach(function (t) { TAG[t.tag_id] = t; });
     PLATFORMS = T('platform_dim').map(function (p) { return p.platform; });
     PLATMETA = {};
@@ -5636,7 +5637,7 @@
 
   var EX_ALL = 100000;     // "Show all": every row of a list; post lists are cut to the server limit below
   var EX_POST_CAP = 300;   // api_server MAX_LIMIT: most posts one list can fetch
-  var EX = { tile: 'topics', platforms: {}, q: '', entityUid: '', entityName: '', entType: '', entSub: '', terms: [], spreadMode: 'cards', spreadLimit: 10, top: 25, unclass: false, minPlat: 0, entTop: null, vrank: 'views', vper: 0, rt: 'include', floor: 'top10', vorder: 'biggest', topicId: '', topicName: '', theme: '', themeAll: false,
+  var EX = { tile: 'topics', platforms: {}, q: '', entityUid: '', entityName: '', entType: '', entSub: '', terms: [], spreadMode: 'cards', spreadLimit: 10, top: 25, unclass: false, minPlat: 0, entTop: null, vrank: 'views', vper: 0, rt: 'include', floor: 'top10', vorder: 'biggest', topicId: '', topicName: '', theme: '', themeAll: false, topicGrain: 'theme',
              viral: null, viralKey: '', st: null, stKey: '', scn: null, scnKey: '', aud: null, audKey: '', audBasis: 'post', audDates: { from: '', to: '' }, audMin: 5, audGapPlat: 'all' };
   var EX_TILES = [
     { k: 'topics', t: 'Trending Topics', s: "What's gaining attention?",
@@ -5708,11 +5709,12 @@
   }
 
   /* group the stored daily metric cells (topic x platform x day) over the selected range */
-  function exCells() {
+  function exCells(sourceTable) {
+    var tbl = sourceTable || 'metrics_daily';
     var days = exDays(), prev = exPrevDays(days);
     var cur = exSet(days), pre = exSet(prev), win = exSet(WINDAYS);
     var out = [];
-    T('metrics_daily').forEach(function (r) {
+    T(tbl).forEach(function (r) {
       var d = day(r.day);
       if (!exPlatOk(r.platform)) { return; }
       var inCur = cur[d] && (!S.windowOnly || win[d]), inPrev = pre[d];
@@ -5752,9 +5754,10 @@
   function exSeriesStage(daily, days, prevTotal) { return exStageDetail(daily, days, prevTotal).stage; }
 
   function exTopicRows() {
-    var g = exCells(), by = {};
+    var isTheme = (EX.topicGrain !== 'macro') && T('dtheme_metrics_daily') && T('dtheme_metrics_daily').length > 0;
+    var g = exCells(isTheme ? 'dtheme_metrics_daily' : 'metrics_daily'), by = {};
     g.cells.forEach(function (c) {
-      var r = c.r, tid = exTid(r.topic_id);
+      var r = c.r, tid = isTheme ? r.topic_id : exTid(r.topic_id);
       var o = by[tid] || (by[tid] = { topic_id: tid, cur: 0, prev: 0, plats: {}, alertDays: {}, emer: null, minq: null,
         mom: null, momDay: '', burstDays: {}, daily: {}, platV: {} });
       if (c.inPrev) { o.prev += (r.V || 0); }
@@ -5778,8 +5781,12 @@
       var o = by[tid], ok = o.prev >= EX_RULES.growthMinPrev && o.cur >= EX_RULES.growthMinCur;
       var sd = exStageDetail(o.daily, g.days, o.prev);
       var topP = Object.keys(o.platV).sort(function (x, y) { return o.platV[y] - o.platV[x]; })[0];
+      var lbl = topicLabel(tid);
+      if (isTheme && tid !== 'unassigned') {
+        lbl = exThemeName(tid);
+      }
       return {
-        topic_id: tid, topic: topicLabel(tid), posts: o.cur,
+        topic_id: tid, topic: lbl, posts: o.cur,
         growth: ok ? (o.cur - o.prev) / o.prev : null,
         emergence: o.emer, minq: o.minq,
         alert_days: Object.keys(o.alertDays).length, burst_days: Object.keys(o.burstDays).length,
@@ -6190,18 +6197,21 @@
   function exTopicsView(host) {
     if (EX.q || EX.theme) { return exSearchTrendView(host); }
     if (EX.entityUid) { return exEntityTopicsView(host); }
+    var isTheme = (EX.topicGrain !== 'macro') && T('dtheme_metrics_daily') && T('dtheme_metrics_daily').length > 0;
     var rows = exTopicRows().filter(function (r) { return !EX.minPlat || r.platforms >= EX.minPlat; }).sort(function (a, b) {
       var ea = a.emergence == null ? -1 : a.emergence, eb = b.emergence == null ? -1 : b.emergence;
       return eb - ea || b.posts - a.posts;
     }).slice(0, EX.top);
-    exExplain(host, 'Trending topics', 'Ranked by Emergence score, the pipeline’s single "popping up" number (blend of volume surprise, ' +
-      'acceleration, semantic novelty and days-to-threshold; relative to this run’s panel, so read it as a ranking, not a probability). ' +
-      'Alert days = days the volume jump was statistically significant (Benjamini–Hochberg q < 0.05); only cells with enough support are counted. ' +
-      'Growth compares the selected days with the same number of days just before them (shown only with at least 10 earlier and 20 current posts). ' +
-      'Momentum is the recent direction of volume, not a forecast. Stage compares the last 3 days with the 3 before, as posts per active channel ' +
-      '(starting / rising / peak / steady / declining; "too little data" under 20 posts in the last 6 days). ' +
-      'The Burst stage on Trend Lifecycle describes a single burst on one platform and uses a different rule, so the two can differ. ' +
-      '"Unclassified" (posts not assigned to a topic) is left out unless you tick the box. "Seen on" keeps only topics present on at least that many platforms. Click a row to open its posts.' );
+    exExplain(host, 'Trending topics', isTheme
+      ? 'Security themes (D01–D09) ranked by activity in the selected window. Shows posts, growth vs prior period, multi-platform presence, and stage (starting / rising / peak / steady / declining). Use the dropdown above to switch to macro clusters (t000–t007) if needed. Click a row to open its posts.'
+      : 'Ranked by Emergence score, the pipeline’s single "popping up" number (blend of volume surprise, ' +
+        'acceleration, semantic novelty and days-to-threshold; relative to this run’s panel, so read it as a ranking, not a probability). ' +
+        'Alert days = days the volume jump was statistically significant (Benjamini–Hochberg q < 0.05); only cells with enough support are counted. ' +
+        'Growth compares the selected days with the same number of days just before them (shown only with at least 10 earlier and 20 current posts). ' +
+        'Momentum is the recent direction of volume, not a forecast. Stage compares the last 3 days with the 3 before, as posts per active channel ' +
+        '(starting / rising / peak / steady / declining; "too little data" under 20 posts in the last 6 days). ' +
+        'The Burst stage on Trend Lifecycle describes a single burst on one platform and uses a different rule, so the two can differ. ' +
+        '"Unclassified" (posts not assigned to a topic) is left out unless you tick the box. "Seen on" keeps only topics present on at least that many platforms. Click a row to open its posts.' );
     exBigTopicNote(host, rows);
     tableView(host, [
       { k: 'topic', label: 'Topic' },
@@ -6216,7 +6226,7 @@
       { k: 'platforms', label: 'Platforms', num: true },
       { k: 'stage', label: 'Stage' }
     ], rows, {
-      label: 'Trending topics (' + rows.length + ')',
+      label: (isTheme ? 'Trending security themes (' : 'Trending topics (') + rows.length + ')',
       rowDrill: function (r) { return { view: 'topic', params: exDrillParams({ topic_id: r.topic_id }, true), title: r.topic, subtitle: S.from + ' \u2192 ' + S.to }; }
     });
     exWhyCards(host, rows);
@@ -6225,6 +6235,7 @@
 
   /* A topic that holds a large share of ALL collected posts cannot be one subject; its trend numbers then describe a mixture. */
   function exBigTopicNote(host, rows) {
+    if (EX.topicGrain !== 'macro' && T('dtheme_metrics_daily') && T('dtheme_metrics_daily').length > 0) { return; }
     var dims = T('topic_dim'), total = 0;
     dims.forEach(function (d) { total += (d.n_posts || 0); });
     if (!total) { return; }
@@ -7525,6 +7536,13 @@
       row2.appendChild(h('label', { class: 'ex-plat-opt' }, [ub, h('span', { text: ' Include Unclassified' })]));
     }
     if (EX.tile === 'topics' && !EX.entityUid) {
+      var gsel = h('select', { class: 'ex-top', id: 'ex-topic-grain', 'aria-label': 'Topic classification',
+                               title: 'Choose between Security themes (D01–D09) or Macro clusters (t000–t007)' });
+      [['theme', 'Security themes (D01–D09)'], ['macro', 'Macro clusters (t000–t007)']].forEach(function (x) {
+        var o = h('option', { text: x[1], value: x[0] }); if ((EX.topicGrain || 'theme') === x[0]) { o.selected = true; } gsel.appendChild(o);
+      });
+      gsel.addEventListener('change', function () { EX.topicGrain = gsel.value; render(); });
+      row2.appendChild(gsel);
       var psel = h('select', { class: 'ex-top', id: 'ex-minplat', 'aria-label': 'Seen on at least this many platforms',
                                title: 'Keep only topics that appear on at least this many platforms (cross-platform presence)' });
       [[0, 'Seen on any number of platforms'], [2, 'Seen on 2+ platforms'], [3, 'Seen on 3+ platforms'], [5, 'Seen on 5+ platforms']].forEach(function (x) {
@@ -7544,7 +7562,7 @@
     var go = h('button', { type: 'button', class: 'df-preset-btn', text: 'Search' });
     go.addEventListener('click', applyQ);
     var rs = h('button', { type: 'button', class: 'df-preset-btn', text: 'Reset' });
-    rs.addEventListener('click', function () { EX.platforms = {}; EX.minPlat = 0; EX.q = ''; EX.topicId = ''; EX.topicName = ''; EX.entityUid = ''; EX.entityName = ''; EX.entType = ''; EX.entSub = ''; EX.audDates = { from: '', to: '' }; EX.audMin = 5; EX.audGapPlat = 'all'; EX.theme = ''; EX.themeAll = false; EX.viral = null; EX.st = null; render(); });
+    rs.addEventListener('click', function () { EX.platforms = {}; EX.minPlat = 0; EX.q = ''; EX.topicId = ''; EX.topicName = ''; EX.entityUid = ''; EX.entityName = ''; EX.entType = ''; EX.entSub = ''; EX.audDates = { from: '', to: '' }; EX.audMin = 5; EX.audGapPlat = 'all'; EX.theme = ''; EX.themeAll = false; EX.topicGrain = 'theme'; EX.viral = null; EX.st = null; render(); });
     row2.appendChild(go); row2.appendChild(rs);
     card.appendChild(row2);
     host.appendChild(card);
