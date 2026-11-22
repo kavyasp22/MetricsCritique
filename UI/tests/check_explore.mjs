@@ -65,8 +65,8 @@ check('Explore view shown, others hidden',
   doc.getElementById('advanced-view').style.display === 'none');
 check('data-mode is explore', doc.body.getAttribute('data-mode') === 'explore');
 const tiles = doc.querySelectorAll('.ex-tile');
-check('six tiles (the five original ones plus Audience Sentiment)', tiles.length === 6, String(tiles.length));
-check('tile titles', ['Trending Topics', 'Viral Posts', 'Cross-Platform Spread', 'Trend Lifecycle', 'Sentiment Analysis']
+check('five tiles (including merged Sentiment & Audience)', tiles.length === 5, String(tiles.length));
+check('tile titles', ['Trending Topics', 'Viral Posts', 'Cross-Platform Spread', 'Trend Lifecycle', 'Sentiment & Audience']
   .every((t) => [...tiles].some((x) => x.textContent.includes(t))));
 check('Needs attention / status panel rendered', !!doc.querySelector('#explore-view .attn-box'));
 check('alerts show entity names, not raw keys like person:xyz', !/\b(person|org|location|event):[a-z_]/i.test(doc.querySelector('#explore-view').textContent.split('Social Signal Monitor')[0]) &&

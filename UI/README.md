@@ -39,3 +39,10 @@ there's no server behind it):
 python UI/build_dashboard.py --static-embed
 # then open index.html via file://
 ```
+
+## Explore > Audience Sentiment
+
+A tile on the Explore page (`/api/explore/audience`, `UI/audience_view.py`) that reads the v2 audience-sentiment tables in `data/audience_sentiment.duckdb` (read-only, one short connection per request):
+post tone, comment sentiment and reply sentiment kept apart, the audience-vs-post gap, trends, themes and coverage, for YouTube and Instagram. Filters: date range, platform, entity, theme. If the pipeline is rebuilding that file the tile shows a
+"being rebuilt" message. Details and limits: `docs/AUDIENCE_SENTIMENT_SPEC.md` (Dashboard section). Tests: `check_audience_api.py` (needs the data files) and `check_audience.mjs` (add `AUD_API=http://localhost:<port>` to run it against a live server).
+

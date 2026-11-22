@@ -50,3 +50,9 @@ well-formed page with quietly wrong content:
 > related paths are now covered by `check_related_hierarchy.py` (query layer) and
 > `check_dim_labels.mjs` (label + render layer); the filter path is **not**
 > currently covered by anything.
+
+| harness | what it pins down |
+|---|---|
+| `check_audience_api.py` | The Audience Sentiment endpoint against the real v2 tables: reads only v2 / layer tables, YouTube and Instagram counts equal the sources, shares / net / mean tone equal an independent recount, comment and reply layers stay separate, no duplicate posts, platform / theme / date / entity filters equal independent SQL, limited data gives None (never 0), posts without a post tone have no gap, zero-vs-missing statuses, 503 path, v1 tables unchanged. 46 checks. |
+| `check_audience.mjs` | The tile in jsdom: six tiles with the original five unchanged, three layers per platform, bars, gap, trends, themes (unknown theme kept), coverage, safe links, filters send their values, limited / empty / 503 states, other tiles unaffected; `AUD_API=...` adds a live run. |
+

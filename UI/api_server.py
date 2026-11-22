@@ -843,7 +843,7 @@ def explore_virality(qs, where, params, join, params_join, terms, limit):
         cur.close()
     return {"rank": "virality", "order": order, "per_platform": per, "total_posts": int(total), "rated_posts": int(rated),
             "floor_on": bool(floor_on), "floor_mode": mode if floor_on else "off", "below_floor": int(rated_all - rated),
-            "min_ref": VIRALITY_MIN_REF, "by_virality": _clean_posts(rows, terms), "terms": terms}
+            "min_ref": VIRALITY_MIN_REF, "by_virality": _clean_posts(rows, terms), "terms": terms, "thresh": qs.get("thresh", [""])[0]}
 
 
 def explore_viral(qs: dict) -> dict:
@@ -883,6 +883,9 @@ def explore_viral(qs: dict) -> dict:
     if qs.get("retweets", ["include"])[0] == "hide":
         where.append("NOT " + RETWEET_SQL)
     _theme_clause(qs, where, params)
+    thresh = qs.get("thresh", [""])[0]
+    if thresh == "viral" and POST_VIRALITY.exists():
+        where.append(f"p.post_uid IN (SELECT post_uid FROM read_parquet('{POST_VIRALITY.as_posix()}') WHERE activity_top10 OR virality_pct >= 0.80)")
     limit = _limit(qs)
     have_v = POST_VIRALITY.exists()
     vjoin = f" LEFT JOIN read_parquet('{POST_VIRALITY.as_posix()}') v ON v.post_uid = p.post_uid" if have_v else ""
@@ -912,7 +915,7 @@ def explore_viral(qs: dict) -> dict:
     def clean(rows):
         return _clean_posts(rows, terms)
 
-    out = {"total_posts": int(total), "with_views": clean(with_views), "without_views": clean(no_views), "terms": terms}
+    out = {"total_posts": int(total), "with_views": clean(with_views), "without_views": clean(no_views), "terms": terms, "thresh": thresh}
     try:
         nl = max(0, min(int(qs.get("latest", ["0"])[0]), 50))
     except ValueError:
@@ -1111,7 +1114,7 @@ def explore_search_trend(qs: dict) -> dict:
                 for k, v in cm.groupby("platform").size().sort_values(ascending=False).items()]
         anomaly = _search_anomaly(daily, d_from, d_to)
         speed = _platform_speed(m, tot_plat, d_from, d_to)
-        topics, themes, entities, tags, people = [], [], [], [], None
+        topics, themes, entities, tags, people, subtopics = [], [], [], [], None, []
         mm = m[in_cur | in_prev][["post_uid"]].assign(per=lambda x: "cur")
         mm["per"] = np.where(in_cur[in_cur | in_prev].to_numpy(), "cur", "prev")
         if len(mm):
