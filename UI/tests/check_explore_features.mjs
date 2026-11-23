@@ -62,21 +62,36 @@ doc.getElementById('mode-explore-btn').click(); await wait(800);
 // ---- why cards + methodology (Trending Topics) ----
 const why = doc.querySelectorAll('.ex-why-card');
 check('Trending Topics shows "why" cards (up to 5)', why.length > 0 && why.length <= 5, String(why.length));
-check('each card has plain-language bullets with posts, emergence rank, alert days and stage',
-  [...why].every((c) => { const t = c.textContent; return /posts between/.test(t) && /Emergence score .* rank \d+ of \d+/.test(t) && /(statistically significant|No day with)/.test(t) && /Stage /.test(t); }));
+check('each D-Themes card has plain-language bullets with posts, volume rank, and stage (no emergence/alerts)',
+  [...why].every((c) => { const t = c.textContent; return /posts between/.test(t) && /Rank \d+ of \d+ security themes .* \(ranked by post volume\)/.test(t) && /Stage /.test(t) && !/(statistically significant|No day with)/.test(t) && !/Emergence score/.test(t); }));
+
+// Switch to Macro clusters to validate Macro Topics why-cards
+const grainSel = doc.getElementById('ex-topic-grain');
+grainSel.value = 'macro';
+grainSel.dispatchEvent(new win.Event('change'));
+await wait(600);
+const macroWhy = doc.querySelectorAll('.ex-why-card');
+check('Macro Topics cards have plain-language bullets with posts, emergence rank, alert days and stage',
+  [...macroWhy].every((c) => { const t = c.textContent; return /posts between/.test(t) && /Emergence score .* rank \d+ of \d+/.test(t) && /(statistically significant|No day with)/.test(t) && /Stage /.test(t); }));
+grainSel.value = 'theme';
+grainSel.dispatchEvent(new win.Event('change'));
+await wait(600);
+
 const meth = doc.querySelector('.ex-method');
 check('"How this ranking is decided" panel exists', !!meth);
 check('methodology shows the live thresholds (25%, 20%, 10%, 6 days, 20 posts)',
   /rising ≥ \+25%/.test(meth.textContent) && /declining ≤ −20%/.test(meth.textContent) && /6\+ days and 20\+ posts/.test(meth.textContent));
+check('D-Themes methodology explains ranking by post volume', /Security themes are ranked by total post volume/.test(meth.textContent));
 
 // ---- thumbs on a why card ----
-const up = why[0].querySelector('.fb-up'), down = why[0].querySelector('.fb-down');
+const activeWhy = doc.querySelectorAll('.ex-why-card');
+const up = activeWhy[0].querySelector('.fb-up'), down = activeWhy[0].querySelector('.fb-down');
 check('thumbs up and down buttons are on the card', !!up && !!down);
 up.click(); await wait(300);
 check('thumb up posts the vote (topic, id, day, vote=1)', fbPosts.length === 1 && fbPosts[0].item_type === 'topic' && fbPosts[0].vote === 1 && !!fbPosts[0].item_id && !!fbPosts[0].user, JSON.stringify(fbPosts[0] || {}));
 check('thumb up shows as selected', up.classList.contains('on'));
 down.click(); await wait(200);
-const panel = why[0].querySelector('.fb-panel');
+const panel = activeWhy[0].querySelector('.fb-panel');
 check('thumb down opens the reasons list', !!panel && panel.querySelectorAll('input[type=checkbox]').length === 7);
 panel.querySelector('input[value=routine_volume]').checked = true;
 panel.querySelector('.fb-other').value = 'looks routine';

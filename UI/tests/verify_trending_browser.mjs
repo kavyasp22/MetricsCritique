@@ -97,21 +97,42 @@ async function run() {
 
   const macroCardTitle = view.querySelector('.tv-title')?.textContent || 'N/A';
   console.log('   Switched Table Title:', macroCardTitle);
-  const macroRows = [...table.querySelectorAll('tbody tr')].map((tr) => {
+  // Re-query table from view to avoid referencing stale detached DOM element
+  const macroTable = view.querySelector('.tv table');
+  if (!macroTable) {
+    throw new Error('Macro table not found after switching topic grain to macro');
+  }
+  const macroHeaders = [...macroTable.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+  console.log('   Macro Table Columns:', macroHeaders.join(' | '));
+  if (!macroHeaders.some((h) => h.includes('Emergence'))) {
+    throw new Error('Macro table missing Emergence column');
+  }
+  const macroRows = [...macroTable.querySelectorAll('tbody tr')].map((tr) => {
     return [...tr.querySelectorAll('td')].map((td) => td.textContent.trim()).join(' | ');
   });
   console.log('   Macro Clusters Rendered:');
   macroRows.forEach((r, i) => console.log(`   ${i + 1}. ${r}`));
+  if (macroRows.length === 0) {
+    throw new Error('No Macro cluster rows rendered');
+  }
 
   // 6. Test Switching Back to Theme
   console.log('\n7. Switching back to "Security themes (D01–D09)":');
   grainSel.value = 'theme';
   grainSel.dispatchEvent(new dom.window.Event('change'));
   await wait(600);
-  const backRowsCount = table.querySelectorAll('tbody tr').length;
+  // Re-query table after restoring security themes
+  const backTable = view.querySelector('.tv table');
+  if (!backTable) {
+    throw new Error('Theme table not found after switching topic grain to theme');
+  }
+  const backHeaders = [...backTable.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+  console.log('   Restored Security Theme columns:', backHeaders.join(' | '));
+  const backRowsCount = backTable.querySelectorAll('tbody tr').length;
   console.log('   Restored Security Theme rows count:', backRowsCount);
 
   console.log('\n=== VERIFICATION COMPLETE: ALL CHECKS PASSED ===');
+  process.exit(0);
 }
 
 run().catch((err) => {

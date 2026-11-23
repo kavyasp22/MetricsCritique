@@ -5751,8 +5751,8 @@
   }
   function exSeriesStage(daily, days, prevTotal) { return exStageDetail(daily, days, prevTotal).stage; }
 
-  function exTopicRows() {
-    var isTheme = (EX.topicGrain !== 'macro') && T('dtheme_metrics_daily') && T('dtheme_metrics_daily').length > 0;
+  function exTopicRows(forceMacro) {
+    var isTheme = !forceMacro && (EX.topicGrain !== 'macro') && T('dtheme_metrics_daily') && T('dtheme_metrics_daily').length > 0;
     var g = exCells(isTheme ? 'dtheme_metrics_daily' : 'metrics_daily'), by = {};
     g.cells.forEach(function (c) {
       var r = c.r, tid = isTheme ? r.topic_id : exTid(r.topic_id);
@@ -5786,9 +5786,10 @@
       return {
         topic_id: tid, topic: lbl, posts: o.cur,
         growth: ok ? (o.cur - o.prev) / o.prev : null,
-        emergence: o.emer, minq: o.minq,
-        alert_days: Object.keys(o.alertDays).length, burst_days: Object.keys(o.burstDays).length,
-        momentum: o.mom, platforms: Object.keys(o.plats).length,
+        emergence: isTheme ? null : o.emer, minq: isTheme ? null : o.minq,
+        alert_days: isTheme ? null : Object.keys(o.alertDays).length,
+        burst_days: isTheme ? null : Object.keys(o.burstDays).length,
+        momentum: isTheme ? null : o.mom, platforms: Object.keys(o.plats).length,
         stage: sd.stage, stage_change: sd.change, prev: o.prev,
         top_platform: topP || null, top_share: topP && o.cur ? o.platV[topP] / o.cur : null,
         plat_names: Object.keys(o.plats)
@@ -5830,7 +5831,7 @@
           '. Posts on those platforms after that day are not counted, so counts for this entity can be lower than the real activity.' }));
       }
       var whole = {};
-      exTopicRows().forEach(function (r) { whole[r.topic_id] = r; });
+      exTopicRows(true).forEach(function (r) { whole[r.topic_id] = r; });
       var by = {};
       d.rows.forEach(function (r) {
         var t = exTid(r.topic_id), o = by[t] || (by[t] = { topic_id: t, cur: 0, prev: 0 });
@@ -5848,7 +5849,7 @@
         { k: 'prev', label: 'Previous period', num: true, fmt: fmtInt },
         { k: 'growth', label: 'Growth', num: true, fmt: function (v) { return v == null ? '—' : (v >= 0 ? '+' : '') + Math.round(v * 100) + '%'; } },
         { k: 'emergence', label: 'Emergence (whole topic)', num: true, fmt: function (v) { return v == null ? '—' : Number(v).toFixed(2); } },
-        { k: 'alert_days', label: 'Alert days (whole topic)', num: true },
+        { k: 'alert_days', label: 'Alert days (whole topic)', num: true, fmt: function (v) { return v == null ? '—' : v; } },
         { k: 'stage', label: 'Stage (whole topic)' }
       ], rows, {
         label: 'Topics naming ' + nm + ' (' + rows.length + ')',
@@ -6201,7 +6202,7 @@
       return eb - ea || b.posts - a.posts;
     }).slice(0, EX.top);
     exExplain(host, 'Trending topics', isTheme
-      ? 'Security themes (D01–D09) ranked by activity in the selected window. Shows posts, growth vs prior period, multi-platform presence, and stage (starting / rising / peak / steady / declining). Use the dropdown above to switch to macro clusters (t000–t007) if needed. Click a row to open its posts.'
+      ? 'Security themes (D01–D09) ranked by post volume in the selected window. Shows posts, growth vs prior period, multi-platform presence, and stage (starting / rising / peak / steady / declining; based on daily post trajectory). Use the dropdown above to switch to macro clusters (t000–t007) if needed. Click a row to open its posts.'
       : 'Ranked by Emergence score, the pipeline’s single "popping up" number (blend of volume surprise, ' +
         'acceleration, semantic novelty and days-to-threshold; relative to this run’s panel, so read it as a ranking, not a probability). ' +
         'Alert days = days the volume jump was statistically significant (Benjamini–Hochberg q < 0.05); only cells with enough support are counted. ' +
@@ -6211,24 +6212,32 @@
         'The Burst stage on Trend Lifecycle describes a single burst on one platform and uses a different rule, so the two can differ. ' +
         '"Unclassified" (posts not assigned to a topic) is left out unless you tick the box. "Seen on" keeps only topics present on at least that many platforms. Click a row to open its posts.' );
     exBigTopicNote(host, rows);
-    tableView(host, [
+    var cols = isTheme ? [
+      { k: 'topic', label: 'Theme' },
+      { k: 'posts', label: 'Posts', num: true, fmt: function (v) { return fmtInt(v); } },
+      { k: 'growth', label: 'Growth', num: true,
+        fmt: function (v) { return v == null ? '\u2014' : (v >= 0 ? '+' : '') + Math.round(v * 100) + '%'; } },
+      { k: 'platforms', label: 'Platforms', num: true },
+      { k: 'stage', label: 'Stage' }
+    ] : [
       { k: 'topic', label: 'Topic' },
       { k: 'posts', label: 'Posts', num: true, fmt: function (v) { return fmtInt(v); } },
       { k: 'growth', label: 'Growth', num: true,
         fmt: function (v) { return v == null ? '\u2014' : (v >= 0 ? '+' : '') + Math.round(v * 100) + '%'; } },
       { k: 'emergence', label: 'Emergence', num: true, fmt: function (v) { return v == null ? '\u2014' : Number(v).toFixed(2); } },
       { k: 'minq', label: 'Min q', num: true, fmt: function (v) { return v == null ? '\u2014' : (v < 0.001 ? '<0.001' : Number(v).toFixed(3)); } },
-      { k: 'alert_days', label: 'Alert days', num: true },
-      { k: 'burst_days', label: 'Burst days', num: true },
+      { k: 'alert_days', label: 'Alert days', num: true, fmt: function (v) { return v == null ? '\u2014' : v; } },
+      { k: 'burst_days', label: 'Burst days', num: true, fmt: function (v) { return v == null ? '\u2014' : v; } },
       { k: 'momentum', label: 'Momentum', num: true, fmt: function (v) { return v == null ? '\u2014' : (v >= 0 ? '+' : '') + Number(v).toFixed(2); } },
       { k: 'platforms', label: 'Platforms', num: true },
       { k: 'stage', label: 'Stage' }
-    ], rows, {
+    ];
+    tableView(host, cols, rows, {
       label: (isTheme ? 'Trending security themes (' : 'Trending topics (') + rows.length + ')',
       rowDrill: function (r) { return { view: 'topic', params: exDrillParams({ topic_id: r.topic_id }, true), title: r.topic, subtitle: S.from + ' \u2192 ' + S.to }; }
     });
-    exWhyCards(host, rows);
-    exMethodology(host);
+    exWhyCards(host, rows, isTheme);
+    exMethodology(host, isTheme);
   }
 
   /* A topic that holds a large share of ALL collected posts cannot be one subject; its trend numbers then describe a mixture. */
@@ -6245,19 +6254,29 @@
   }
 
   /* plain-language reasons, each one a number the table already shows */
-  function exWhyBullets(r, rank, n) {
+  function exWhyBullets(r, rank, n, isTheme) {
     var b = [], nd = exDays().length;
     b.push(fmtInt(r.posts) + ' posts between ' + S.from + ' and ' + S.to + (r.growth != null
       ? ' \u2014 ' + (r.growth >= 0 ? '+' : '') + Math.round(r.growth * 100) + '% against the previous ' + (nd === 1 ? 'day' : nd + ' days') + ' (' + fmtInt(r.prev) + ' posts).'
       : ' \u2014 too few posts in one of the two periods to compare growth.'));
-    if (r.emergence != null) { b.push('Emergence score ' + Number(r.emergence).toFixed(2) + ', rank ' + rank + ' of ' + n + ' topics in this view.'); }
-    b.push(r.alert_days > 0 ? r.alert_days + ' day' + (r.alert_days === 1 ? '' : 's') + ' where the jump in volume was statistically significant (q < ' + EX_RULES.alpha + ').'
-      : 'No day with a statistically significant jump.');
-    b.push('Stage ' + r.stage + (r.stage_change != null ? ': the last 3 days are ' + (r.stage_change >= 0 ? '+' : '') + Math.round(r.stage_change * 100) + '% against the 3 before (posts per active channel).' : '.'));
+    if (!isTheme && r.emergence != null) {
+      b.push('Emergence score ' + Number(r.emergence).toFixed(2) + ', rank ' + rank + ' of ' + n + ' topics in this view.');
+    } else if (isTheme) {
+      b.push('Rank ' + rank + ' of ' + n + ' security themes in this view (ranked by post volume).');
+    }
+    if (!isTheme && r.alert_days != null) {
+      b.push(r.alert_days > 0 ? r.alert_days + ' day' + (r.alert_days === 1 ? '' : 's') + ' where the jump in volume was statistically significant (q < ' + EX_RULES.alpha + ').'
+        : 'No day with a statistically significant jump.');
+    }
+    if (isTheme) {
+      b.push('Stage ' + r.stage + (r.stage_change != null ? ': the last 3 days are ' + (r.stage_change >= 0 ? '+' : '') + Math.round(r.stage_change * 100) + '% against the 3 before (post volume).' : '.'));
+    } else {
+      b.push('Stage ' + r.stage + (r.stage_change != null ? ': the last 3 days are ' + (r.stage_change >= 0 ? '+' : '') + Math.round(r.stage_change * 100) + '% against the 3 before (posts per active channel).' : '.'));
+    }
     if (r.top_platform) { b.push('Seen on ' + r.platforms + ' platform' + (r.platforms === 1 ? '' : 's') + '; the largest is ' + r.top_platform + ' (' + Math.round(100 * r.top_share) + '% of the posts).'); }
     return b;
   }
-  function exWhyCards(host, rows) {
+  function exWhyCards(host, rows, isTheme) {
     var top = rows.slice(0, 5);
     if (!top.length) { return; }
     host.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Why these are trending (top ' + top.length + ')' }));
@@ -6266,7 +6285,7 @@
       var card = h('article', { class: 'ex-why-card' });
       card.appendChild(h('div', { class: 'ex-why-hd' }, [h('b', { text: (i + 1) + '. ' + r.topic }), h('span', { class: 'ex-why-st', text: r.stage })]));
       var ul = h('ul', { class: 'ex-why-ul' });
-      exWhyBullets(r, i + 1, rows.length).forEach(function (t) { ul.appendChild(h('li', { text: t })); });
+      exWhyBullets(r, i + 1, rows.length, isTheme).forEach(function (t) { ul.appendChild(h('li', { text: t })); });
       card.appendChild(ul);
       var act = h('div', { class: 'ex-why-act' });
       var vb = h('button', { type: 'button', class: 'df-preset-btn', text: 'View posts' });
@@ -6280,20 +6299,31 @@
   }
 
   /* "How this is decided": formulas come from the stored metric definitions; thresholds from EX_RULES (the same numbers the code uses) */
-  function exMethodology(host) {
+  function exMethodology(host, isTheme) {
     var det = h('details', { class: 'ex-method' });
     det.appendChild(h('summary', { text: 'How this ranking is decided' }));
     var meta = {};
     T('metric_meta').forEach(function (m) { meta[m.metric_key] = m; });
     var R = EX_RULES;
-    var rows = [
-      ['Ranking', (meta.emergence_score ? meta.emergence_score.formula : 'Emergence score'), 'Topics are sorted by emergence score, then by posts. The score is relative to this run\u2019s panel: a ranking, not a probability.'],
-      ['Alert day', (meta.surprise ? meta.surprise.formula : 'Volume surprise'), 'A day counts when its jump is significant after Benjamini\u2013Hochberg correction (q < ' + R.alpha + ') and the cell has enough support.'],
-      ['Growth', 'posts in the selected days \u00f7 posts in the same number of days just before, minus 1', 'Shown only with at least ' + R.growthMinPrev + ' earlier and ' + R.growthMinCur + ' current posts; otherwise \u201c\u2014\u201d.'],
-      ['Momentum', (meta.momentum ? meta.momentum.formula : 'EMA7 \u2212 EMA21 of growth'), 'Describes the recent direction of volume; it is not a forecast.'],
-      ['Stage', 'last 3 days vs the 3 before, as posts per active channel', 'rising \u2265 +' + Math.round((R.rise - 1) * 100) + '%; declining \u2264 \u2212' + Math.round((1 - R.fall) * 100) + '%; peak = flat and within ' + Math.round((1 - R.peakBand) * 100) + '% of the best 3-day level; steady = flat below it; starting = rising and the earlier period was under ' + Math.round(R.startPrev * 100) + '% as large (ranges up to ' + R.startMaxDays + ' days). Needs ' + R.stageDays + '+ days and ' + R.stageMinPosts + '+ posts in the last ' + R.stageDays + '.'],
-      ['Left out', 'Unclassified', 'Posts not assigned to a topic are excluded unless \u201cInclude Unclassified\u201d is ticked.']
-    ];
+    var rows;
+    if (isTheme) {
+      rows = [
+        ['Ranking', 'Post volume', 'Security themes are ranked by total post volume in the selected date window.'],
+        ['Growth', 'posts in the selected days \u00f7 posts in the same number of days just before, minus 1', 'Shown only with at least ' + R.growthMinPrev + ' earlier and ' + R.growthMinCur + ' current posts; otherwise \u201c\u2014\u201d.'],
+        ['Stage', 'last 3 days vs the 3 before', 'rising \u2265 +' + Math.round((R.rise - 1) * 100) + '%; declining \u2264 \u2212' + Math.round((1 - R.fall) * 100) + '%; peak = flat and within ' + Math.round((1 - R.peakBand) * 100) + '% of the best 3-day level; steady = flat below it; starting = rising and the earlier period was under ' + Math.round(R.startPrev * 100) + '% as large (ranges up to ' + R.startMaxDays + ' days). Needs ' + R.stageDays + '+ days and ' + R.stageMinPosts + '+ posts in the last ' + R.stageDays + ' (calculated directly from post volume without channel-effort normalization).'],
+        ['Platforms', 'Platform count', 'Number of distinct platforms on which the security theme was observed.'],
+        ['Left out', 'Unassigned', 'Posts not assigned to a security theme are excluded unless \u201cInclude Unclassified\u201d is ticked.']
+      ];
+    } else {
+      rows = [
+        ['Ranking', (meta.emergence_score ? meta.emergence_score.formula : 'Emergence score'), 'Topics are sorted by emergence score, then by posts. The score is relative to this run\u2019s panel: a ranking, not a probability.'],
+        ['Alert day', (meta.surprise ? meta.surprise.formula : 'Volume surprise'), 'A day counts when its jump is significant after Benjamini\u2013Hochberg correction (q < ' + R.alpha + ') and the cell has enough support.'],
+        ['Growth', 'posts in the selected days \u00f7 posts in the same number of days just before, minus 1', 'Shown only with at least ' + R.growthMinPrev + ' earlier and ' + R.growthMinCur + ' current posts; otherwise \u201c\u2014\u201d.'],
+        ['Momentum', (meta.momentum ? meta.momentum.formula : 'EMA7 \u2212 EMA21 of growth'), 'Describes the recent direction of volume; it is not a forecast.'],
+        ['Stage', 'last 3 days vs the 3 before, as posts per active channel', 'rising \u2265 +' + Math.round((R.rise - 1) * 100) + '%; declining \u2264 \u2212' + Math.round((1 - R.fall) * 100) + '%; peak = flat and within ' + Math.round((1 - R.peakBand) * 100) + '% of the best 3-day level; steady = flat below it; starting = rising and the earlier period was under ' + Math.round(R.startPrev * 100) + '% as large (ranges up to ' + R.startMaxDays + ' days). Needs ' + R.stageDays + '+ days and ' + R.stageMinPosts + '+ posts in the last ' + R.stageDays + '.'],
+        ['Left out', 'Unclassified', 'Posts not assigned to a topic are excluded unless \u201cInclude Unclassified\u201d is ticked.']
+      ];
+    }
     var tb = h('table', { class: 'ex-method-t' });
     tb.appendChild(h('thead', {}, [h('tr', {}, ['Item', 'Definition', 'Rule'].map(function (x) { return h('th', { text: x }); }))]));
     var body = h('tbody');

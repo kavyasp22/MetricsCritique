@@ -80,8 +80,23 @@ check('Trending Topics table has rows', doc.querySelectorAll('#explore-view [dat
 const view = () => doc.querySelector('#explore-view [data-panel="explore_view"]');
 const rows = (k) => { [...doc.querySelectorAll('.ex-tile')].find((x) => x.dataset.tile === k).click(); return wait(500).then(() => view().querySelectorAll('.tv table tbody tr').length); };
 const topicHead = [...view().querySelectorAll('.tv table thead th')].map((x) => x.textContent);
-check('Trending Topics uses the stored metrics (emergence, q-value, alert days, momentum)',
-  ['Emergence', 'Min q', 'Alert days', 'Burst days', 'Momentum'].every((c) => topicHead.some((h) => h.includes(c))), topicHead.join(' | '));
+check('Trending security themes (default grain) shows supported columns (Theme, Posts, Growth, Platforms, Stage)',
+  ['Theme', 'Posts', 'Growth', 'Platforms', 'Stage'].every((c) => topicHead.some((h) => h.includes(c))), topicHead.join(' | '));
+check('Trending security themes hides unsupported metric columns (Emergence, Min q, Alert days, Burst days, Momentum)',
+  !['Emergence', 'Min q', 'Alert days', 'Burst days', 'Momentum'].some((c) => topicHead.some((h) => h.includes(c))), topicHead.join(' | '));
+
+// Switch to Macro Clusters to test Macro Topics columns
+const grain = doc.getElementById('ex-topic-grain');
+grain.value = 'macro';
+grain.dispatchEvent(new dom.window.Event('change'));
+await wait(500);
+const macroHead = [...view().querySelectorAll('.tv table thead th')].map((x) => x.textContent);
+check('Macro Topics uses the stored metrics (emergence, q-value, alert days, momentum)',
+  ['Emergence', 'Min q', 'Alert days', 'Burst days', 'Momentum'].every((c) => macroHead.some((h) => h.includes(c))), macroHead.join(' | '));
+grain.value = 'theme';
+grain.dispatchEvent(new dom.window.Event('change'));
+await wait(500);
+
 const topicNames = [...view().querySelectorAll('.tv table tbody tr')].map((tr) => tr.children[0].textContent.trim());
 check('Unclassified is left out of Trending Topics by default', !topicNames.includes('Unclassified'), topicNames.join(', '));
 const stages = [...view().querySelectorAll('.tv table tbody tr')].map((tr) => tr.children[topicHead.findIndex((x) => x.includes('Stage'))].textContent.trim());
