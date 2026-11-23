@@ -159,6 +159,7 @@ await tile('topics');
   await wait(500);
   const who = doc.querySelector('.ex-rel-who');
   check('a "Who is involved" group appears with the type and subtype in its title', !!who && /Who is involved · People · /.test(who.querySelector('.ex-rel-title').textContent), who && who.querySelector('.ex-rel-title').textContent);
+  check('the "Who is involved" group is collapsed by default', !who.open);
   check('the scenario search is asked for the typed words, the days and the type', scnCalls.length === 1 && /scenario=iran%20war/.test(scnCalls[0]) && /entity_type=PERSON/.test(scnCalls[0]) && /entity_subtype=political_leader/.test(scnCalls[0]) && /from=/.test(scnCalls[0]), scnCalls[0]);
   const scn = who.querySelector('.ex-who-scn');
   const rowsS = [...scn.querySelectorAll('.ex-rel-row')].map((r) => r.textContent);

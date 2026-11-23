@@ -6050,7 +6050,17 @@
       // ---- who is involved: asked for by choosing a type (and subtype) next to the search
       if (d.people) {
         var KIND = { PERSON: 'People', ORG: 'Organisations', LOCATION: 'Places', EVENT: 'Events' };
-        var pg = h('div', { class: 'ex-rel-group ex-rel-who' }, [h('div', { class: 'ex-rel-title', text: 'Who is involved · ' + (KIND[d.people.type] || d.people.type) + (d.people.subtype ? ' · ' + subtypeName(d.people.subtype) : '') })]);
+        var pg = h('details', { class: 'ex-rel-group ex-rel-who' });
+        var titleText = 'Who is involved · ' + (KIND[d.people.type] || d.people.type) + (d.people.subtype ? ' · ' + subtypeName(d.people.subtype) : '');
+        var hint = h('span', { class: 'ex-explain-hint', text: ' \u2014 click to expand' });
+        var sum = h('summary', {}, [
+          h('span', { class: 'ex-rel-title', text: titleText }),
+          hint
+        ]);
+        pg.addEventListener('toggle', function () {
+          hint.textContent = pg.open ? ' \u2014 click to collapse' : ' \u2014 click to expand';
+        });
+        pg.appendChild(sum);
         var qBase = function (name) { return (EX.q ? EX.q + ' ' : '') + '"' + name + '"'; };
         var fb = h('div', { class: 'ex-who-fallback' });
         d.people.rows.forEach(function (r) {

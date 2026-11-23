@@ -2963,6 +2963,11 @@ body[data-mode="explore"] #global-filters { display: none !important; }
 .ex-rel-declining, .ex-rel-few { opacity: 0.6; }
 
 .ex-rel-who { margin: 0.8rem 0; }
+.ex-rel-who > summary { cursor: pointer; list-style: none; margin-bottom: 0.4rem; font-size: 0.85rem; color: var(--ink-2); display: flex; align-items: baseline; gap: 0.4rem; }
+.ex-rel-who > summary::-webkit-details-marker { display: none; }
+.ex-rel-who > summary::before { content: "+ "; color: var(--gold, #d6aa3c); font-weight: 600; }
+.ex-rel-who[open] > summary::before { content: "\2212\00a0"; }
+.ex-rel-who > summary .ex-rel-title { margin-bottom: 0; }
 .ex-who-posts { margin: 0.2rem 0 0.6rem 1.2rem; padding-left: 0.6rem; border-left: 2px solid currentColor; }
 
 .ex-who-why { margin: 0.3rem 0 0.1rem; font-style: italic; }
