@@ -5222,7 +5222,7 @@
     var body = h('div');
     body.appendChild(h('div', { class: 'attn-hd', text: 'Needs attention' }));
     body.appendChild(h('div', { class: 'attn-body' }, [txt('Unusual activity in '), h('b', { text: name }), txt(' on ' + fmtDayFull(top.day) + '.')]));
-    body.appendChild(h('div', { class: 'attn-vote' }, [h('span', { class: 'cs', text: 'Is this useful? ' }), FB.buttons('alert', top.dimType + '|' + top.key, name, day(top.day))]));
+    /* body.appendChild(h('div', { class: 'attn-vote' }, [h('span', { class: 'cs', text: 'Is this useful? ' }), FB.buttons('alert', top.dimType + '|' + top.key, name, day(top.day))])); */
     body.appendChild(h('div', { class: 'attn-note', text: alerts.length + ' alert' + (alerts.length === 1 ? '' : 's') + ' flagged in the selected window.' + (top.rationale ? ' ' + top.rationale : '') }));
     box.appendChild(body);
 
@@ -5646,8 +5646,8 @@
       i: '<path d="M12 3c1 3 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-3-1-5 1-9z"/>' },
     { k: 'spread', t: 'Cross-Platform Spread', s: 'Where is the story spreading?',
       i: '<circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v5M12 12l-6 5M12 12l6 5"/>' },
-    { k: 'life', t: 'Trend Lifecycle', s: 'Is it rising, peaking or declining?',
-      i: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 14l3-3 3 3 4-5"/>' },
+    /* { k: 'life', t: 'Trend Lifecycle', s: 'Is it rising, peaking or declining?',
+      i: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 14l3-3 3 3 4-5"/>' }, */
     { k: 'sent', t: 'Sentiment & Audience', s: 'Author tone & audience reactions',
       i: '<circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9.5h.01M15 9.5h.01"/>' }
   ];
@@ -6103,9 +6103,15 @@
       var lead = (olds.length ? 'Already active before the selected days on ' + olds.slice(0, 3).join(', ') + '. ' : '') +
         (starts.length ? 'First seen on ' + starts.slice(0, 3).map(function (r) { return r.platform + ' (' + r.first_day + ')'; }).join(', then ') + '.' : '');
       if (lead) { wr.appendChild(h('div', { class: 'cs', text: lead })); }
-      body.appendChild(wr);
-      // ---- related trending: topics, themes, people / organisations / places, hashtags
-      body.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Related trending' }));
+      var platDet = h('details', { class: 'explain', style: 'margin-top:0.8rem;border:1px solid var(--gold-hair,rgba(143,163,191,0.25));border-radius:8px;padding:0.4rem 0.75rem;background:var(--surface,#161b22);' });
+      var platSummary = h('summary', { style: 'cursor:pointer;font-size:0.85rem;font-weight:600;color:var(--gold,#e3bc4b);user-select:none;display:flex;align-items:center;gap:0.5rem;' }, [
+        txt('By platform breakdown '),
+        h('span', { class: 'hint', text: '(click to expand)' })
+      ]);
+      platDet.appendChild(platSummary);
+      platDet.appendChild(wr);
+      body.appendChild(platDet);
+      // ---- related trending: topics, themes, people / organisations / places, hashtags (collapsible)
       var words = (d.terms || []).map(function (w) { return String(w).toLowerCase(); });
       var whole = {}; exTopicRows().forEach(function (r) { whole[r.topic_id] = r; });
       var tmap = {};
@@ -6167,7 +6173,14 @@
       }
       grid.appendChild(relGroup('People, organisations and places', 'From the production entity extract; some platforms stop earlier.', entRows, 'No entity is named in at least 5 of these posts.'));
       grid.appendChild(relGroup('Hashtags', '', tagRows, 'No hashtag appears in at least 5 of these posts.'));
-      body.appendChild(grid);
+      var relDet = h('details', { class: 'explain', style: 'margin-top:0.8rem;border:1px solid var(--gold-hair,rgba(143,163,191,0.25));border-radius:8px;padding:0.4rem 0.75rem;background:var(--surface,#161b22);' });
+      var relSummary = h('summary', { style: 'cursor:pointer;font-size:0.85rem;font-weight:600;color:var(--gold,#e3bc4b);user-select:none;display:flex;align-items:center;gap:0.5rem;' }, [
+        txt('Related trending topics, entities & hashtags '),
+        h('span', { class: 'hint', text: '(click to expand)' })
+      ]);
+      relDet.appendChild(relSummary);
+      relDet.appendChild(grid);
+      body.appendChild(relDet);
       // ---- the posts behind it
       body.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Posts behind it' }));
       var pbox = h('div', { class: 'ex-cols' }, [h('div', { class: 'empty', text: 'Loading…' })]);
@@ -6207,9 +6220,17 @@
     if (EX.q || EX.theme) { return exSearchTrendView(host); }
     if (EX.entityUid) { return exEntityTopicsView(host); }
     var isTheme = (EX.topicGrain !== 'macro') && T('dtheme_metrics_daily') && T('dtheme_metrics_daily').length > 0;
+    function exTrendingScore(r) {
+      // Prioritize genuinely surging / breaking out topics: starting (5), rising (4), peak (2), steady (1), declining (-3)
+      var s = (r.stage === 'starting' ? 5 : (r.stage === 'rising' ? 4 : (r.stage === 'peak' ? 2 : (r.stage === 'steady' ? 1 : -3))));
+      var g = (r.growth != null && isFinite(r.growth)) ? r.growth : 0;
+      var sc = (r.stage_change != null && isFinite(r.stage_change)) ? r.stage_change : 0;
+      var em = (r.emergence != null) ? r.emergence : 0;
+      return (s * 10) + (g * 2) + sc + (em * 3);
+    }
     var rows = exTopicRows().filter(function (r) { return !EX.minPlat || r.platforms >= EX.minPlat; }).sort(function (a, b) {
-      var ea = a.emergence == null ? -1 : a.emergence, eb = b.emergence == null ? -1 : b.emergence;
-      return eb - ea || b.posts - a.posts;
+      var sa = exTrendingScore(a), sb = exTrendingScore(b);
+      return sb - sa || (b.posts - a.posts);
     }).slice(0, EX.top);
     exExplain(host, 'Trending topics', isTheme
       ? 'Security themes (D01–D09) ranked by post volume in the selected window. Shows posts, growth vs prior period, multi-platform presence, and stage (starting / rising / peak / steady / declining; based on daily post trajectory). Use the dropdown above to switch to macro clusters (t000–t007) if needed. Click a row to open its posts.'
@@ -6272,7 +6293,7 @@
     if (!isTheme && r.emergence != null) {
       b.push('Emergence score ' + Number(r.emergence).toFixed(2) + ', rank ' + rank + ' of ' + n + ' topics in this view.');
     } else if (isTheme) {
-      b.push('Rank ' + rank + ' of ' + n + ' security themes in this view (ranked by post volume).');
+      b.push('Rank ' + rank + ' of ' + n + ' themes in this view (ranked by trending momentum & growth).');
     }
     if (!isTheme && r.alert_days != null) {
       b.push(r.alert_days > 0 ? r.alert_days + ' day' + (r.alert_days === 1 ? '' : 's') + ' where the jump in volume was statistically significant (q < ' + EX_RULES.alpha + ').'
@@ -6287,7 +6308,10 @@
     return b;
   }
   function exWhyCards(host, rows, isTheme) {
-    var top = rows.slice(0, 5);
+    // Only showcase topics that are actually trending (rising, starting, peak with growth, NOT declining)
+    var activeTrending = rows.filter(function (r) { return r.stage === 'rising' || r.stage === 'starting' || (r.stage === 'peak' && (r.growth == null || r.growth >= 0)); });
+    var top = (activeTrending.length >= 3 ? activeTrending : rows.filter(function (r) { return r.stage !== 'declining'; })).slice(0, 5);
+    if (!top.length) { top = rows.slice(0, 5); }
     if (!top.length) { return; }
     host.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Why these are trending (top ' + top.length + ')' }));
     var list = h('div', { class: 'ex-why' });
@@ -7505,8 +7529,8 @@
     return map;
   }
 
-  P.explore_attention = function (host) { P.basic_attention(host); };
-  P.explore_alerts = function (host) { P.basic_alerts_list(host); };
+  P.explore_attention = function (host) { /* Hidden from explore page */ };
+  P.explore_alerts = function (host) { /* Hidden from explore page */ };
 
   P.explore_tiles = function (host) {
     var card = h('div', { class: 'card ex-card' });
@@ -7765,7 +7789,8 @@
     }
     var stored = null;
     try { stored = localStorage.getItem('z-mode'); } catch (e) { stored = null; }
-    setMode(stored === 'advanced' || stored === 'explore' ? stored : 'basic');
+    setMode(stored === 'advanced' || stored === 'basic' ? stored : 'explore');
+    window.setDashboardMode = setMode;
     basicBtn.addEventListener('click', function () { setMode('basic'); });
     advBtn.addEventListener('click', function () { setMode('advanced'); });
     if (expBtn) { expBtn.addEventListener('click', function () { setMode('explore'); }); }

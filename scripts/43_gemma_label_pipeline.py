@@ -16,6 +16,10 @@ The taxonomy (Topics + Rules sheets) is frozen into data/gold/taxonomy_v1.json o
 Reads   data/analytics.duckdb (read-only), data/post_domain_zs.parquet, data/post_theme_v1.parquet, data/gold/*.parquet, GEMMA_* from .env
 Writes  data/gold/gemma_label_<set>_v1.parquet   (versioned, git-ignored)
 Usage   python scripts/43_gemma_label_pipeline.py --set gold198|sample5000 [--taxonomy-xlsx <workbook>] [--limit N]
+        python scripts/43_gemma_label_pipeline.py --set subset --ids-file <parquet with post_uid> --name <name> [--chunk 2000]
+          subset mode: labels the listed posts only, in chunks of --chunk posts. Each chunk is saved to data/gold/gemma_chunks_<name>_v1/ as soon as it is
+          done, so a stopped run resumes (finished chunks are read back, not re-asked). Output: data/gold/gemma_label_<name>_v1.parquet. The gold198 and
+          sample5000 outputs are never touched by this mode.
 """
 from __future__ import annotations
 
@@ -69,16 +73,24 @@ def prompts(tax: dict):
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--set", required=True, choices=["gold198", "sample5000"])
+    ap.add_argument("--set", required=True, choices=["gold198", "sample5000", "subset"])
     ap.add_argument("--taxonomy-xlsx")
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--ids-file")
+    ap.add_argument("--name")
+    ap.add_argument("--chunk", type=int, default=2000)
     a = ap.parse_args()
+    if a.set == "subset":
+        assert a.ids_file and a.name and re.fullmatch(r"[a-z0-9_]+", a.name), "subset mode needs --ids-file and --name (a-z, 0-9, _)"
+        assert a.name not in ("gold198", "sample5000"), "pick a new name"
     tax = load_taxonomy(a.taxonomy_xlsx)
     valid = {t["T"] for t in tax["topics"]} | {"NONE"}
     S1, S2 = prompts(tax)
     con = duckdb.connect(str(ROOT / "data" / "analytics.duckdb"), read_only=True)
     if a.set == "gold198":
         base = pd.read_parquet(GOLD / "analyst_gold_v1.parquet")[["post_uid", "rid", "sec", "D", "T"]]
+    elif a.set == "subset":
+        base = pd.read_parquet(a.ids_file)[["post_uid"]].drop_duplicates("post_uid")
     else:
         base = duckdb.connect(str(GOLD / "topic_knn_v1.duckdb"), read_only=True).execute("SELECT post_uid FROM knn_label_v1").df()
     if a.limit:
@@ -105,8 +117,24 @@ def main() -> int:
 
     todo = list(d[~d.skip_llm].itertuples())
     t0 = time.time()
-    p1 = pd.DataFrame(G.run_batch(todo, lambda r: run(S1, r))).add_prefix("p1_").rename(columns={"p1_post_uid": "post_uid"})
-    p2 = pd.DataFrame(G.run_batch(todo, lambda r: run(S2, r))).add_prefix("p2_").rename(columns={"p2_post_uid": "post_uid"})
+    if a.set == "subset":
+        ckdir = GOLD / f"gemma_chunks_{a.name}_{VERSION}"; ckdir.mkdir(exist_ok=True)
+        parts = []
+        for i in range(0, len(todo), a.chunk):
+            f = ckdir / f"chunk_{i // a.chunk:04d}.parquet"
+            if f.exists():                                    # finished earlier: read it back, do not ask Gemma again
+                parts.append(pd.read_parquet(f)); print(f"chunk {i // a.chunk} read from {f.name}", flush=True); continue
+            ch = todo[i:i + a.chunk]; tc = time.time()
+            c1 = pd.DataFrame(G.run_batch(ch, lambda r: run(S1, r))).add_prefix("p1_").rename(columns={"p1_post_uid": "post_uid"})
+            c2 = pd.DataFrame(G.run_batch(ch, lambda r: run(S2, r))).add_prefix("p2_").rename(columns={"p2_post_uid": "post_uid"})
+            cc = c1.merge(c2, on="post_uid"); cc.to_parquet(f.with_suffix(".tmp"), index=False); f.with_suffix(".tmp").rename(f)
+            print(f"chunk {i // a.chunk}: {len(ch)} posts in {time.time() - tc:.0f}s ({len(ch) / (time.time() - tc):.2f}/s); done {min(i + a.chunk, len(todo))}/{len(todo)}", flush=True)
+            parts.append(cc)
+        pc = pd.concat(parts, ignore_index=True)
+        p1 = pc[["post_uid"] + [c for c in pc.columns if c.startswith("p1_")]]; p2 = pc[["post_uid"] + [c for c in pc.columns if c.startswith("p2_")]]
+    else:
+        p1 = pd.DataFrame(G.run_batch(todo, lambda r: run(S1, r))).add_prefix("p1_").rename(columns={"p1_post_uid": "post_uid"})
+        p2 = pd.DataFrame(G.run_batch(todo, lambda r: run(S2, r))).add_prefix("p2_").rename(columns={"p2_post_uid": "post_uid"})
     wall = time.time() - t0
     d = d.merge(p1, on="post_uid", how="left").merge(p2, on="post_uid", how="left")
 
@@ -146,7 +174,7 @@ def main() -> int:
     kt, ks = [], []
     for u in d.post_uid:
         s = E[u] @ R.T
-        if a.set == "gold198":                      # the post itself is a reference: leave it out
+        if a.set in ("gold198", "subset"):          # the post itself is a reference: leave it out
             s = np.where(refs.post_uid.values == u, -9, s)
         idx = np.argsort(-s)[:10]; w = {}
         for i in idx:
@@ -162,7 +190,7 @@ def main() -> int:
     d.loc[dem, "tier"] = "needs_review"
     d.loc[dem, ["label_T", "label_D", "label_sec"]] = None
     d["version"] = VERSION
-    out = GOLD / f"gemma_label_{a.set}_{VERSION}.parquet"
+    out = GOLD / f"gemma_label_{a.name if a.set == 'subset' else a.set}_{VERSION}.parquet"
     d.drop(columns=["text"]).to_parquet(out, index=False)
     print(f"{a.set}: {len(d)} posts | pre-filter skipped {int(d.skip_llm.sum())} | gemma posts {len(todo)} x2 passes in {wall:.0f}s | tiers {d.tier.value_counts().to_dict()} -> {out.relative_to(ROOT)}")
     return 0

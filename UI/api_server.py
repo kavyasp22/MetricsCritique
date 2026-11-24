@@ -34,6 +34,7 @@ from feedback_store import FeedbackError, FeedbackStore
 
 from gemma_live import gemma_status
 from live_view import live_overview, DEFAULT_MILITARY
+import post_viewer as PV          # Post Viewer — integrated 23-platform browser
 
 HERE = Path(__file__).resolve().parent
 EDA_ROOT = HERE.parent
@@ -1476,6 +1477,20 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        # Post Viewer translation update
+        if parsed.path in ("/api/update-translation", "/post-viewer/api/update-translation"):
+            try:
+                n = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(n) if n > 0 else b"{}"
+                status, resp = PV.handle_update_translation(body)
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(resp)))
+                self.end_headers()
+                self.wfile.write(resp)
+            except Exception as e:
+                self._json({"error": str(e)}, status=500)
+            return
         if parsed.path != "/api/feedback":
             self._json({"error": "not found"}, status=404)
             return
@@ -1585,6 +1600,43 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/feedback/summary":
             self._json(FEEDBACK.summary())
             return
+        # ── Post Viewer routes (authentic post-read-db integration) ───────────
+        if parsed.path in ("/post-viewer", "/post-viewer/", "/platform", "/platform/"):
+            self.send_response(302)
+            self.send_header("Location", "/platform/twitter_posts")
+            self.end_headers()
+            return
+        if parsed.path.startswith("/platform/") or parsed.path.startswith("/post-viewer/platform/"):
+            if parsed.path.startswith("/post-viewer/platform/"):
+                table = parsed.path[len("/post-viewer/platform/"):]
+            else:
+                table = parsed.path[len("/platform/"):]
+            qs = parse_qs(parsed.query)
+            try:
+                status, html_page = PV.render_platform_view(table, qs)
+                enc = html_page.encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(enc)))
+                self.end_headers()
+                self.wfile.write(enc)
+            except Exception as e:
+                self._json({"error": str(e)}, status=500)
+            return
+        if parsed.path in ("/api/counts", "/post-viewer/api/counts"):
+            try:
+                qs = parse_qs(parsed.query)
+                refresh = qs.get("refresh", ["0"])[0] == "1"
+                body = PV.handle_api_counts(refresh=refresh)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as e:
+                self._json({"error": str(e)}, status=500)
+            return
+        # ── end Post Viewer routes ──────────────────────────────────────────
         if parsed.path == "/api/drill":
             qs = parse_qs(parsed.query)
             view = qs.get("view", [None])[0]

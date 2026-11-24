@@ -3005,7 +3005,7 @@ body[data-mode="explore"] #global-filters { display: none !important; }
 .dr-sort-note { color: var(--ink-3, #8fa3bf); }
 
 /* ---- reader feedback (thumbs) ---- */
-.fb { position: relative; display: inline-flex; align-items: center; gap: 0.25rem; margin-left: 0.5rem; vertical-align: middle; }
+.fb, .attn-vote { display: none !important; }
 .fb-b { background: transparent; border: 1px solid rgba(143, 163, 191, 0.35); border-radius: 6px; padding: 0.1rem 0.4rem; cursor: pointer; font-size: 0.85rem; color: inherit; opacity: 0.75; }
 .fb-b:hover { opacity: 1; background: rgba(143, 163, 191, 0.12); }
 .fb-b.on { opacity: 1; border-color: var(--gold, #e3bc4b); background: rgba(227, 188, 75, 0.15); }

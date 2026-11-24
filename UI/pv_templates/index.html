@@ -1,0 +1,1361 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Social Media Post Viewer</title>
+  <script>
+    // Apply saved theme immediately to prevent flashing
+    (function () {
+      const theme = localStorage.getItem('theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --sidebar-bg: #161b22;
+      --card-bg: #161b22;
+      --topbar-bg: #161b22;
+      --border: #30363d;
+      --border-hover: rgba(88, 166, 255, 0.35);
+      --text: #e1e4e8;
+      --text-muted: #8b949e;
+      --text-sub: #c9d1d9;
+      --accent: #58a6ff;
+      --accent-hover: #79c0ff;
+      --active-bg: #1f3a5f;
+      --item-hover: #21262d;
+      --btn-bg: #21262d;
+      --btn-hover: #30363d;
+      --btn-text: #e1e4e8;
+      --badge-bg: #21262d;
+      --badge-text: #8b949e;
+      --badge-active-bg: #1f3a5f;
+      --badge-active-text: #58a6ff;
+      --input-bg: #0d1117;
+      --trans-bg: #0d1117;
+      --trans-border: #238636;
+      --trans-text: #7ee787;
+      --scrollbar-track: #0d1117;
+      --scrollbar-thumb: #30363d;
+    }
+
+    [data-theme="light"] {
+      --bg: #f6f8fa;
+      --sidebar-bg: #ffffff;
+      --card-bg: #ffffff;
+      --topbar-bg: #ffffff;
+      --border: #d0d7de;
+      --border-hover: rgba(9, 105, 218, 0.4);
+      --text: #1f2328;
+      --text-muted: #656d76;
+      --text-sub: #24292f;
+      --accent: #0969da;
+      --accent-hover: #0860ca;
+      --active-bg: #ddf4ff;
+      --item-hover: #f3f4f6;
+      --btn-bg: #f3f4f6;
+      --btn-hover: #e5e7eb;
+      --btn-text: #1f2328;
+      --badge-bg: #eaeef2;
+      --badge-text: #57606a;
+      --badge-active-bg: #ddf4ff;
+      --badge-active-text: #0969da;
+      --input-bg: #ffffff;
+      --trans-bg: #dafbe1;
+      --trans-border: #1a7f37;
+      --trans-text: #1a7f37;
+      --scrollbar-track: #f6f8fa;
+      --scrollbar-thumb: #d0d7de;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+      transition: background 0.2s, color 0.2s;
+    }
+
+    /* ── Sidebar ── */
+    #sidebar {
+      width: 280px;
+      min-width: 260px;
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    #sidebar-filter-form {
+      padding: 16px 14px;
+      overflow-y: auto;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .sidebar-filter-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .sidebar-filter-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-muted);
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+    }
+
+    .sidebar-filter-select,
+    .sidebar-filter-input {
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 8px 10px;
+      font-size: 13px;
+      width: 100%;
+      box-sizing: border-box;
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    .sidebar-filter-select:focus,
+    .sidebar-filter-input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .date-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .date-lbl {
+      font-size: 12px;
+      color: var(--text-muted);
+      width: 36px;
+      flex-shrink: 0;
+    }
+
+    .sidebar-filter-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 6px;
+    }
+
+    .sidebar-search-btn {
+      flex: 1;
+      background: #1f6feb;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      padding: 9px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s;
+      text-align: center;
+    }
+
+    .sidebar-search-btn:hover {
+      background: #388bfd;
+    }
+
+    .sidebar-reset-btn {
+      background: var(--btn-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 9px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: all .15s;
+    }
+
+    .sidebar-reset-btn:hover {
+      background: var(--btn-hover);
+    }
+
+    #sidebar-header {
+      padding: 16px 14px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    #sidebar-header h1 {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: .3px;
+    }
+
+    #sidebar-header .total {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .icon-btn {
+      background: var(--btn-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 13px;
+      padding: 3px 8px;
+      line-height: 1.2;
+      transition: all .2s;
+    }
+
+    .icon-btn:hover {
+      background: var(--btn-hover);
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .spinning {
+      display: inline-block;
+      animation: spin 0.9s linear infinite;
+      pointer-events: none;
+    }
+
+    @keyframes spin {
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+
+    #platform-search {
+      margin: 10px 10px 0;
+      padding: 7px 10px;
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 13px;
+      width: calc(100% - 20px);
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    #platform-search:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    #platform-list {
+      overflow-y: auto;
+      flex: 1;
+      padding: 8px 0;
+    }
+
+    .platform-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 14px;
+      cursor: pointer;
+      border-radius: 6px;
+      margin: 1px 6px;
+      transition: background .15s;
+      text-decoration: none;
+      color: inherit;
+    }
+
+    .platform-item:hover {
+      background: var(--item-hover);
+    }
+
+    .platform-item.active {
+      background: var(--active-bg);
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .platform-item .pname {
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .platform-item .badge {
+      font-size: 11px;
+      background: var(--badge-bg);
+      color: var(--badge-text);
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-weight: 600;
+    }
+
+    .platform-item.active .badge {
+      background: var(--badge-active-bg);
+      color: var(--badge-active-text);
+    }
+
+    /* ── Grouped Platform (e.g. YouTube) ── */
+    .platform-group {
+      margin: 1px 6px;
+    }
+
+    .platform-group-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 14px;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: background .15s;
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    .platform-group-header:hover {
+      background: var(--item-hover);
+    }
+
+    .platform-group.active-group .platform-group-header {
+      color: var(--accent);
+      background: var(--active-bg);
+    }
+
+    .platform-group-sub {
+      margin-left: 14px;
+      border-left: 2px solid var(--border);
+      padding-left: 2px;
+      margin-top: 2px;
+    }
+
+    .platform-item.sub-item {
+      padding: 5px 10px;
+      font-size: 12px;
+      margin: 2px 2px;
+    }
+
+    .topbar-left {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .sub-tabs {
+      display: flex;
+      gap: 6px;
+      margin-top: 2px;
+    }
+
+    .sub-tab {
+      padding: 3px 10px;
+      background: var(--btn-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: 500;
+      transition: all .15s;
+    }
+
+    .sub-tab:hover {
+      background: var(--btn-hover);
+      color: var(--text);
+    }
+
+    .sub-tab.active {
+      background: var(--active-bg);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* ── Main ── */
+    #main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    #topbar {
+      background: var(--topbar-bg);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    #topbar h2 {
+      font-size: 16px;
+      font-weight: 700;
+      flex: 0 0 auto;
+    }
+
+    #topbar .row-count {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .search-bar {
+      display: flex;
+      gap: 10px;
+      flex: 1;
+      align-items: flex-end;
+      flex-wrap: wrap;
+    }
+
+    .filter-field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .filter-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+
+    .search-bar input,
+    .search-bar select {
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 6px 10px;
+      font-size: 13px;
+      height: 34px;
+      box-sizing: border-box;
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    .search-bar input:focus,
+    .search-bar select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .search-bar button.search-submit-btn {
+      background: #1f6feb;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      padding: 0 16px;
+      height: 34px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: background .15s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .search-bar button.search-submit-btn:hover {
+      background: #388bfd;
+    }
+
+    .search-bar .clear-btn {
+      background: var(--btn-bg);
+      color: var(--text-muted);
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 12px;
+      height: 34px;
+      border-radius: 6px;
+      font-size: 13px;
+      border: 1px solid var(--border);
+      transition: all .15s;
+    }
+
+    .search-bar .clear-btn:hover {
+      background: var(--btn-hover);
+      color: var(--text);
+    }
+
+    /* ── Post List ── */
+    #post-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 20px;
+    }
+
+    .welcome-box {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--text-muted);
+      text-align: center;
+      gap: 10px;
+    }
+
+    .welcome-box .big-icon {
+      font-size: 60px;
+    }
+
+    .welcome-box h3 {
+      font-size: 20px;
+      color: var(--text);
+    }
+
+    .post-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      transition: border-color .15s, background 0.2s;
+    }
+
+    .post-card:hover {
+      border-color: var(--border-hover);
+    }
+
+    .post-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+    }
+
+    .post-meta .author {
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--accent);
+    }
+
+    .post-meta .time {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .post-meta .lang-badge {
+      font-size: 11px;
+      background: var(--badge-bg);
+      color: #d2a679;
+      padding: 2px 7px;
+      border-radius: 10px;
+    }
+
+    .post-meta .kw-badge {
+      font-size: 11px;
+      background: var(--badge-bg);
+      color: #a78bfa;
+      border: 1px solid var(--border);
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-weight: 500;
+    }
+
+    .post-meta .det-lang {
+      font-size: 11px;
+      background: var(--badge-bg);
+      color: #2ea043;
+      padding: 2px 7px;
+      border-radius: 10px;
+    }
+
+    .post-meta a {
+      color: var(--text-muted);
+      font-size: 11px;
+      text-decoration: none;
+    }
+
+    .post-meta a:hover {
+      color: var(--accent);
+    }
+
+    .post-text {
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text-sub);
+      word-break: break-word;
+    }
+
+    .post-translated-toggle {
+      margin-top: 8px;
+    }
+
+    .post-translated-toggle summary {
+      font-size: 12px;
+      color: var(--accent);
+      cursor: pointer;
+      user-select: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      background: var(--btn-bg);
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      width: fit-content;
+      transition: all .15s;
+    }
+
+    .post-translated-toggle summary:hover {
+      background: var(--btn-hover);
+      color: var(--accent-hover);
+    }
+
+    .post-fulltext-toggle {
+      margin-top: 6px;
+    }
+
+    .post-fulltext-toggle summary {
+      font-size: 12px;
+      color: var(--accent);
+      cursor: pointer;
+      user-select: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      background: var(--btn-bg);
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      width: fit-content;
+      transition: all .15s;
+    }
+
+    .post-fulltext-toggle summary:hover {
+      background: var(--btn-hover);
+      color: var(--accent-hover);
+    }
+
+    .post-fulltext {
+      margin-top: 6px;
+      padding: 8px 12px;
+      background: var(--input-bg);
+      border-left: 3px solid var(--accent);
+      border-radius: 4px;
+      font-size: 13px;
+      line-height: 1.6;
+      word-break: break-word;
+      max-height: 220px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+
+    .post-translated {
+      margin-top: 6px;
+      padding: 8px 12px;
+      background: var(--trans-bg);
+      border-left: 3px solid var(--trans-border);
+      border-radius: 4px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--trans-text);
+      word-break: break-word;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+
+    .edit-trans-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      border-radius: 4px;
+      font-size: 11px;
+      padding: 2px 8px;
+      cursor: pointer;
+      transition: all .15s;
+    }
+
+    .edit-trans-btn:hover {
+      background: var(--btn-hover);
+      color: var(--text);
+      border-color: var(--accent);
+    }
+
+    .save-trans-btn {
+      background: #238636;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      font-size: 12px;
+      padding: 4px 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background .15s;
+    }
+
+    .save-trans-btn:hover {
+      background: #2ea043;
+    }
+
+    .cancel-trans-btn {
+      background: var(--btn-bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 12px;
+      padding: 4px 12px;
+      cursor: pointer;
+    }
+
+    .cancel-trans-btn:hover {
+      background: var(--btn-hover);
+    }
+
+    .trans-textarea {
+      width: 100%;
+      box-sizing: border-box;
+      background: var(--input-bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px;
+      font-family: inherit;
+      font-size: 13px;
+      line-height: 1.5;
+      resize: vertical;
+    }
+
+    .trans-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .post-stats {
+      display: flex;
+      gap: 12px;
+      margin-top: 8px;
+    }
+
+    .post-stats span {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* ── Pagination ── */
+    #pagination {
+      background: var(--topbar-bg);
+      border-top: 1px solid var(--border);
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    #pagination a,
+    #pagination span {
+      padding: 5px 10px;
+      border-radius: 5px;
+      font-size: 13px;
+      text-decoration: none;
+    }
+
+    #pagination a {
+      background: var(--btn-bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      transition: all .15s;
+    }
+
+    #pagination a:hover {
+      background: var(--btn-hover);
+    }
+
+    #pagination span.current {
+      background: var(--active-bg);
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      font-weight: 600;
+    }
+
+    #pagination span.disabled {
+      color: var(--text-muted);
+      border: 1px solid transparent;
+    }
+
+    #pagination .page-info {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-left: 8px;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: var(--scrollbar-track);
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--scrollbar-thumb);
+      border-radius: 3px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #484f58;
+    }
+
+    .empty-state {
+      text-align: center;
+      color: var(--text-muted);
+      padding: 40px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ── Sidebar Filter Panel ── -->
+  <nav id="sidebar">
+    <div id="sidebar-header">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h1>📡 Post Viewer</h1>
+        <div class="header-actions">
+          <button class="icon-btn" id="theme-toggle-btn" onclick="toggleTheme()"
+            title="Toggle Light / Dark mode">☀️</button>
+          <button class="icon-btn" id="refresh-counts-btn" onclick="refreshCounts()"
+            title="Refresh database row counts">🔄</button>
+        </div>
+      </div>
+      <div class="total" id="sidebar-total-text">Total: {{ "{:,}".format(total) }} posts across {{ platforms|length }}
+        platforms</div>
+    </div>
+
+    <form id="sidebar-filter-form" method="GET" action="/platform/{{ active or 'twitter_posts' }}">
+      <!-- PLATFORM -->
+      <div class="sidebar-filter-group">
+        <label class="sidebar-filter-label">PLATFORM</label>
+        <select name="platform" class="sidebar-filter-select" onchange="window.location.href='/platform/' + this.value">
+          {% for tbl, pcfg in platforms.items() %}
+          <option value="{{ tbl }}" {% if active==tbl %}selected{% endif %}>
+            {{ pcfg.label }} ({{ "{:,}".format(counts.get(tbl, 0)) }})
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- LANGUAGE -->
+      <div class="sidebar-filter-group">
+        <label class="sidebar-filter-label">LANGUAGE</label>
+        <select name="lang" class="sidebar-filter-select">
+          <option value="">All</option>
+          {% for l in langs %}
+          <option value="{{ l.code }}" {% if lang_filter==l.code %}selected{% endif %}>
+            {{ l.name }} ({{ l.code }})
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- HANDLES / AUTHORS / CHANNELS -->
+      <div class="sidebar-filter-group">
+        <label class="sidebar-filter-label">{{ (cfg.author_label or 'HANDLES')|upper }}</label>
+        {% if handles and handles|length > 0 %}
+        <select name="handle" class="sidebar-filter-select">
+          <option value="">All {{ cfg.author_label or 'Handles' }}</option>
+          {% for h in handles %}
+          <option value="{{ h.val }}" {% if handle==h.val %}selected{% endif %}>
+            {{ '@' if not h.val.startswith('@') else '' }}{{ h.val }} ({{ "{:,}".format(h.cnt) }})
+          </option>
+          {% endfor %}
+        </select>
+        {% elif cfg and cfg.author_col %}
+        <input type="text" name="handle" class="sidebar-filter-input"
+          placeholder="Search {{ (cfg.author_label or 'handles')|lower }}..." value="{{ handle }}">
+        {% endif %}
+      </div>
+
+      <!-- KEYWORDS (if platform has keyword_col) -->
+      {% if cfg and cfg.keyword_col and keywords and keywords|length > 0 %}
+      <div class="sidebar-filter-group">
+        <label class="sidebar-filter-label">{{ (cfg.keyword_label or 'KEYWORDS')|upper }}</label>
+        <select name="keyword" class="sidebar-filter-select">
+          <option value="">All {{ cfg.keyword_label or 'Keywords' }}</option>
+          {% for kw in keywords %}
+          <option value="{{ kw.val }}" {% if keyword==kw.val %}selected{% endif %}>
+            {{ kw.val }} ({{ "{:,}".format(kw.cnt) }})
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      {% elif cfg and cfg.keyword_col %}
+      <div class="sidebar-filter-group">
+        <label class="sidebar-filter-label">{{ (cfg.keyword_label or 'KEYWORDS')|upper }}</label>
+        <input type="text" name="keyword" class="sidebar-filter-input" placeholder="Keyword..." value="{{ keyword }}">
+      </div>
+      {% endif %}
+
+      <!-- SEARCH POST TEXT -->
+      <div class="sidebar-filter-group">
+        <label class="sidebar-filter-label">SEARCH POST TEXT</label>
+        <input type="text" name="search" class="sidebar-filter-input" placeholder="Search post text..."
+          value="{{ search }}">
+      </div>
+
+      <!-- DATE RANGE -->
+      {% if cfg and cfg.time_col %}
+      <div class="sidebar-filter-group">
+        <label class="sidebar-filter-label">DATE RANGE</label>
+        <div class="date-row">
+          <span class="date-lbl">From</span>
+          <input type="date" name="from_date" class="sidebar-filter-input" value="{{ from_date }}">
+        </div>
+        <div class="date-row" style="margin-top: 6px;">
+          <span class="date-lbl">To</span>
+          <input type="date" name="to_date" class="sidebar-filter-input" value="{{ to_date }}">
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- BUTTONS -->
+      <div class="sidebar-filter-actions">
+        <button type="submit" class="sidebar-search-btn">Search</button>
+        {% if search or handle or keyword or lang_filter or from_date or to_date %}
+        <a class="sidebar-reset-btn" href="/platform/{{ active }}">Reset</a>
+        {% endif %}
+      </div>
+    </form>
+  </nav>
+
+  <!-- ── Main Area ── -->
+  <div id="main">
+
+    {% if active %}
+    <!-- Topbar -->
+    <div id="topbar">
+      <div class="topbar-left">
+        <h2>{{ platforms[active].icon }} {{ platforms[active].label }}</h2>
+        {% if active in ['youtube_videos', 'youtube_comments'] %}
+        <div class="sub-tabs">
+          <a href="/platform/youtube_videos" class="sub-tab {% if active == 'youtube_videos' %}active{% endif %}">📹
+            Videos ({{ "{:,}".format(counts.get('youtube_videos', 0)) }})</a>
+          <a href="/platform/youtube_comments" class="sub-tab {% if active == 'youtube_comments' %}active{% endif %}">💬
+            Comments ({{ "{:,}".format(counts.get('youtube_comments', 0)) }})</a>
+        </div>
+        {% else %}
+        <div class="row-count">{{ "{:,}".format(total_rows) }} posts{% if search or handle or keyword or lang_filter or
+          from_date or to_date %} <span style="color:var(--accent); font-weight:600;">(filtered)</span>{% endif %}
+        </div>
+        {% endif %}
+      </div>
+      {% if search or handle or keyword or lang_filter or from_date or to_date %}
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-size:12px; color:var(--accent);">🔍 Filters active</span>
+        <a class="clear-btn" href="/platform/{{ active }}" style="font-size:12px; padding:4px 10px;">✕ Clear Filters</a>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Posts -->
+    <div id="post-container">
+      {% if posts %}
+      {% for post in posts %}
+      <div class="post-card">
+        <div class="post-meta">
+          <span class="author">{{ '@' if post._author and not post._author.startswith('@') else '' }}{{ post._author or
+            '—' }}</span>
+          {% if post._time %}
+          <span class="time">🕐 {{ post._time.strftime('%Y-%m-%d %H:%M') if post._time else '' }}</span>
+          {% endif %}
+          {% if post.keyword %}
+          <span class="kw-badge">🏷️ {{ post.keyword }}</span>
+          {% elif post.keywords %}
+          <span class="kw-badge">🏷️ {{ post.keywords }}</span>
+          {% elif post.matched_hashtag %}
+          <span class="kw-badge">🏷️ #{{ post.matched_hashtag }}</span>
+          {% elif post.topic %}
+          <span class="kw-badge">🏷️ {{ post.topic }}</span>
+          {% elif post.keyword_used %}
+          <span class="kw-badge">🏷️ {{ post.keyword_used }}</span>
+          {% elif post.hashtag_queried %}
+          <span class="kw-badge">🏷️ #{{ post.hashtag_queried }}</span>
+          {% elif post.room_name %}
+          <span class="kw-badge">🚪 {{ post.room_name }}</span>
+          {% elif post.channel_name and active in ['rocketchat_messages', 'discord_posts'] %}
+          <span class="kw-badge">#️⃣ {{ post.channel_name }}</span>
+          {% endif %}
+          {% set dl_name = post.detected_language|lang_name %}
+          {% if dl_name %}
+          <span class="det-lang">🌐 {{ dl_name }}</span>
+          {% else %}
+          <span class="det-lang" style="display:none;"></span>
+          {% endif %}
+          {% if post._url %}
+          <a href="{{ post._url }}" target="_blank">🔗 View</a>
+          {% endif %}
+        </div>
+
+        <!-- Original text(s) -->
+        {% set has_text = namespace(found=false) %}
+        {% for i in range(platforms[active].text_cols|length) %}
+        {% set key = '_text_' ~ i %}
+        {% set txt = post[key] %}
+        {% if txt %}
+        {% set has_text.found = true %}
+        {% if txt|length > 600 %}
+        <div class="post-text post-text-preview">{{ txt[:600] }}…</div>
+        <details class="post-fulltext-toggle"
+          ontoggle="this.previousElementSibling.style.display = this.open ? 'none' : 'block'">
+          <summary>📖 See Full Text ({{ "{:,}".format(txt|length) }} characters)</summary>
+          <div class="post-fulltext">{{ txt }}</div>
+        </details>
+        {% else %}
+        <div class="post-text">{{ txt }}</div>
+        {% endif %}
+        {% endif %}
+        {% endfor %}
+        {% if not has_text.found %}
+        <div class="post-text" style="color:var(--text-muted);font-style:italic;">(no text)</div>
+        {% endif %}
+
+        <!-- Translated text(s) -->
+        {% if platforms[active].translated_cols %}
+        {% set trans_items = [] %}
+        {% for i in range(platforms[active].translated_cols|length) %}
+        {% set key = '_translated_' ~ i %}
+        {% set col_name = platforms[active].translated_cols[i] %}
+        {% set val = post[key]|string|trim if post[key] else '' %}
+        {% set _ = trans_items.append((col_name, val)) %}
+        {% endfor %}
+
+        {% set has_any_trans = namespace(found=false) %}
+        {% for col_name, text in trans_items %}
+        {% if text %}{% set has_any_trans.found = true %}{% endif %}
+        {% endfor %}
+
+        {% if has_any_trans.found %}
+        <details class="post-translated-toggle">
+          <summary>🌐 View Translated Text</summary>
+          <div class="post-translated">
+            {% for col_name, text in trans_items %}
+            {% if text %}
+            <div class="trans-item-wrap" data-table="{{ active }}" data-post-id="{{ post._id }}"
+              data-field="{{ col_name }}" data-current-text="{{ text|e }}"
+              data-current-lang="{{ post.detected_language or '' }}">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <span
+                  style="font-size:11px; opacity:0.8; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">
+                  {% if trans_items|length > 1 %}{{ col_name.replace('translated_', '').replace('_', ' ').title() }}{%
+                  endif %}
+                </span>
+                <button type="button" class="edit-trans-btn" onclick="startEditTrans(this)"
+                  title="Edit this translation">✏️ Edit</button>
+              </div>
+              <div class="trans-display-text">{{ text }}</div>
+              <div class="trans-edit-box" style="display:none; margin-top:6px;">
+                <textarea class="trans-textarea" rows="3">{{ text }}</textarea>
+                <div style="display:flex; gap:10px; margin-top:8px; align-items:center; flex-wrap:wrap;">
+                  <div style="display:inline-flex; align-items:center; gap:6px;">
+                    <label style="font-size:12px; color:var(--text-muted); font-weight:500;">🌐 Language:</label>
+                    <select class="trans-lang-select"
+                      style="font-size:12px; padding:3px 8px; border-radius:4px; background:var(--input-bg); color:var(--text); border:1px solid var(--border); max-width:180px;">
+                      <option value="">-- No change / Unset --</option>
+                      {% for code, name in all_languages %}
+                      <option value="{{ code }}" {% if post.detected_language==code %}selected{% endif %}>{{ name }} ({{
+                        code }})</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div style="display:inline-flex; gap:6px; align-items:center;">
+                    <button type="button" class="save-trans-btn" onclick="saveEditTrans(this)">💾 Save to DB</button>
+                    <button type="button" class="cancel-trans-btn" onclick="cancelEditTrans(this)">✕ Cancel</button>
+                    <span class="save-trans-status" style="font-size:12px; margin-left:4px;"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {% endif %}
+            {% endfor %}
+          </div>
+        </details>
+        {% endif %}
+        {% endif %}
+
+        <!-- Extra stats -->
+        {% set extras = platforms[active].extra_cols %}
+        {% if extras %}
+        <div class="post-stats">
+          {% for col in extras %}
+          {% if post[col] is not none %}
+          <span>{{ col.replace('_', ' ').title() }}: {{ "{:,}".format(post[col]) if post[col] is number else post[col]
+            }}</span>
+          {% endif %}
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+      {% else %}
+      <div class="empty-state">No posts found{% if search or lang_filter %} for this search{% endif %}.</div>
+      {% endif %}
+    </div>
+
+    <!-- Pagination -->
+    {% if total_pages > 1 %}
+    {% set qp = '&search=' ~ search ~ '&handle=' ~ handle ~ '&keyword=' ~ keyword ~ '&lang=' ~ lang_filter ~
+    '&from_date=' ~ from_date ~ '&to_date=' ~ to_date %}
+    <div id="pagination">
+      {% if page > 1 %}
+      <a href="/platform/{{ active }}?page=1{{ qp }}">« First</a>
+      <a href="/platform/{{ active }}?page={{ page-1 }}{{ qp }}">‹ Prev</a>
+      {% else %}
+      <span class="disabled">« First</span>
+      <span class="disabled">‹ Prev</span>
+      {% endif %}
+
+      {% for p in range([1, page-2]|max, [total_pages+1, page+3]|min) %}
+      {% if p == page %}
+      <span class="current">{{ p }}</span>
+      {% else %}
+      <a href="/platform/{{ active }}?page={{ p }}{{ qp }}">{{ p }}</a>
+      {% endif %}
+      {% endfor %}
+
+      {% if page < total_pages %} <a href="/platform/{{ active }}?page={{ page+1 }}{{ qp }}">Next ›</a>
+        <a href="/platform/{{ active }}?page={{ total_pages }}{{ qp }}">Last »</a>
+        {% else %}
+        <span class="disabled">Next ›</span>
+        <span class="disabled">Last »</span>
+        {% endif %}
+
+        <span class="page-info">Page {{ page }} of {{ total_pages }} &nbsp;·&nbsp; {{ "{:,}".format(total_rows) }}
+          total</span>
+    </div>
+    {% endif %}
+
+    {% else %}
+    <!-- Welcome screen -->
+    <div id="post-container">
+      <div class="welcome-box">
+        <div class="big-icon">📡</div>
+        <h3>Social Media Post Viewer</h3>
+        <p>Select a platform from the sidebar to browse posts.</p>
+        <p style="margin-top:16px; font-size:13px;">
+          <strong style="color:var(--text);">{{ platforms|length }} platforms</strong> &nbsp;·&nbsp;
+          <strong style="color:var(--text);">{{ "{:,}".format(total) }}</strong> total posts
+        </p>
+      </div>
+    </div>
+    {% endif %}
+
+  </div>
+
+  <script>
+    // Theme toggle logic
+    function initTheme() {
+      const saved = localStorage.getItem('theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', saved);
+      updateThemeIcon(saved);
+    }
+
+    function toggleTheme() {
+      const current = document.documentElement.getAttribute('data-theme') || 'dark';
+      const next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('theme', next);
+      updateThemeIcon(next);
+    }
+
+    function updateThemeIcon(theme) {
+      const btn = document.getElementById('theme-toggle-btn');
+      if (btn) {
+        btn.textContent = theme === 'dark' ? '☀️' : '🌙';
+        btn.title = theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode';
+      }
+    }
+
+    initTheme();
+
+    async function refreshCounts() {
+      const btn = document.getElementById('refresh-counts-btn');
+      if (!btn) return;
+      btn.classList.add('spinning');
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/counts?refresh=1');
+        const counts = await res.json();
+        let total = 0;
+        for (const [table, cnt] of Object.entries(counts)) {
+          total += cnt;
+          const el = document.querySelector(`.badge[data-table="${table}"]`);
+          if (el) el.textContent = Number(cnt).toLocaleString();
+        }
+        // Combined YouTube count
+        const ytVideos = counts['youtube_videos'] || 0;
+        const ytComments = counts['youtube_comments'] || 0;
+        const ytEl = document.querySelector('.badge[data-table="youtube_combined"]');
+        if (ytEl) ytEl.textContent = Number(ytVideos + ytComments).toLocaleString();
+
+        const totalEl = document.getElementById('sidebar-total-text');
+        if (totalEl) {
+          totalEl.textContent = `Total: ${total.toLocaleString()} posts across ${Object.keys(counts).length} platforms`;
+        }
+      } catch (err) {
+        console.error('Failed to refresh counts:', err);
+      } finally {
+        btn.classList.remove('spinning');
+        btn.disabled = false;
+      }
+    }
+
+    function toggleYouTubeGroup() {
+      const sub = document.getElementById('youtube-sub-menu');
+      if (sub) {
+        sub.style.display = (sub.style.display === 'none') ? 'block' : 'none';
+      }
+    }
+
+    function filterPlatforms(q) {
+      q = q.toLowerCase();
+      document.querySelectorAll('.platform-item:not(.sub-item)').forEach(el => {
+        const name = el.dataset.name || '';
+        el.style.display = name.includes(q) ? '' : 'none';
+      });
+      // Handle group
+      document.querySelectorAll('.platform-group').forEach(group => {
+        const gName = group.dataset.name || '';
+        const match = gName.includes(q);
+        group.style.display = match ? '' : 'none';
+      });
+    }
+
+    function startEditTrans(btn) {
+      const wrap = btn.closest('.trans-item-wrap');
+      const display = wrap.querySelector('.trans-display-text');
+      const editBox = wrap.querySelector('.trans-edit-box');
+      const textarea = wrap.querySelector('.trans-textarea');
+      const langSelect = wrap.querySelector('.trans-lang-select');
+
+      textarea.value = wrap.dataset.currentText || display.textContent.trim();
+      if (langSelect && wrap.dataset.currentLang !== undefined) {
+        langSelect.value = wrap.dataset.currentLang;
+      }
+      display.style.display = 'none';
+      btn.style.display = 'none';
+      editBox.style.display = 'block';
+      textarea.focus();
+    }
+
+    function cancelEditTrans(btn) {
+      const wrap = btn.closest('.trans-item-wrap');
+      const display = wrap.querySelector('.trans-display-text');
+      const editBox = wrap.querySelector('.trans-edit-box');
+      const editBtn = wrap.querySelector('.edit-trans-btn');
+      const status = wrap.querySelector('.save-trans-status');
+      const langSelect = wrap.querySelector('.trans-lang-select');
+
+      if (langSelect && wrap.dataset.currentLang !== undefined) {
+        langSelect.value = wrap.dataset.currentLang;
+      }
+      editBox.style.display = 'none';
+      display.style.display = 'block';
+      editBtn.style.display = 'inline-block';
+      status.textContent = '';
+    }
+
+    async function saveEditTrans(btn) {
+      const wrap = btn.closest('.trans-item-wrap');
+      const display = wrap.querySelector('.trans-display-text');
+      const editBox = wrap.querySelector('.trans-edit-box');
+      const editBtn = wrap.querySelector('.edit-trans-btn');
+      const textarea = wrap.querySelector('.trans-textarea');
+      const status = wrap.querySelector('.save-trans-status');
+      const langSelect = wrap.querySelector('.trans-lang-select');
+
+      const table = wrap.dataset.table;
+      const postId = wrap.dataset.postId;
+      const field = wrap.dataset.field;
+      const newText = textarea.value.trim();
+      const newLang = langSelect ? langSelect.value : null;
+
+      btn.disabled = true;
+      status.style.color = 'var(--text-muted)';
+      status.textContent = 'Saving to database...';
+
+      try {
+        const payload = { table, post_id: postId, field, new_text: newText };
+        if (langSelect) {
+          payload.detected_language = newLang;
+        }
+
+        const res = await fetch('/api/update-translation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          wrap.dataset.currentText = newText;
+          display.textContent = newText || '(empty)';
+
+          if (langSelect) {
+            wrap.dataset.currentLang = newLang;
+            const card = wrap.closest('.post-card');
+            const badge = card ? card.querySelector('.det-lang') : null;
+            if (badge) {
+              if (data.detected_language_name) {
+                badge.textContent = '🌐 ' + data.detected_language_name;
+                badge.style.display = 'inline-block';
+              } else if (!newLang) {
+                badge.style.display = 'none';
+              }
+            }
+          }
+
+          status.style.color = '#3fb950';
+          status.textContent = '✅ Saved to DB';
+          setTimeout(() => {
+            editBox.style.display = 'none';
+            display.style.display = 'block';
+            editBtn.style.display = 'inline-block';
+            status.textContent = '';
+          }, 800);
+        } else {
+          status.style.color = '#f85149';
+          status.textContent = '❌ ' + (data.error || 'Failed to save');
+        }
+      } catch (err) {
+        status.style.color = '#f85149';
+        status.textContent = '❌ Error: ' + err.message;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+
+</html>
