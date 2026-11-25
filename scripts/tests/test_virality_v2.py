@@ -50,3 +50,30 @@ def test_copies_of_one_post_are_collapsed():
     d.loc[ig, "url"] = [f"igpost{i % 7}" for i in range(int(ig.sum()))]; d["scraped_at"] = pd.Timestamp("2026-01-01")
     o, _ = v2.compute(d); g = o[o.platform == "ig"]
     assert len(g) == 7 and (g.n_copies > 1).all() and g.n_copies.sum() == int(ig.sum())
+
+
+def _text_frame():
+    d = frame(); d["posted_at"] = pd.Timestamp("2026-01-01", tz="UTC"); d["text_head"] = [f"original news item number {i} about something unique" for i in range(len(d))]
+    return d
+
+def test_repost_flag_catches_rt_and_retweet():
+    h = pd.Series(["RT @someone: hello", "retweet @x: hi", "  rt @y hi", "RTX results are in", "right @ the start"]); assert v2.repost_flag(h).tolist() == [True, True, True, False, False]
+
+def test_template_flag_needs_repeat_across_days():
+    d = _text_frame(); idx = d.index[d.platform == "tw"][:8]
+    d.loc[idx, "author_uid"] = "botA"; d.loc[idx, "text_head"] = [f"Alert: {n} drones heading to city {n}" for n in range(8)]          # same opening once digits are masked
+    d.loc[idx, "posted_at"] = [pd.Timestamp(f"2026-01-0{1 + i % 4}", tz="UTC") for i in range(8)]
+    t, _ = v2.template_flag(d); assert t[idx].all() and t.sum() == 8
+    d2 = d.copy(); d2.loc[idx, "posted_at"] = pd.Timestamp("2026-01-01", tz="UTC"); assert v2.template_flag(d2)[0].sum() == 0          # one day only: not a recurring template
+
+def test_short_message_feed_is_flagged_and_excluded_from_candidates():
+    d = _text_frame(); d["scrape_lag_days"] = 1.0
+    feed = d.index[d.platform == "tw"][:400]; d.loc[feed, "author_uid"] = "feedA"; d.loc[feed, "text_head"] = [f"w{i}" for i in range(400)]
+    d.loc[feed, "posted_at"] = [pd.Timestamp("2026-01-01", tz="UTC") + pd.Timedelta(hours=i % 20) for i in range(400)]
+    d.loc[feed, "shares"] = 10_000.0; d.loc[feed, "views"] = 1e7
+    o, _ = v2.compute(d); f = o[o.post_uid.isin(d.loc[feed, "post_uid"])]
+    assert f.is_feed.all() and not f.is_candidate.any() and (f.rule_original == False).all()          # noqa: E712
+
+def test_reposts_never_candidates():
+    d = _text_frame(); i = d.index[d.platform == "tw"][0]; d.loc[i, "text_head"] = "RT @orig: big news"; d.loc[i, ["shares", "views", "likes", "comments"]] = [1e7, 1e9, 1e7, 1e6]
+    o, _ = v2.compute(d); r = o[o.post_uid == d.loc[i, "post_uid"]].iloc[0]; assert r.is_repost and not r.is_candidate

@@ -185,7 +185,7 @@ def main() -> int:
     chk("the topic filter's post count equals the topic drill-down total (posts + YouTube comments are counted there, posts only here)", t006["total_posts"] <= int(drill[0][0]), f"{t006['total_posts']:,} <= {int(drill[0][0]):,}")
     merged = a.explore_viral(q(rank="virality", limit=5, topic_id="t004", **tw))["total_posts"]
     only4 = a._main_con.execute("SELECT count(*) FROM analytics.post_facts p WHERE p.post_uid IN (SELECT post_uid FROM analytics.post_topic WHERE topic_id IN ('t004','t005')) "
-                                "AND CAST(p.posted_at AS DATE) BETWEEN ? AND ?", [tw["from"], tw["to"]]).fetchall()[0][0]
+                                "AND p.post_uid IN (SELECT post_uid FROM viral_keep) AND CAST(p.posted_at AS DATE) BETWEEN ? AND ?", [tw["from"], tw["to"]]).fetchall()[0][0]    # one row per distinct post, as the card counts
     chk("t004 means t004 + t005 (the dashboard shows them as one topic)", merged == only4, f"{merged:,} vs {only4:,}")
     both = a.explore_viral(q(rank="virality", limit=5, topic_id="t006", q="flood", **tw))["total_posts"]
     chk("a topic and a keyword can be combined", 0 < both < t006["total_posts"], f"{both:,} of {t006['total_posts']:,}")
@@ -205,7 +205,7 @@ def main() -> int:
     vi = a.explore_viral(q(limit=100, **wide)); vh = a.explore_viral(q(limit=100, retweets="hide", **wide))
     chk("the by-views lists honour the switch too", not any((p["text"] or "").upper().startswith("RT @") for p in vh["with_views"] + vh["without_views"]) and all("is_retweet" in p for p in vi["with_views"] + vi["without_views"]))
     only_rt = a._main_con.execute("SELECT count(*) FROM analytics.post_facts p WHERE " + a.RETWEET_SQL).fetchall()[0][0]
-    chk("the retweet rule matches a known count (Twitter 4,219 + Truth Social 10 start with 'RT @')", only_rt == 4229, only_rt)
+    chk("the retweet rule matches a known count (Twitter 4,219 + Truth Social 10 start with 'RT @', plus 207 that start 'retweet @')", only_rt == 4436, only_rt)
 
     # ---------------- theme filter and search trend (stage 27)
     import pandas as pd
@@ -226,7 +226,7 @@ def main() -> int:
     chk("the lower-confidence switch adds posts and never removes any", va["total_posts"] >= vt["total_posts"] and va["total_posts"] > 0, (vt["total_posts"], va["total_posts"]))
     d4 = pd.concat([th[(th.theme == "D04") & (th.tier == "high")][["post_uid"]], knn[knn.knn_theme == "D04"].reset_index()[["post_uid"]]]).drop_duplicates()
     a._main_con.register("d4_uids", d4[["post_uid"]])
-    exp = a._main_con.execute("SELECT count(*) FROM d4_uids u JOIN analytics.post_facts p ON p.post_uid = u.post_uid WHERE p.posted_at IS NOT NULL").fetchall()[0][0]
+    exp = a._main_con.execute("SELECT count(*) FROM d4_uids u JOIN analytics.post_facts p ON p.post_uid = u.post_uid JOIN viral_keep k ON k.post_uid = p.post_uid WHERE p.posted_at IS NOT NULL").fetchall()[0][0]    # copies collapsed, as the card counts
     tot_all = a.explore_viral(q(theme="D04", **{"from": "1990-01-01", "to": "2100-01-01"}))["total_posts"]
     chk("theme total over all days equals the stage-27 high tier + stage-28 neighbour file (D04, posts with a posted day)", tot_all == exp and exp > 0, (tot_all, exp, len(d4)))
     for bad in ("D10", "x", "D0"):
@@ -302,6 +302,27 @@ def main() -> int:
         except ValueError:
             chk("scenario search refuses a bad request (" + ",".join(f"{k}={str(v)[:8]}" for k, v in bad.items()) + ")", True)
     chk("scenario search needs the stage-31 embedding files", a.Path(a.DATA / "post_emb_fp16.npy").exists() and a.Path(a.DATA / "post_emb_index.parquet").exists())
+
+    # ---------------- live-card fixes (2026-11-24): copies collapsed, zero activity is not "top 10 %", breakout rule, entity type, retweet pattern
+    WI = {"from": "2026-06-01", "to": TO}
+    ig = a.explore_viral(q(limit=300, platforms="instagram", **WI)); rows = ig["with_views"] + ig["without_views"]
+    ig_distinct = a._main_con.execute("SELECT count(DISTINCT url) FROM analytics.post_facts WHERE platform = 'instagram' AND CAST(posted_at AS DATE) BETWEEN ? AND ?", [WI["from"], WI["to"]]).fetchall()[0][0]
+    chk("copies collapsed: no URL appears twice in an Instagram list", len({r["url"] for r in rows}) == len(rows), f"{len(rows)} rows")
+    chk("copies collapsed: Instagram total = distinct posts, not rows", ig["total_posts"] == ig_distinct, (ig["total_posts"], ig_distinct))
+    pin = a.explore_viral(q(rank="virality", order="biggest", limit=300, platforms="pinterest", **{"from": "2026-01-01", "to": TO}))
+    chk("zero-activity posts are never 'top 10 %' (Pinterest p90 = 0)", all((p["engagement"] or 0) > 0 or (p["views"] or 0) > 0 for p in pin["by_virality"]), f"{len(pin['by_virality'])} posts")
+    vb = a.explore_viral(q(rank="virality", order="amplified", floor="off", thresh="viral", limit=300, **{"from": "2026-10-01", "to": TO}))["by_virality"]
+    pv = a._main_con.execute(f"SELECT post_uid, activity, activity_top10, activity_ok, virality_pct, virality_ref_n FROM read_parquet('{a.POST_VIRALITY.as_posix()}')").fetchdf().set_index("post_uid")
+    ok_rule = all(((pv.loc[p["post_uid"], "activity_top10"] and pv.loc[p["post_uid"], "activity"] > 0) or (pv.loc[p["post_uid"], "virality_pct"] >= 0.80 and pv.loc[p["post_uid"], "virality_ref_n"] >= 20 and pv.loc[p["post_uid"], "activity_ok"])) for p in vb)
+    chk("viral breakout: top-10% activity (> 0) or P >= 0.80 with at least median activity; no tiny-count ratio posts", ok_rule and len(vb) > 0, f"{len(vb)} posts")
+    n_all = a.explore_viral(q(limit=5, **{"from": FROM, "to": TO}))["total_posts"]
+    n_person = a.explore_viral(q(limit=5, entity_type="PERSON", **{"from": FROM, "to": TO}))["total_posts"]
+    chk("entity type alone filters the posts (posts naming any person)", 0 < n_person < n_all, (n_person, n_all))
+    try:
+        a.explore_viral(q(limit=5, entity_type="PERSON'; DROP", **{"from": FROM, "to": TO})); chk("entity type refuses a bad value", False)
+    except ValueError:
+        chk("entity type refuses a bad value", True)
+    chk("retweet pattern also catches 'retweet @user:'", a._main_con.execute("SELECT " + a.RETWEET_SQL.replace("p.text", "'retweet @presidencymv: On behalf'")).fetchall()[0][0] is True)
 
     n_ok = sum(RESULTS)
     print(f"\n  {n_ok}/{len(RESULTS)} checks passed")

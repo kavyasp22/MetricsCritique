@@ -24,11 +24,12 @@ Rules (all data-derived per run; platforms are never hard-coded):
   * candidate = score_pct >= 0.99 AND minimum support (primary counter(s) >= platform p90 of non-zero values) AND, where the platform has an
     author baseline for >= 50 % of its posts, author_overperf >= 5 (log-scale leave-one-out median; empirical-Bayes shrinkage for thin authors)
   * rows that share (platform, url) are copies of ONE post (local Instagram: 93,029 rows = 982 distinct posts): collapsed to the latest-scraped row, with n_copies kept
+  * reposts ('RT @user', 'retweet @user': counters are the original's) and recurring templates (same author, same normalised opening, >= 5 posts on >= 3 days) and short-message feeds (an author with >= 20 posts a day, median text <= 60 characters; param exclude_feeds) get rule_original = False and are never candidates. Trade-off measured on the judged sample: the feed rule removed 3 of 3 artefact candidates but also 1 of 68 breakouts
   * YouTube videos with views = 0 mean 'counter unavailable' (as in stage 24) -> NULL
   * unknown scrape lag: compared with the whole platform, not with a fresh age band (as in stage 24)
 Switch: the output is NOT read by the dashboard; nothing consumes it until the judged-sample gate (spec section 8) passes.
 
-Usage:  python scripts/24_post_virality_v2.py [--input path/to/post_facts_like.parquet]
+Usage:  python scripts/24_post_virality_v2.py [--source prod | --input path/to/post_facts_like.parquet]
         (default: READ-ONLY open of data/analytics.duckdb, table post_facts; the parquet needs the same columns)
 """
 from __future__ import annotations
@@ -53,6 +54,8 @@ PARAMS = dict(
     weights={"shares": 0.40, "views": 0.30, "comments": 0.20, "likes": 0.10},
     age_bands=[0.0, 0.5, 1.0, 2.0, 4.0, 7.0, 14.0, 30.0, 90.0], min_band_n=20,
     tail=0.99, support_q=0.90, overperf_min=5.0, baseline_min_coverage=0.50, baseline_min_others=5,
+    template_min_posts=5, template_min_days=3, template_key_chars=50, template_min_key_len=12,
+    feed_min_posts=300, feed_min_per_day=20.0, feed_max_median_len=60, exclude_feeds=True,
 )
 PCT_COL = {"shares": "spread_pct", "views": "reach_pct", "comments": "comment_pct", "likes": "like_pct"}
 
@@ -95,6 +98,10 @@ def _group_pct(values: np.ndarray, lag: np.ndarray, groups: np.ndarray, P=PARAMS
 def collapse_copies(d: pd.DataFrame) -> pd.DataFrame:
     """One row per (platform, url): the latest-scraped copy (ties: smallest post_uid); n_copies = rows collapsed. Rows without a url are kept as they are."""
     d = d.copy(); d["n_copies"] = 1
+    if "scraped_at" in d.columns:                                   # same post_uid seen twice (e.g. a tweet in two source tables): keep the latest scrape, as stage 01
+        d = d.sort_values("scraped_at", kind="stable", na_position="first").drop_duplicates("post_uid", keep="last")
+    else:
+        d = d.drop_duplicates("post_uid", keep="last")
     if "url" not in d.columns:
         return d
     has = d["url"].notna() & (d["url"].astype(str) != "")
@@ -109,6 +116,41 @@ def collapse_copies(d: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([keyed, rest], ignore_index=True)
 
 
+_REPOST_RE = r"(?i)^\s*(rt|retweet)\s+@"
+_URL_RE = r"https?://\S+"
+
+
+def repost_flag(head: pd.Series) -> pd.Series:
+    """Posts that start 'RT @user' / 'retweet @user': their counters are the ORIGINAL post's, so they are never ranked as independent posts."""
+    return head.fillna("").astype(str).str.match(_REPOST_RE)
+
+
+def template_flag(d: pd.DataFrame, P=PARAMS) -> tuple[pd.Series, pd.Series]:
+    """Recurring bulletin / template feed: the same author posts, on >= template_min_days different days and >= template_min_posts times, texts whose
+    normalised opening is identical (lower case, URLs removed, every digit -> 0, punctuation dropped, first template_key_chars characters).
+    Alert bulletins ('Threat of ballistic missiles from ... 25 October') and hiring templates repeat their wording while only numbers and places change."""
+    out = pd.Series(False, index=d.index); feed_out = pd.Series(False, index=d.index)
+    if "text_head" not in d.columns or "posted_at" not in d.columns:
+        return out, feed_out
+    key = (d["text_head"].fillna("").astype(str).str.lower().str.replace(_URL_RE, " ", regex=True).str.replace(r"\d", "0", regex=True)
+           .str.replace(r"[^\w\s]", " ", regex=True).str.replace(r"\s+", " ", regex=True).str.strip().str.slice(0, P["template_key_chars"]))
+    ok = (key.str.len() >= P["template_min_key_len"]) & d["author_uid"].notna()
+    day = pd.to_datetime(d["posted_at"], utc=True, errors="coerce").dt.date
+    t = pd.DataFrame({"pl": d["platform"], "au": d["author_uid"], "k": key, "day": day})[ok]
+    g = t.groupby(["pl", "au", "k"])
+    n = g["day"].transform("size"); nd = g["day"].transform("nunique")
+    out.loc[t.index[(n >= P["template_min_posts"]) & (nd >= P["template_min_days"])]] = True
+    # short-message feed: an author that posts >= feed_min_per_day messages a day (>= feed_min_posts in all) with a median length <= feed_max_median_len
+    # characters is an alert feed whose wording varies too much for the opening-text rule (e.g. one-line air-raid alerts)
+    a = pd.DataFrame({"pl": d["platform"], "au": d["author_uid"], "day": day, "len": d["text_head"].fillna("").astype(str).str.len()})[d["author_uid"].notna()]
+    ag = a.groupby(["pl", "au"]).agg(n=("len", "size"), nd=("day", "nunique"), med=("len", "median"))
+    feed = ag[(ag["n"] >= P["feed_min_posts"]) & (ag["n"] / ag["nd"].clip(lower=1) >= P["feed_min_per_day"]) & (ag["med"] <= P["feed_max_median_len"])].index
+    if len(feed):
+        m = pd.MultiIndex.from_arrays([d["platform"], d["author_uid"]]).isin(feed)
+        feed_out.loc[m] = True
+    return out, feed_out
+
+
 def compute(df: pd.DataFrame, P=PARAMS):
     d = collapse_copies(df.reset_index(drop=True).copy())
     assert d["post_uid"].is_unique, "duplicate post_uid"
@@ -117,6 +159,8 @@ def compute(df: pd.DataFrame, P=PARAMS):
     d.loc[(d["platform"] == "youtube_video") & (d["views"] == 0), "views"] = np.nan       # counter unavailable, not "nobody watched"
     use = usable_counters(d, P); tier = {pl: tier_of(u) for pl, u in use.items()}
     d["tier"] = d["platform"].map(tier)
+    d["is_repost"] = repost_flag(d["text_head"]) if "text_head" in d.columns else False
+    d["is_template"], d["is_feed"] = template_flag(d, P)
     lag = d["scrape_lag_days"].to_numpy(float); groups = d["platform"].to_numpy(object)
     num = np.zeros(len(d)); den = np.zeros(len(d)); ref_n = np.zeros(len(d)); band = np.full(len(d), "", dtype=object)
     for c in COUNTERS:
@@ -177,12 +221,14 @@ def compute(df: pd.DataFrame, P=PARAMS):
     d["rule_baseline"] = pd.array(np.where(feasible, rb, None), dtype="boolean")
     spread_needed = d["tier"].isin(["A", "B"]).to_numpy()
     d["rule_spread"] = pd.array(np.where(spread_needed, (d["shares"].fillna(0) > 0).to_numpy(), None), dtype="boolean")
-    rules = ["rule_tail", "rule_min_support", "rule_baseline", "rule_spread"]
+    bad = d["is_repost"].to_numpy(bool) | d["is_template"].to_numpy(bool) | (d["is_feed"].to_numpy(bool) if P["exclude_feeds"] else False)
+    d["rule_original"] = pd.array(~bad, dtype="boolean")          # not a repost, not a recurring bulletin, not a short-message feed (when exclude_feeds)
+    rules = ["rule_tail", "rule_min_support", "rule_baseline", "rule_spread", "rule_original"]
     appl = d[rules].notna().to_numpy(); val = d[rules].fillna(True).to_numpy(bool)
     d["is_candidate"] = d["score_pct"].notna() & (~appl | val).all(axis=1) & d["rule_tail"].fillna(False).astype(bool)
     d["qualified_rules"] = [",".join(n.replace("rule_", "") for n, a, v in zip(rules, ap, vv) if a and v) for ap, vv in zip(appl, val)]
     cols = ["post_uid", "platform", *[c for c in ("native_id", "url") if c in d.columns], "n_copies", "tier", "age_band", "ref_n", "reach_pct", "spread_pct", "comment_pct", "like_pct", "score_s", "score_pct",
-            "baseline_kind", "author_overperf", *rules, "qualified_rules", "is_candidate"]
+            "baseline_kind", "author_overperf", "is_repost", "is_template", "is_feed", *rules, "qualified_rules", "is_candidate"]
     rows = []
     for pl, g in d.groupby("platform"):
         for c in COUNTERS:
@@ -202,23 +248,60 @@ def self_checks(out: pd.DataFrame, n_in: int):
     assert not out.loc[out.score_pct.isna(), "is_candidate"].any(), "candidate without a score"
 
 
+def load_prod():
+    """READ-ONLY extract of the counters from the production tables, using the stage-01 per-platform SQL (same column mapping and the same
+    post_uid = sha1(platform|native_id)). Only counters/keys are selected (no text, no embedding). Returns (frame, snapshot_ts)."""
+    import importlib.util
+    from lib.pg import q, read_only_snapshot
+    spec = importlib.util.spec_from_file_location("extract01", ROOT / "scripts" / "01_extract_base.py"); m = importlib.util.module_from_spec(spec)
+    sys.modules["extract01"] = m; spec.loader.exec_module(m)
+    frames = []
+    with read_only_snapshot() as (conn, cur, ts):
+        for plat, sql in m.PLATFORM_SQL.items():
+            wrapped = ("SELECT platform, native_id, url, author_id, posted_at, scraped_at, likes, comments, shares, views, left(coalesce(text, ''), 80) AS text_head, "
+                       "CASE WHEN native_id IS NULL OR btrim(native_id::text) = '' THEN (CASE WHEN text IS NULL OR text = '' THEN '' ELSE md5(text) END) END AS text_md5 "
+                       f"FROM ({sql}) q")
+            cols, rows = q(cur, wrapped); print(f"  {plat}: {len(rows):,} rows", flush=True)
+            if rows:
+                frames.append(pd.DataFrame(rows, columns=cols))
+    d = pd.concat(frames, ignore_index=True)
+    d["posted_at"] = pd.to_datetime(d["posted_at"], utc=True, errors="coerce"); d["scraped_at"] = pd.to_datetime(d["scraped_at"], utc=True, errors="coerce")
+    d["scrape_lag_days"] = (d["scraped_at"] - d["posted_at"]).dt.total_seconds() / 86400.0
+    d.loc[(d["scrape_lag_days"] < 0) | (d["scrape_lag_days"] > 5000), "scrape_lag_days"] = np.nan          # clock skew / epoch errors, as stage 07
+    has = d["native_id"].notna() & (d["native_id"].astype(str).str.strip() != "")
+    d["post_uid"] = [m._uid(pl, str(n)) if h else m._uid(pl, t or "", str(a or "")) for pl, n, h, t, a in zip(d["platform"], d["native_id"], has, d["text_md5"], d["author_id"])]
+    d = d.rename(columns={"author_id": "author_uid"})
+    return d[["post_uid", "platform", "native_id", "author_uid", "url", "posted_at", "scraped_at", "scrape_lag_days", "likes", "comments", "shares", "views", "text_head"]], ts
+
+
 def load(path: str | None) -> pd.DataFrame:
-    cols = "post_uid, platform, native_id, author_uid, url, scraped_at, scrape_lag_days, likes, comments, shares, views"
+    cols = "post_uid, platform, native_id, author_uid, url, posted_at, scraped_at, scrape_lag_days, likes, comments, shares, views"
     if path:
-        return pd.read_parquet(path, columns=[c.strip() for c in cols.split(",")])
+        import pyarrow.parquet as pq
+        have = set(pq.ParquetFile(path).schema_arrow.names)
+        return pd.read_parquet(path, columns=[c.strip() for c in (cols + ", text_head").split(",") if c.strip() in have])
     import duckdb
     con = duckdb.connect(str(ROOT / "data" / "analytics.duckdb"), read_only=True)
     try:
-        return con.execute(f"SELECT {cols} FROM post_facts").df()
+        return con.execute(f"SELECT {cols}, left(coalesce(text, ''), 80) AS text_head FROM post_facts").df()
     finally:
         con.close()
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(); ap.add_argument("--input", default=None); a = ap.parse_args()
-    df = load(a.input); print(f"posts in: {len(df):,}")
-    out, base = compute(df); self_checks(out, len(out))
-    print(f"copies collapsed: {len(df) - len(out):,} rows")
+    ap = argparse.ArgumentParser(); ap.add_argument("--input", default=None, help="parquet with the post_facts-like columns")
+    ap.add_argument("--source", choices=["local", "prod"], default="local", help="prod = READ-ONLY extract from production (snapshot cached under data/)")
+    a = ap.parse_args(); snap = None
+    if a.source == "prod":
+        df, snap = load_prod(); cache = ROOT / "data" / f"prod_counters_{snap:%Y%m%d_%H%M}.parquet"; df.to_parquet(cache, index=False); print(f"prod snapshot cached: {cache}")
+    else:
+        df = load(a.input)
+        import re
+        mm = re.search(r"prod_counters_(\d{8})_(\d{4})", a.input or "")
+        snap = pd.Timestamp(f"{mm.group(1)} {mm.group(2)[:2]}:{mm.group(2)[2:]}", tz="UTC") if mm else None
+    print(f"posts in: {len(df):,}")
+    out, base = compute(df); self_checks(out, len(out)); print(f"copies collapsed: {len(df) - len(out):,} rows")
+    out["snapshot_ts"] = snap; base["snapshot_ts"] = snap
     out.to_parquet(OUT, index=False); base.to_parquet(OUT_BASE, index=False)
     print(f"wrote {OUT} ({len(out):,}) and {OUT_BASE} ({len(base):,})")
     g = out.groupby(["tier", "platform"]).agg(n=("post_uid", "size"), scored=("score_s", lambda s: int(s.notna().sum())), candidates=("is_candidate", "sum"))

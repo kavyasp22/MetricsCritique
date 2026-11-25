@@ -6722,7 +6722,7 @@
   function exAttentionText(p) {         // size: where raw views (or likes + comments + shares) sit among posts of the same platform and age
     if (p.attention_pct == null && p.attention_mult == null) { return ''; }
     var top = p.attention_pct == null ? null : Math.max(0.01, (1 - Number(p.attention_pct)) * 100);
-    var topTxt = top == null ? '' : 'top ' + (top < 0.1 ? top.toFixed(2) : (top < 1 ? top.toFixed(1) : String(Math.round(top)))) + '% of ' + p.platform + ' posts of similar age';
+    var topTxt = top == null ? '' : 'top ' + (top < 0.1 ? top.toFixed(2) : (top < 1 ? top.toFixed(1) : String(Math.round(top)))) + '% of ' + p.platform + ' posts of similar age (all ages when the age is unknown)';
     var m = p.attention_mult == null ? null : Number(p.attention_mult);
     var multTxt = m == null ? '' : (m >= 10 ? Math.round(m) : m.toFixed(1)) + '\u00d7 the top-10% line';
     return 'attention: ' + [topTxt, multTxt].filter(Boolean).join(' (') + (topTxt && multTxt ? ')' : '');
@@ -6778,7 +6778,7 @@
       'amplification ratio (engagement relative to exposure) ranks against posts of the same platform and age (0.5 = typical, higher = stronger), averaged over the group\u2019s ' +
       'rated posts; shown only with at least 20 rated posts. Audience-normalised reach = views relative to the same author\u2019s other posts (1.0 = their usual). ' +
       'Observed views are the counter values we saw, not audience size. Engagement activity is a different unit and is not added to views. ' +
-      'These are group averages (topic \u00d7 platform): the per-post percentile is not stored yet. Click a row to open its posts.' );
+      'These are group averages (topic \u00d7 platform); the individual posts are listed below. Click a row to open its posts.' );
     tableView(host, [
       { k: 'topic', label: 'Topic' }, { k: 'platform', label: 'Platform' },
       { k: 'posts', label: 'Posts', num: true, fmt: fmtInt },
@@ -6799,7 +6799,7 @@
     });
     host.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Top individual posts' }));
     var plats = PLATFORMS.filter(exPlatOk).join(',');
-    var key = [S.from, S.to, plats, EX.q, EX.entityUid, EX.top, EX.vrank, EX.vper, EX.rt, EX.floor, EX.vorder, EX.topicId, EX.theme, EX.themeAll, EX.vthresh].join('|');
+    var key = [S.from, S.to, plats, EX.q, EX.entityUid, EX.top, EX.vrank, EX.vper, EX.rt, EX.floor, EX.vorder, EX.topicId, EX.theme, EX.themeAll, EX.vthresh, EX.entType, EX.entSub].join('|');
     exExplain(host, 'Top posts', (EX.topicName ? 'Showing only the posts in the topic \u201c' + EX.topicName + '\u201d. ' : '') + 'The search box takes a keyword, or pick a topic name from its suggestions to see only the posts in that topic. Two ways to rank. "Views": posts ranked by observed views; platforms that give no view count are listed separately, ' +
       'ranked by likes + comments + shares, and never ranked as zero views. Views are not comparable across platforms, so the most viewed post is not ' +
       'necessarily the most unusual one. "Viral ranking" has two orders. BIGGEST (default) sorts by where a post\u2019s raw attention (views, else likes + comments + shares) sits among posts of the same ' +
@@ -6840,9 +6840,9 @@
       });
     }
     rankBar.appendChild(h('span', { class: 'bds-label', text: 'THRESHOLD' }));
-    [['all', 'All posts'], ['viral', 'Viral breakout (Top 10% / P \u2265 0.80)']].forEach(function (x) {
+    [['all', 'All posts'], ['viral', 'Viral breakout (Top 10% activity / P \u2265 0.80 with at least median activity)']].forEach(function (x) {
       var b = h('button', { type: 'button', class: 'df-preset-btn' + (EX.vthresh === x[0] ? ' active' : ''), text: x[1],
-                            title: x[0] === 'viral' ? 'Keep only posts that broke out: in top 10% activity of their platform or virality percentile \u2265 0.80.' : 'Show all posts matching the search query.' });
+                            title: x[0] === 'viral' ? 'Keep only posts that broke out: in the top 10% of their platform by raw activity (more than 0), or a virality percentile \u2265 0.80 AND at least the platform median activity. A ratio on tiny counts does not qualify.' : 'Show all posts matching the search query.' });
       b.addEventListener('click', function () { EX.vthresh = x[0]; render(); });
       rankBar.appendChild(b);
     });
@@ -6871,8 +6871,8 @@
     boContent.appendChild(h('div', null, [
       h('b', { style: 'color: var(--ink); display: block; margin-bottom: 0.1rem;', text: 'Breakout rule:' }),
       h('div', { text: 'A post qualifies if either:' }),
-      h('div', { style: 'padding-left: 0.6rem;', text: '\u2022 Activity is in the Top 10%, OR' }),
-      h('div', { style: 'padding-left: 0.6rem;', text: '\u2022 Virality percentile is \u2265 80%.' })
+      h('div', { style: 'padding-left: 0.6rem;', text: '\u2022 Activity is in the top 10% of its platform (and above 0), OR' }),
+      h('div', { style: 'padding-left: 0.6rem;', text: '\u2022 Virality percentile is \u2265 80% AND activity is at least the platform median.' })
     ]));
     boInfo.appendChild(boContent);
     host.appendChild(boInfo);
@@ -6882,7 +6882,7 @@
       body.textContent = '';
       if (d.rank === 'virality') {
         var withPct = d.rated_posts + (d.floor_on ? d.below_floor : 0), big = d.order === 'biggest';
-        var threshNoteV = d.thresh === 'viral' ? ' (viral breakout threshold: top 10% activity or P \u2265 0.80)' : '';
+        var threshNoteV = d.thresh === 'viral' ? ' (viral breakout threshold: top 10% activity, or P \u2265 0.80 with at least median activity)' : '';
         body.appendChild(h('p', { class: 'cs', text: fmtInt(d.total_posts) + ' posts match the filters' + threshNoteV + '; ' + fmtInt(withPct) +
           (big ? ' of them have a view or engagement counter' : ' of them have a virality percentile (usable ratio and at least ' + d.min_ref + ' similar posts)') +
           (d.floor_on ? '. ' + fmtInt(d.below_floor) + ' of those are hidden because their activity is below ' + (d.floor_mode === 'top10' ? 'the top 10%' : 'the median') + ' of their own platform (change MIN ACTIVITY to see them), leaving ' + fmtInt(d.rated_posts) + ' ranked' : ', all ranked') +
@@ -6906,7 +6906,7 @@
         }
         return;
       }
-      var threshNote = d.thresh === 'viral' ? ' (viral breakout threshold: top 10% activity or P \u2265 0.80)' : '';
+      var threshNote = d.thresh === 'viral' ? ' (viral breakout threshold: top 10% activity, or P \u2265 0.80 with at least median activity)' : '';
       body.appendChild(h('p', { class: 'cs', text: fmtInt(d.total_posts) + ' posts match the filters' + threshNote + '.' }));
       var a = h('div', { class: 'ex-col' }, [h('div', { class: 'ct', text: 'Ranked by views (' + d.with_views.length + ')' })]);
       d.with_views.forEach(function (p) { a.appendChild(exPostCard(p, true)); });
@@ -6920,7 +6920,7 @@
     body.appendChild(h('div', { class: 'empty', text: 'Loading…' }));
     var url = '/api/explore/viral?from=' + encodeURIComponent(S.from) + '&to=' + encodeURIComponent(S.to) +
       '&platforms=' + encodeURIComponent(plats) + '&q=' + encodeURIComponent(EX.q) + (EX.topicId ? '&topic_id=' + encodeURIComponent(EX.topicId) : '') + exThemeQs() +
-      '&entity_uid=' + encodeURIComponent(EX.entityUid) + '&limit=' + Math.min(EX.top, EX_POST_CAP) +
+      '&entity_uid=' + encodeURIComponent(EX.entityUid) + (EX.entType ? '&entity_type=' + encodeURIComponent(EX.entType) : '') + (EX.entSub ? '&entity_subtype=' + encodeURIComponent(EX.entSub) : '') + '&limit=' + Math.min(EX.top, EX_POST_CAP) +
       (EX.vthresh === 'viral' ? '&thresh=viral' : '') +
       (EX.vrank === 'virality' ? '&rank=virality&per_platform=' + EX.vper : '') + (EX.rt === 'hide' ? '&retweets=hide' : '') + (EX.vrank === 'virality' && EX.floor !== 'top10' ? '&floor=' + EX.floor : '') +
       (EX.vrank === 'virality' && EX.vorder !== 'biggest' ? '&order=' + EX.vorder : '');
@@ -7790,7 +7790,6 @@
     var stored = null;
     try { stored = localStorage.getItem('z-mode'); } catch (e) { stored = null; }
     setMode(stored === 'advanced' || stored === 'basic' ? stored : 'explore');
-    window.setDashboardMode = setMode;
     basicBtn.addEventListener('click', function () { setMode('basic'); });
     advBtn.addEventListener('click', function () { setMode('advanced'); });
     if (expBtn) { expBtn.addEventListener('click', function () { setMode('explore'); }); }

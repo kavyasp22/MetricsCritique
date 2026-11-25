@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import threading
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -34,7 +35,6 @@ from feedback_store import FeedbackError, FeedbackStore
 
 from gemma_live import gemma_status
 from live_view import live_overview, DEFAULT_MILITARY
-import post_viewer as PV          # Post Viewer — integrated 23-platform browser
 
 HERE = Path(__file__).resolve().parent
 EDA_ROOT = HERE.parent
@@ -47,8 +47,9 @@ POST_THEME = DATA / "post_theme_v1.parquet"      # scripts/27_post_theme.py: hyb
 POST_THEME_KNN = DATA / "post_theme_knn_v1.parquet"   # scripts/28_theme_knn.py: theme spread to untagged posts by nearest-neighbour voting; optional
 POST_EVENT_TOPIC = DATA / "post_event_topic_v1.parquet" # scripts/29_post_event_topic.py: event topic A01..A10 (41 subcodes); optional
 POST_DEDUP = DATA / "post_dedup.parquet"         # scripts/25_post_dedup.py: is_first = the first post of an exact-copy group
-RETWEET_SQL = "(coalesce(p.text, '') ILIKE 'RT @%')"      # a retweet starts "RT @user:"; only Twitter / Truth Social mark reposts this way in the data
+RETWEET_SQL = "(coalesce(p.text, '') ILIKE 'RT @%' OR coalesce(p.text, '') ILIKE 'retweet @%')"      # a retweet starts "RT @user:" (or "retweet @user:"); only Twitter / Truth Social mark reposts this way in the data
 VIRALITY_MIN_REF = 20                            # a percentile needs at least this many reference posts to be shown
+VIRAL_P_MIN = 0.80                               # "viral breakout" by amplification: percentile at or above this (and activity at or above the platform median, see explore_viral)
 
 _main_con = duckdb.connect(database=":memory:", read_only=False)
 _main_con.execute(f"ATTACH '{DATA / 'analytics.duckdb'}' AS analytics (READ_ONLY)")
@@ -787,6 +788,24 @@ def _pv_has_floor() -> bool:
     return "activity_ok" in _pv_cols()
 
 
+_KEEP_LOCK = threading.Lock()
+_KEEP_READY = False
+
+
+def _ensure_keep() -> None:
+    """In-memory table of the post_uid to keep for each (platform, url): rows sharing a URL are copies of ONE post (local Instagram: 93,029 rows
+    = 982 posts), so the Viral Posts card ranks one row per post: the latest scrape. Built once, in memory only; no database file is written."""
+    global _KEEP_READY
+    if _KEEP_READY:
+        return
+    with _KEEP_LOCK:
+        if not _KEEP_READY:
+            _main_con.execute("CREATE TABLE IF NOT EXISTS viral_keep AS SELECT post_uid FROM (SELECT post_uid, row_number() OVER ("
+                              "PARTITION BY platform, coalesce(nullif(url, ''), post_uid) ORDER BY scraped_at DESC NULLS LAST, post_uid) AS rn "
+                              "FROM analytics.post_facts) WHERE rn = 1")
+            _KEEP_READY = True
+
+
 def explore_virality(qs, where, params, join, params_join, terms, limit):
     """Viral Posts ranked by the per-post virality percentile (stage 24): where a post sits among posts of the SAME platform and
     age band (0.5 typical, 1.0 top). It is comparable across platforms, unlike raw views. Only posts with a usable ratio and a
@@ -816,12 +835,12 @@ def explore_virality(qs, where, params, join, params_join, terms, limit):
              f"{'v.activity_mult AS attention_mult, v.activity_basis, v.activity_pct AS attention_pct, v.activity_ref_n AS attention_ref_n' if {'activity_mult', 'activity_pct'} <= cols_have else 'CAST(NULL AS DOUBLE) AS attention_mult, CAST(NULL AS VARCHAR) AS activity_basis, CAST(NULL AS DOUBLE) AS attention_pct, CAST(NULL AS DOUBLE) AS attention_ref_n'} "
              f"FROM analytics.post_facts p {join} JOIN read_parquet('{POST_VIRALITY.as_posix()}') v ON v.post_uid = p.post_uid "
              f"WHERE {' AND '.join(where)} AND " +
-             ("v.activity IS NOT NULL" if order == "biggest" else f"v.virality_pct IS NOT NULL AND v.virality_ref_n >= {VIRALITY_MIN_REF}"))
+             ("v.activity > 0" if order == "biggest" else f"v.virality_pct IS NOT NULL AND v.virality_ref_n >= {VIRALITY_MIN_REF}"))
     order_by = ("attention_pct DESC NULLS LAST, attention_mult DESC NULLS LAST, engagement DESC, post_uid" if order == "biggest"
                 else "virality_pct DESC, engagement DESC, post_uid")
     inner_all = inner
     if floor_on:
-        inner = inner + f" AND v.{floor_col}"
+        inner = inner + f" AND v.{floor_col} AND v.activity > 0"          # a platform whose p90 / median is 0 must not count zero-activity posts as "top 10 %"
     try:
         per = int(qs.get("per_platform", ["0"])[0])
     except ValueError:
@@ -851,7 +870,8 @@ def explore_viral(qs: dict) -> dict:
     """Explore page: posts ranked by observed views (and, separately, engagement for platforms
     that give no view count). Read-only. Filters: from/to (day), platforms (csv), q (text),
     entity_uid. Returns two lists so a post with no views is never ranked as zero."""
-    where, params = ["1=1"], []
+    _ensure_keep()
+    where, params = ["p.post_uid IN (SELECT post_uid FROM viral_keep)"], []          # one row per distinct post (copies collapsed)
     d_from, d_to = qs.get("from", [""])[0], qs.get("to", [""])[0]
     if d_from:
         where.append("CAST(p.posted_at AS DATE) >= ?"); params.append(d_from)
@@ -875,10 +895,17 @@ def explore_viral(qs: dict) -> dict:
         where.append("p.post_uid IN (SELECT post_uid FROM analytics.post_topic WHERE topic_id IN (" + ",".join("?" * len(ids)) + "))")
         params += ids
     ent = qs.get("entity_uid", [""])[0].strip()
+    etype, esub = qs.get("entity_type", [""])[0].strip(), qs.get("entity_subtype", [""])[0].strip()
     join = ""
     if ent:
         join = "JOIN (SELECT DISTINCT post_uid FROM geo.entity_mentions WHERE entity_uid = ?) em ON em.post_uid = p.post_uid"
         params_join = [ent]
+    elif etype:                          # type / subtype alone (no single entity picked): posts naming any entity of that type
+        if not re.fullmatch(r"[A-Z_]{2,20}", etype) or (esub and not re.fullmatch(r"[A-Za-z0-9_ .&/-]{1,60}", esub)):
+            raise ValueError("entity_type / entity_subtype have an invalid form")
+        join = ("JOIN (SELECT DISTINCT post_uid FROM geo.entity_mentions WHERE entity_type = ?" + (" AND entity_subtype = ?" if esub else "") +
+                ") em ON em.post_uid = p.post_uid")
+        params_join = [etype] + ([esub] if esub else [])
     else:
         params_join = []
     if qs.get("retweets", ["include"])[0] == "hide":
@@ -886,7 +913,11 @@ def explore_viral(qs: dict) -> dict:
     _theme_clause(qs, where, params)
     thresh = qs.get("thresh", [""])[0]
     if thresh == "viral" and POST_VIRALITY.exists():
-        where.append(f"p.post_uid IN (SELECT post_uid FROM read_parquet('{POST_VIRALITY.as_posix()}') WHERE activity_top10 OR virality_pct >= 0.80)")
+        # breakout = top 10 % of the platform by raw activity (and more than 0), OR an amplification percentile >= VIRAL_P_MIN that also has
+        # at least the platform's median activity: a ratio on tiny counts (4 views, 1 share) is not a breakout
+        pcols = _pv_cols()
+        amp = (f" OR (virality_pct >= {VIRAL_P_MIN} AND virality_ref_n >= {VIRALITY_MIN_REF} AND activity_ok AND activity > 0)" if "activity_ok" in pcols else "")
+        where.append(f"p.post_uid IN (SELECT post_uid FROM read_parquet('{POST_VIRALITY.as_posix()}') WHERE (activity_top10 AND activity > 0){amp})")
     limit = _limit(qs)
     have_v = POST_VIRALITY.exists()
     vjoin = f" LEFT JOIN read_parquet('{POST_VIRALITY.as_posix()}') v ON v.post_uid = p.post_uid" if have_v else ""
@@ -1477,20 +1508,6 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        # Post Viewer translation update
-        if parsed.path in ("/api/update-translation", "/post-viewer/api/update-translation"):
-            try:
-                n = int(self.headers.get("Content-Length", "0"))
-                body = self.rfile.read(n) if n > 0 else b"{}"
-                status, resp = PV.handle_update_translation(body)
-                self.send_response(status)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(resp)))
-                self.end_headers()
-                self.wfile.write(resp)
-            except Exception as e:
-                self._json({"error": str(e)}, status=500)
-            return
         if parsed.path != "/api/feedback":
             self._json({"error": "not found"}, status=404)
             return
@@ -1600,43 +1617,6 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/feedback/summary":
             self._json(FEEDBACK.summary())
             return
-        # ── Post Viewer routes (authentic post-read-db integration) ───────────
-        if parsed.path in ("/post-viewer", "/post-viewer/", "/platform", "/platform/"):
-            self.send_response(302)
-            self.send_header("Location", "/platform/twitter_posts")
-            self.end_headers()
-            return
-        if parsed.path.startswith("/platform/") or parsed.path.startswith("/post-viewer/platform/"):
-            if parsed.path.startswith("/post-viewer/platform/"):
-                table = parsed.path[len("/post-viewer/platform/"):]
-            else:
-                table = parsed.path[len("/platform/"):]
-            qs = parse_qs(parsed.query)
-            try:
-                status, html_page = PV.render_platform_view(table, qs)
-                enc = html_page.encode("utf-8")
-                self.send_response(status)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(enc)))
-                self.end_headers()
-                self.wfile.write(enc)
-            except Exception as e:
-                self._json({"error": str(e)}, status=500)
-            return
-        if parsed.path in ("/api/counts", "/post-viewer/api/counts"):
-            try:
-                qs = parse_qs(parsed.query)
-                refresh = qs.get("refresh", ["0"])[0] == "1"
-                body = PV.handle_api_counts(refresh=refresh)
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            except Exception as e:
-                self._json({"error": str(e)}, status=500)
-            return
-        # ── end Post Viewer routes ──────────────────────────────────────────
         if parsed.path == "/api/drill":
             qs = parse_qs(parsed.query)
             view = qs.get("view", [None])[0]
