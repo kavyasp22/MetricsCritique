@@ -92,8 +92,13 @@ def main() -> int:
     ref = dict(a._main_con.execute("SELECT platform, sum(virality_n) FROM metrics.metrics_daily GROUP BY 1").fetchall())
     yt_unavail = a._main_con.execute("SELECT count(*) FROM analytics.post_facts WHERE platform = 'youtube_video' AND views = 0 "
                                      "AND (coalesce(likes,0) + coalesce(comments,0)) > 0").fetchall()[0][0]
-    bad = {k: (int(mine.get(k, 0)), int(v or 0)) for k, v in ref.items() if int(mine.get(k, 0)) != int(v or 0) and k != "youtube_video"}
-    chk("rated posts per platform equal virality_n summed in metrics_daily on every platform except YouTube", not bad, bad)
+    a._ensure_keep()          # stage 24 collapses copies of one post (platform + url); metrics_daily (metrics v2) still counts every row
+    rows_by = dict(a._main_con.execute("SELECT platform, count(*) FROM analytics.post_facts GROUP BY 1").fetchall())
+    kept_by = dict(a._main_con.execute("SELECT p.platform, count(*) FROM analytics.post_facts p JOIN viral_keep k ON k.post_uid = p.post_uid GROUP BY 1").fetchall())
+    copies = {k: rows_by[k] - kept_by.get(k, 0) for k in rows_by}
+    bad = {k: (int(mine.get(k, 0)), int(v or 0)) for k, v in ref.items() if k != "youtube_video" and (
+        int(mine.get(k, 0)) != int(v or 0) if copies.get(k, 0) == 0 else not (int(v or 0) - copies[k] <= int(mine.get(k, 0)) <= int(v or 0)))}
+    chk("rated posts per platform equal virality_n in metrics_daily (YouTube excepted); platforms with copies are lower by at most the copies removed", not bad, bad)
     yt_diff = int(ref.get("youtube_video", 0)) - int(mine.get("youtube_video", 0))
     chk("YouTube differs by exactly the videos whose view counter is unavailable (views = 0 with likes or comments)", yt_diff == yt_unavail, f"{yt_diff} vs {yt_unavail}")
     ytz = df[(df["platform"] == "youtube_video")]
@@ -323,6 +328,32 @@ def main() -> int:
     except ValueError:
         chk("entity type refuses a bad value", True)
     chk("retweet pattern also catches 'retweet @user:'", a._main_con.execute("SELECT " + a.RETWEET_SQL.replace("p.text", "'retweet @presidencymv: On behalf'")).fetchall()[0][0] is True)
+
+    # ---------------- spread efficiency (v3 file): extra columns, the "Most efficient" order, and the fallback when the file is missing
+    WE = {"from": "2026-10-01", "to": TO}
+    eff = a.explore_viral(q(rank="virality", order="efficient", limit=100, **WE)); el = eff["by_virality"]
+    chk("efficient order returns the v3 flag and only posts that have a share rate", eff["order"] == "efficient" and eff["v3"] is True and len(el) > 0 and all(p["spread_eff_pct"] is not None for p in el), f"{len(el)} posts")
+    chk("efficient order is sorted by spread_eff_pct descending", all(el[i]["spread_eff_pct"] >= el[i + 1]["spread_eff_pct"] for i in range(len(el) - 1)))
+    chk("efficient order lists only evidence tiers A and B (platforms with a share or forward counter)", {p["evidence_tier"] for p in el} <= {"A", "B"}, sorted({p["evidence_tier"] for p in el}))
+    chk("efficient order leaves out reposts and RT-text posts (their counters are the original's)", not any(p["is_retweet"] for p in el) and not any((p["text"] or "").upper().startswith(("RT @", "RETWEET @")) for p in el), f"{sum(bool(p['is_retweet']) for p in el)} retweets")
+    chk("efficient order keeps the activity floor (no tiny-count post at the top)", all((p["views"] or 0) > 0 or (p["engagement"] or 0) > 0 for p in el))
+    big_ = a.explore_viral(q(rank="virality", order="biggest", limit=300, **WE))["by_virality"]
+    chk("default Biggest order carries the spread columns and keeps its own order", len(big_) > 0 and "spread_eff_pct" in big_[0] and "evidence_tier" in big_[0] and all(big_[i]["attention_pct"] >= big_[i + 1]["attention_pct"] for i in range(len(big_) - 1)))
+    cd = [p for p in big_ if p["evidence_tier"] in ("C", "D")]
+    chk("tier C/D posts have no share rate (shown as 'no share counter', never as 0)", all(p["spread_eff_pct"] is None for p in cd), f"{len(cd)} tier C/D posts")
+    old_path = a.POST_VIRALITY_V3
+    try:
+        a.POST_VIRALITY_V3 = a.Path("/nonexistent/post_virality_v3.parquet")
+        fb = a.explore_viral(q(rank="virality", order="biggest", limit=20, **WE))
+        chk("without the v3 file the card still works (spread columns are NULL, v3 false)", fb["v3"] is False and len(fb["by_virality"]) > 0 and all(p["spread_eff_pct"] is None for p in fb["by_virality"]))
+        try:
+            a.explore_viral(q(rank="virality", order="efficient", limit=5, **WE)); chk("efficient order without the v3 file says what to run", False)
+        except ValueError as e:
+            chk("efficient order without the v3 file says what to run", "24_post_virality_v3" in str(e))
+    finally:
+        a.POST_VIRALITY_V3 = old_path
+    cov = a._main_con.execute(f"SELECT count(*), count(w.post_uid) FROM viral_keep k LEFT JOIN read_parquet('{a.POST_VIRALITY_V3.as_posix()}') w ON w.post_uid = k.post_uid").fetchall()[0]
+    chk("the v3 file covers (almost) every post the card can show", cov[1] / cov[0] > 0.995, f"{cov[1]:,} of {cov[0]:,}")
 
     n_ok = sum(RESULTS)
     print(f"\n  {n_ok}/{len(RESULTS)} checks passed")

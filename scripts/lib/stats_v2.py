@@ -394,6 +394,47 @@ def eb_shrink(mean: float, n: float, parent_mean: float, k: float) -> float:
     return float((n * mean + k * parent_mean) / (n + k))
 
 
+def beta_binomial_prior(k: Sequence[float], n: Sequence[float], *, min_posts: int = 30) -> tuple[float, float, float]:
+    """Empirical-Bayes prior for a rate k/n over many posts: returns (p0, C, rho).
+
+    p0 = pooled rate sum(k)/sum(n); rho = over-dispersion (intra-class correlation) by the moment estimator for the beta-binomial
+    (analysis of variance form, unequal n: Kleinman 1973 / Griffiths 1973); C = alpha + beta = (1 - rho) / rho is the prior's weight in
+    "posts-worth of denominator". A numerator cannot exceed its denominator (clipped). Fewer than ``min_posts`` usable posts -> NaN, not a guess.
+    """
+    kk = np.asarray(k, dtype=float); nn = np.asarray(n, dtype=float)
+    ok = np.isfinite(kk) & np.isfinite(nn) & (nn > 0) & (kk >= 0)
+    kk, nn = kk[ok], nn[ok]
+    m = kk.size
+    if m < min_posts:
+        return np.nan, np.nan, np.nan
+    kk = np.minimum(kk, nn)
+    N = float(nn.sum()); pbar = float(kk.sum() / N)
+    if pbar <= 0.0:
+        return 0.0, 1e6, 0.0                       # nobody shares: every post shrinks to 0
+    if pbar >= 1.0 or N <= m:
+        return float(min(pbar, 1.0)), 1e6, 0.0
+    pi = kk / nn
+    msb = float(np.sum(nn * (pi - pbar) ** 2) / (m - 1))
+    msw = float(np.sum(nn * pi * (1.0 - pi)) / (N - m))
+    n_c = float((N - np.sum(nn ** 2) / N) / (m - 1))
+    den = msb + (n_c - 1.0) * msw
+    if not np.isfinite(den) or den <= 0 or not np.isfinite(msw) or msw <= 0:
+        return pbar, 1e6, 0.0
+    rho = float(np.clip((msb - msw) / den, 1e-6, 0.999))
+    return pbar, float(np.clip((1.0 - rho) / rho, 1.0, 1e6)), rho
+
+
+def eb_ratio(k: Sequence[float], n: Sequence[float], p0: float, C: float) -> np.ndarray:
+    """Shrunk rate (k + C*p0) / (n + C); NaN when n or the prior is unusable. k is clipped to n."""
+    kk = np.asarray(k, dtype=float); nn = np.asarray(n, dtype=float)
+    out = np.full(kk.shape, np.nan)
+    if not (np.isfinite(p0) and np.isfinite(C)):
+        return out
+    ok = np.isfinite(kk) & np.isfinite(nn) & (nn > 0) & (kk >= 0)
+    out[ok] = (np.minimum(kk[ok], nn[ok]) + C * p0) / (nn[ok] + C)
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Persistence: AR(1)
 # --------------------------------------------------------------------------- #
@@ -1296,6 +1337,16 @@ def run_self_checks(*, verbose: bool = False) -> dict:
     res["entropy_single_is_zero"] = bool(shannon_entropy([5]) == 0.0)
     res["hhi_single_is_one"] = bool(hhi([5]) == 1.0)
     res["hhi_uniform_is_inv_n"] = bool(abs(hhi([1] * 4) - 0.25) < 1e-12)
+
+    # --- 12b. beta-binomial prior + shrunk ratio ----------------------------
+    _r = np.random.default_rng(RNG_SEED); _n = np.maximum(1, _r.lognormal(5, 2, 4000).astype(int)); _p = _r.beta(2.5, 47.5, 4000); _k = _r.binomial(_n, _p)
+    _p0, _C, _rho = beta_binomial_prior(_k, _n)
+    res["bb_prior_recovers_rate"] = bool(abs(_p0 - 0.05) / 0.05 < 0.25)
+    res["bb_prior_recovers_weight"] = bool(25 < _C < 100)                            # true alpha+beta = 50
+    res["eb_ratio_tiny_post_shrinks"] = bool(abs(eb_ratio([1], [1], _p0, _C)[0] - _p0) < 0.2 * (1.0 - _p0) and eb_ratio([1], [1], _p0, _C)[0] < 0.2)   # 1 share on 1 view does not score 1.0 (raw ratio 1.0, +1 smoothing 0.5)
+    res["eb_ratio_big_post_keeps_rate"] = bool(abs(eb_ratio([50_000], [1_000_000], _p0, _C)[0] - 0.05) < 1e-3)
+    res["bb_prior_needs_support"] = bool(np.isnan(beta_binomial_prior([1, 2], [10, 10])[0]))
+    res["eb_ratio_no_prior_is_nan"] = bool(np.isnan(eb_ratio([1], [1], np.nan, np.nan)[0]))
 
     # --- 13. rank_pct -----------------------------------------------------
     rp = rank_pct([1.0, 2.0, 3.0, np.nan])

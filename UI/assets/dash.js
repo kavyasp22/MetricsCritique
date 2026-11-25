@@ -6727,13 +6727,22 @@
     var multTxt = m == null ? '' : (m >= 10 ? Math.round(m) : m.toFixed(1)) + '\u00d7 the top-10% line';
     return 'attention: ' + [topTxt, multTxt].filter(Boolean).join(' (') + (topTxt && multTxt ? ')' : '');
   }
+  function exSpreadText(p) {             // spread efficiency: rank of the empirical-Bayes shrunk share rate among posts of the same platform, count basis and age
+    if (p.spread_eff_pct != null) {
+      var top = Math.max(0.1, (1 - Number(p.spread_eff_pct)) * 100), r = p.spread_rate_eb == null ? null : Number(p.spread_rate_eb) * 100;
+      var rate = r == null ? '' : (p.spread_stratum === 'views' ? ' (' + r.toFixed(r < 1 ? 2 : 1) + '% of views shared)' : ' (' + r.toFixed(0) + '% of interactions are shares)');
+      return 'share rate: top ' + (top < 1 ? top.toFixed(1) : String(Math.round(top))) + '% of ' + p.platform + ' posts' + rate;
+    }
+    return (p.evidence_tier === 'C' || p.evidence_tier === 'D') ? 'no share counter' : '';
+  }
   function exPostCard(p, byViews, mode) {
     var when = p.posted_at ? day(p.posted_at) : '';
     var vt = exViralityText(p), at = exAttentionText(p);
-    var lead = EX.vorder === 'amplified' ? [vt, at] : [at, vt];               // the bold part is what the list is sorted by
+    var st = exSpreadText(p);
+    var lead = EX.vorder === 'efficient' ? [st, at] : (EX.vorder === 'amplified' ? [vt, at] : [at, vt]);               // the bold part is what the list is sorted by
     var metric = mode === 'virality' ? (lead[0] || lead[1] || 'no ratio')
       : (byViews ? (fmtCompact(p.views || 0) + ' views') : ('engagement ' + fmtCompact(p.engagement || 0)));
-    var second = (mode === 'virality' ? ((lead[0] && lead[1] ? ' · ' + lead[1] : '') + (p.views ? ' · ' + fmtCompact(p.views) + ' views' : '')) : (vt ? ' · ' + vt : '')) +
+    var second = (mode === 'virality' ? ((lead[0] && lead[1] ? ' · ' + lead[1] : '') + (p.views ? ' · ' + fmtCompact(p.views) + ' views' : '') + (EX.vorder !== 'efficient' && st ? ' · ' + st : '')) : (vt ? ' · ' + vt : '')) +
       (p.likes != null ? ' · ' + fmtCompact(p.likes) + ' likes' : '') + (p.shares != null ? ' · ' + fmtCompact(p.shares) + ' shares' : '');
     var title = h('div', { class: 'ex-post-top' }, [
       h('b', { text: p.platform }), p.is_retweet ? h('span', { class: 'ex-rt-tag', text: 'Retweet', title: 'Starts with "RT @": the counters shown are the original post\u2019s, not its own' }) : null,
@@ -6804,7 +6813,7 @@
       'ranked by likes + comments + shares, and never ranked as zero views. Views are not comparable across platforms, so the most viewed post is not ' +
       'necessarily the most unusual one. "Viral ranking" has two orders. BIGGEST (default) sorts by where a post\u2019s raw attention (views, else likes + comments + shares) sits among posts of the same ' +
       'platform and age, so a post with millions of views comes first whatever its share rate; the percentile is comparable across platforms. MOST AMPLIFIED sorts by the amplification percentile: each post is ranked against ' +
-      'posts of the same platform and age (1.00 = top of its peers, 0.50 = typical), which can be compared across platforms. Every post shows both numbers. The percentile is shown only for posts with a usable amplification ratio and at least 20 similar posts to ' +
+      'posts of the same platform and age (1.00 = top of its peers, 0.50 = typical), which can be compared across platforms. Every post shows both numbers. MOST EFFICIENT sorts by the share rate (shares per view, else per interaction) pulled toward the platform norm, so tiny counts cannot win; it only lists platforms that have a share or forward counter and is never blended with size. The percentile is shown only for posts with a usable amplification ratio and at least 20 similar posts to ' +
       'compare with; platforms with no counters (Reddit) have none. Ties are broken by engagement. Because the percentile ranks a ratio, tiny counts can score high (4 views and 1 share), so by default a post must also be in the top 10% of its own platform by activity (views, else likes + comments + shares); MIN ACTIVITY can loosen it to the platform median or switch it off. Retweets (posts starting "RT @") are included because they show spread, and are tagged; their counters are the original post\u2019s, so their score is really the original\u2019s. "Original posts only" hides them (only Twitter and Truth Social mark reposts this way).' + (EX.entityName ? ' Filtered to posts naming ' + EX.entityName + '.' : '') );
     if (EX.theme) { host.appendChild(h('p', { class: 'cs ex-warn', text: exThemeNote() })); }
     if (EX.top === EX_ALL) { host.appendChild(h('p', { class: 'cs', text: 'Show all: the posts below are cut at ' + EX_POST_CAP + ' per list (the server limit); narrow the search to see the rest.' })); }
@@ -6816,8 +6825,9 @@
     });
     if (EX.vrank === 'virality') {
       rankBar.appendChild(h('span', { class: 'bds-label', text: 'ORDER' }));
-      [['biggest', 'Biggest'], ['amplified', 'Most amplified']].forEach(function (x) {
+      [['biggest', 'Biggest'], ['amplified', 'Most amplified'], ['efficient', 'Most efficient']].forEach(function (x) {
         var tips = { biggest: 'Largest raw attention first: views (or likes + comments + shares) as a multiple of the top-10% line of the post\u2019s own platform. A post with millions of views comes first whatever its share rate.',
+                     efficient: 'Highest share rate first (shares per view, else per interaction), pulled toward the platform norm so a post with 1 view and 1 share cannot win. Only platforms with a share or forward counter appear. It shows efficient spreading, not size: it is a separate order and is never blended with Biggest.',
                      amplified: 'Highest share-or-like ratio first, compared with posts of the same platform and age. Finds posts that spread efficiently; it can rank a very large post low.' };
         var b = h('button', { type: 'button', class: 'df-preset-btn' + (EX.vorder === x[0] ? ' active' : ''), text: x[1], title: tips[x[0]] });
         b.addEventListener('click', function () { EX.vorder = x[0]; render(); });
@@ -6881,14 +6891,14 @@
     function paint(d) {
       body.textContent = '';
       if (d.rank === 'virality') {
-        var withPct = d.rated_posts + (d.floor_on ? d.below_floor : 0), big = d.order === 'biggest';
+        var withPct = d.rated_posts + (d.floor_on ? d.below_floor : 0), big = d.order === 'biggest', eff = d.order === 'efficient';
         var threshNoteV = d.thresh === 'viral' ? ' (viral breakout threshold: top 10% activity, or P \u2265 0.80 with at least median activity)' : '';
         body.appendChild(h('p', { class: 'cs', text: fmtInt(d.total_posts) + ' posts match the filters' + threshNoteV + '; ' + fmtInt(withPct) +
-          (big ? ' of them have a view or engagement counter' : ' of them have a virality percentile (usable ratio and at least ' + d.min_ref + ' similar posts)') +
+          (eff ? ' of them have a share or forward counter and a share rate' : big ? ' of them have a view or engagement counter' : ' of them have a virality percentile (usable ratio and at least ' + d.min_ref + ' similar posts)') +
           (d.floor_on ? '. ' + fmtInt(d.below_floor) + ' of those are hidden because their activity is below ' + (d.floor_mode === 'top10' ? 'the top 10%' : 'the median') + ' of their own platform (change MIN ACTIVITY to see them), leaving ' + fmtInt(d.rated_posts) + ' ranked' : ', all ranked') +
-          (big ? '. Ordered by raw attention compared with posts of the same platform and age.' : '. The rest have no percentile and are not ranked here. Ordered by the amplification percentile.') }));
+          (eff ? '. Ordered by the share rate (shrunk toward the platform norm) among posts of the same platform and age. Platforms with no share or forward counter are not listed here.' : big ? '. Ordered by raw attention compared with posts of the same platform and age.' : '. The rest have no percentile and are not ranked here. Ordered by the amplification percentile.') }));
         var list = d.by_virality || [];
-        if (!list.length) { empty(body, d.order === 'biggest' ? 'No posts with counters match.' : 'No posts with a virality percentile match.'); return; }
+        if (!list.length) { empty(body, d.order === 'biggest' ? 'No posts with counters match.' : (eff ? 'No posts with a share rate match (only platforms with a share or forward counter are ranked here).' : 'No posts with a virality percentile match.')); return; }
         if (d.per_platform > 0) {
           var by = {}, order = [];
           list.forEach(function (p) { if (!by[p.platform]) { by[p.platform] = []; order.push(p.platform); } by[p.platform].push(p); });
@@ -6900,7 +6910,7 @@
           });
           body.appendChild(grid);
         } else {
-          var one = h('div', { class: 'ex-col' }, [h('div', { class: 'ct', text: (d.order === 'biggest' ? 'Biggest attention (' : 'Most amplified (') + list.length + ')' })]);
+          var one = h('div', { class: 'ex-col' }, [h('div', { class: 'ct', text: (d.order === 'biggest' ? 'Biggest attention (' : (eff ? 'Most efficient (' : 'Most amplified (')) + list.length + ')' })]);
           list.forEach(function (p) { one.appendChild(exPostCard(p, false, 'virality')); });
           body.appendChild(one);
         }

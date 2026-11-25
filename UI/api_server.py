@@ -43,6 +43,7 @@ DATA = EDA_ROOT / "data"
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 300
 POST_VIRALITY = DATA / "post_virality.parquet"   # scripts/24_post_virality.py; optional, the page works without it
+POST_VIRALITY_V3 = DATA / "post_virality_v3.parquet"   # scripts/24_post_virality_v3.py; optional: evidence tier + empirical-Bayes share rate (spread efficiency) and the "Most efficient" order
 POST_THEME = DATA / "post_theme_v1.parquet"      # scripts/27_post_theme.py: hybrid security theme D01..D09; optional
 POST_THEME_KNN = DATA / "post_theme_knn_v1.parquet"   # scripts/28_theme_knn.py: theme spread to untagged posts by nearest-neighbour voting; optional
 POST_EVENT_TOPIC = DATA / "post_event_topic_v1.parquet" # scripts/29_post_event_topic.py: event topic A01..A10 (41 subcodes); optional
@@ -817,9 +818,16 @@ def explore_virality(qs, where, params, join, params_join, terms, limit):
     `order=biggest` (default) sorts by where the post's raw attention sits among posts of the same platform, basis and age band
     (activity_pct, comparable across platforms), then by its multiple of the platform's top-10% line, so the largest posts come first
     whatever their share rate; posts with no ratio (for example Snapchat) can appear. `order=amplified` sorts by the ratio
-    percentile described above. The two are deliberately not combined: a geometric mean put the most viewed posts at ranks 26-30,003."""
+    percentile described above. The two are deliberately not combined: a geometric mean put the most viewed posts at ranks 26-30,003.
+    `order=efficient` (needs data/post_virality_v3.parquet) sorts by spread efficiency: the percentile, among posts of the same platform, count basis and age
+    band, of the empirical-Bayes SHRUNK share rate (shares / views, else shares / all interactions; a post with 1 view and 1 share cannot win), then by attention.
+    Only posts with a share counter (evidence tiers A and B) have it; the activity floor still applies; reposts ("RT @" carry the original's counters), recurring templates and short-message feeds (`rule_original` in the v3 file) are left out, because their share rate says nothing about spread. It is a separate order, never blended with size
+    (the benchmark in Project-documents-final/Viral_Posts_Virality_Spec_and_Research.md section 8D: a blended composite buried the biggest posts)."""
     order = qs.get("order", ["biggest"])[0]
-    order = order if order in ("biggest", "amplified") else "biggest"
+    order = order if order in ("biggest", "amplified", "efficient") else "biggest"
+    has_v3 = POST_VIRALITY_V3.exists()
+    if order == "efficient" and not has_v3:
+        raise ValueError("spread efficiency is not built yet: run scripts/24_post_virality_v3.py")
     if order == "biggest" and not {"activity_mult", "activity_pct"} <= _pv_cols():
         order = "amplified"                   # older file without the multiple
     mode = qs.get("floor", ["top10"])[0]
@@ -830,13 +838,19 @@ def explore_virality(qs, where, params, join, params_join, terms, limit):
     floor_col = {"top10": "activity_top10", "median": "activity_ok"}.get(mode)
     floor_on = mode != "off" and floor_col in cols_have
     cols = "p.post_uid, p.platform, p.posted_at, p.author_name, left(coalesce(p.text,''), 100000) AS text, p.url"
+    w_cols = (", w.tier AS evidence_tier, w.spread_eff_pct, w.spread_ratio_eb AS spread_rate_eb, w.spread_ratio_raw AS spread_rate_raw, w.spread_stratum" if has_v3 else
+              ", CAST(NULL AS VARCHAR) AS evidence_tier, CAST(NULL AS DOUBLE) AS spread_eff_pct, CAST(NULL AS DOUBLE) AS spread_rate_eb, CAST(NULL AS DOUBLE) AS spread_rate_raw, CAST(NULL AS VARCHAR) AS spread_stratum")
+    w_join = f" LEFT JOIN read_parquet('{POST_VIRALITY_V3.as_posix()}') w ON w.post_uid = p.post_uid" if has_v3 else ""
     inner = (f"SELECT {cols}, p.views, p.likes, p.comments, p.shares, "
              f"coalesce(p.likes,0)+coalesce(p.comments,0)+coalesce(p.shares,0) AS engagement, {RETWEET_SQL} AS is_retweet, v.virality_pct, v.virality_ref_n, "
              f"{'v.activity_mult AS attention_mult, v.activity_basis, v.activity_pct AS attention_pct, v.activity_ref_n AS attention_ref_n' if {'activity_mult', 'activity_pct'} <= cols_have else 'CAST(NULL AS DOUBLE) AS attention_mult, CAST(NULL AS VARCHAR) AS activity_basis, CAST(NULL AS DOUBLE) AS attention_pct, CAST(NULL AS DOUBLE) AS attention_ref_n'} "
-             f"FROM analytics.post_facts p {join} JOIN read_parquet('{POST_VIRALITY.as_posix()}') v ON v.post_uid = p.post_uid "
+             f"{w_cols} "
+             f"FROM analytics.post_facts p {join} JOIN read_parquet('{POST_VIRALITY.as_posix()}') v ON v.post_uid = p.post_uid{w_join} "
              f"WHERE {' AND '.join(where)} AND " +
-             ("v.activity > 0" if order == "biggest" else f"v.virality_pct IS NOT NULL AND v.virality_ref_n >= {VIRALITY_MIN_REF}"))
+             ("v.activity > 0" if order == "biggest" else "v.activity > 0 AND w.spread_eff_pct IS NOT NULL AND coalesce(w.rule_original, TRUE)" if order == "efficient" else
+              f"v.virality_pct IS NOT NULL AND v.virality_ref_n >= {VIRALITY_MIN_REF}"))
     order_by = ("attention_pct DESC NULLS LAST, attention_mult DESC NULLS LAST, engagement DESC, post_uid" if order == "biggest"
+                else "spread_eff_pct DESC, attention_pct DESC NULLS LAST, engagement DESC, post_uid" if order == "efficient"
                 else "virality_pct DESC, engagement DESC, post_uid")
     inner_all = inner
     if floor_on:
@@ -863,7 +877,7 @@ def explore_virality(qs, where, params, join, params_join, terms, limit):
         cur.close()
     return {"rank": "virality", "order": order, "per_platform": per, "total_posts": int(total), "rated_posts": int(rated),
             "floor_on": bool(floor_on), "floor_mode": mode if floor_on else "off", "below_floor": int(rated_all - rated),
-            "min_ref": VIRALITY_MIN_REF, "by_virality": _clean_posts(rows, terms), "terms": terms, "thresh": qs.get("thresh", [""])[0]}
+            "min_ref": VIRALITY_MIN_REF, "v3": has_v3, "by_virality": _clean_posts(rows, terms), "terms": terms, "thresh": qs.get("thresh", [""])[0]}
 
 
 def explore_viral(qs: dict) -> dict:

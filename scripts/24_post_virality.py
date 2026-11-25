@@ -39,6 +39,7 @@ Why a separate stage: re-running 07 takes 45-60 min and rewrites every metric; t
 (READ-ONLY open of data/analytics.duckdb) and writes one new file, so nothing existing changes and
 the dashboard can keep running.
 
+Copies of one post (same platform + url) are collapsed to the latest-scraped row before any percentile or line is computed (2026-11-24).
 Posts of platforms that script 07 leaves out of the time-series scope (TS_PLATFORMS_EXCLUDE) are
 not in the file. Reddit has no counters, so its percentile is NaN.
 
@@ -74,7 +75,19 @@ def main() -> int:
     src = m.load_source()
     posts_all = src["posts"]
     ts_posts = posts_all[~posts_all["platform"].isin(m.TS_PLATFORMS_EXCLUDE)].copy()
-    m.log(f"posts total={len(posts_all):,} in scope={len(ts_posts):,}")
+    # Rows that share (platform, url) are COPIES of one post (local Instagram: 93,029 rows = 982 posts). Percentiles, p90 and medians must be
+    # computed over distinct posts, or a copied post is counted ~95 times in its own reference set. Keep the latest-scraped copy: the SAME rule the
+    # dashboard API uses (UI/api_server.py, `viral_keep`), so every post the card shows has a row here. Rows not in post_facts (YouTube comments) are kept.
+    import duckdb
+    _con = duckdb.connect(str(m.DUCKDB_PATH), read_only=True)
+    try:
+        _copies = set(_con.execute(
+            "SELECT post_uid FROM (SELECT post_uid, row_number() OVER (PARTITION BY platform, coalesce(nullif(url, ''), post_uid) "
+            "ORDER BY scraped_at DESC NULLS LAST, post_uid) AS rn FROM post_facts) WHERE rn > 1").df()["post_uid"])
+    finally:
+        _con.close()
+    n_before = len(ts_posts); ts_posts = ts_posts[~ts_posts["post_uid"].isin(_copies)].copy()
+    m.log(f"posts total={len(posts_all):,} in scope={n_before:,}; copies of one post removed={n_before - len(ts_posts):,}; ranked posts={len(ts_posts):,}")
     p = m.enrich_posts(ts_posts, P)
     views = p["views"].astype("float64")
     # YouTube: views = 0 with other counters means the view counter was NOT AVAILABLE, not that nobody watched. The ratio
