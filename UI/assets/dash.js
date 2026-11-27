@@ -7308,6 +7308,51 @@
       var dl = h('div', { class: 'aud-legend' }, [h('span', { class: 'aud-key aud-neg' }), txt(' negative '), h('span', { class: 'aud-key aud-neu' }), txt(' neutral '), h('span', { class: 'aud-key aud-pos' }), txt(' positive')]);
       body.appendChild(dl); body.appendChild(dist);
 
+      /* 1b. sentiment quality: what the net number is made of (stage 51); absent when stage 51 has not been run */
+      if (d.quality && d.quality.rows && d.quality.rows.length) {
+        var Q = d.quality;
+        body.appendChild(h('div', { class: 'ct aud-sec', text: 'Sentiment quality: what the net number is made of' }));
+        var qrows = Q.rows.map(function (x) {
+          var share = function (n) { return x.scored ? 100 * n / x.scored : null; };
+          return { platform: (AUD_PLAT[x.platform] || x.platform), layer: x.layer === 'comment' ? 'Comments' : 'Replies', scored: x.scored,
+                   emoji: share(x.emoji_only), notext: x.no_text, weak: x.scored ? 100 * (x.weak + x.uncertain) / x.scored : null,
+                   all: x.net_all, head: x.net_headline, words: x.net_words, conf: x.net_confident,
+                   ci: (x.pos_lo == null ? null : x.pos_lo.toFixed(1) + '–' + x.pos_hi.toFixed(1) + '%') };
+        });
+        audTable(body, [
+          { k: 'platform', label: 'Platform' }, { k: 'layer', label: 'Layer' }, { k: 'scored', label: 'Scored', num: true, fmt: audN },
+          { k: 'emoji', label: 'Emoji-only', num: true, fmt: audPct }, { k: 'notext', label: 'No text (excluded)', num: true, fmt: audN },
+          { k: 'weak', label: 'Below 0.60 confidence', num: true, fmt: audPct },
+          { k: 'head', label: 'Net (headline)', num: true, fmt: audNet }, { k: 'words', label: 'Net, words only', num: true, fmt: audNet },
+          { k: 'conf', label: 'Net, confident only', num: true, fmt: audNet }, { k: 'ci', label: 'Positive share, 95% interval' }
+        ], qrows, { rawTable: true });
+        body.appendChild(h('p', { class: 'fnote', text: 'Headline = every scored comment except those with no text (empty, punctuation only, a single letter, a link only). ' +
+          'Emoji-only comments are kept: the model reads them sensibly (hearts and thumbs-up positive, crying faces negative), so they are real audience reaction, but they carry less information than words, so "words only" is shown beside it. ' +
+          '"Confident only" keeps comments where the model’s top class has probability of at least ' + Q.conf_high.toFixed(2) + '; it drops mostly neutral comments, so it reads more extreme and is a sensitivity check, not a replacement. ' +
+          'The interval is a Wilson 95% interval on the positive share. Counts are summed by ' + Q.grain + ' (month grain when dates are set); the theme and entity filters do not apply here. Thresholds are provisional.' }));
+      }
+
+      /* 1c. robust trend of the weekly net sentiment: Theil-Sen slope + Hamed-Rao Mann-Kendall (stage 51 weekly counts) */
+      if (d.quality_trend && d.quality_trend.rows && d.quality_trend.rows.length) {
+        var QT = d.quality_trend;
+        body.appendChild(h('div', { class: 'ct aud-sec', text: 'Weekly sentiment trend' }));
+        var trows = QT.rows.map(function (x) {
+          var has = x.slope != null;
+          return { platform: (AUD_PLAT[x.platform] || x.platform), layer: x.layer === 'comment' ? 'Comments' : 'Replies', weeks: x.weeks,
+                   slope: has ? (x.slope >= 0 ? '+' : '') + x.slope.toFixed(2) + ' (' + x.lo.toFixed(2) + ' to ' + x.hi.toFixed(2) + ')' : '—',
+                   dir: !has ? '—' : (x.trend === 'up' ? 'Rising' : (x.trend === 'down' ? 'Falling' : 'No clear trend')),
+                   p: has ? (x.p < 0.001 ? '<0.001' : x.p.toFixed(3)) : '—',
+                   note: has ? '' : (x.weeks < QT.min_weeks ? 'fewer than ' + QT.min_weeks + ' weeks with enough comments' : 'weeks with data cover only ' + Math.round(100 * (x.cover || 0)) + '% of the period: pick a shorter date range') };
+        });
+        audTable(body, [
+          { k: 'platform', label: 'Platform' }, { k: 'layer', label: 'Layer' }, { k: 'weeks', label: 'Weeks used', num: true, fmt: audN },
+          { k: 'slope', label: 'Net change per week (95% interval)' }, { k: 'dir', label: 'Direction' }, { k: 'p', label: 'p-value', num: true }, { k: 'note', label: 'Note' }
+        ], trows, { rawTable: true });
+        body.appendChild(h('p', { class: 'fnote', text: 'Net sentiment points per week on the headline base, from the Theil-Sen slope (the median of all pairwise slopes, so one viral week cannot tilt it) with a Mann-Kendall test corrected for week-to-week autocorrelation (Hamed-Rao). ' +
+          'Only weeks with at least ' + QT.min_n + ' scored comments are used, a trend needs at least ' + QT.min_weeks + ' of them covering ' + Math.round(100 * QT.min_cover) + '% of the period, and the weeks are by comment date. ' +
+          'It describes the comments that were collected, not the whole audience; collection limits per post apply.' }));
+      }
+
       /* 2. the gap between the audience and the post */
       body.appendChild(h('div', { class: 'ct aud-sec', text: 'Audience vs post: the sentiment gap' }));
       body.appendChild(h('div', { class: 'cs aud-gapdef' }, [h('b', { text: 'Audience gap = mean comment sentiment − original post sentiment.' }), txt(' Triage flag at ±0.30; see the note below.')]));

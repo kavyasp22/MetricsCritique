@@ -43,6 +43,13 @@ function payload(o) {
       youtube_video: { negative: [{ post_uid: 'p1', platform: 'youtube_video', date: '2026-10-02', url: 'https://www.youtube.com/watch?v=abc', text: 'YT only card', theme: 'D01', post_tone: 0.4, comment_tone: -0.5, gap: -0.9, comments: 120, replies: 30, reply_gap: -1.0, small_sample: false, caption_effect: false }], positive: [] },
       instagram: { negative: [{ post_uid: 'p9', platform: 'instagram', date: '2026-11-01', url: 'https://www.instagram.com/p/cap/', text: 'A promo caption', theme: null, post_tone: 0.8, comment_tone: -0.2, gap: -1.0, comments: 9, replies: 0, reply_gap: null, small_sample: true, caption_effect: true }],
                    positive: [] } },
+    quality: { grain: 'all dates', built: '2026-11-27', conf_high: 0.6, conf_low: 0.45, min_pooled: 30, ignores_theme_entity: true, rows: [
+      { platform: 'youtube_video', layer: 'comment', scored: 1000, no_text: 3, emoji_only: 50, words_only: 947, confident: 600, uncertain: 250, weak: 147, net_all: -12.6, net_headline: -12.6, net_words: -16.6, net_confident: -19.1, pos_pct: 33.6, pos_lo: 30.7, pos_hi: 36.6 },
+      { platform: 'instagram', layer: 'comment', scored: 20, no_text: 0, emoji_only: 5, words_only: 15, confident: 8, uncertain: 8, weak: 4, net_all: null, net_headline: null, net_words: null, net_confident: null, pos_pct: null, pos_lo: null, pos_hi: null }] },
+    quality_trend: { min_weeks: 8, min_n: 30, min_cover: 0.7, rows: [
+      { platform: 'youtube_video', layer: 'comment', weeks: 20, cover: 1, slope: -0.41, lo: -0.64, hi: -0.22, p: 0.0004, trend: 'down' },
+      { platform: 'instagram', layer: 'comment', weeks: 5, cover: 1, slope: null, lo: null, hi: null, p: null, trend: null },
+      { platform: 'linkedin', layer: 'comment', weeks: 12, cover: 0.3, slope: null, lo: null, hi: null, p: null, trend: null }] },
     filter_coverage: { posts_with_data: 1000, with_theme: 320, theme_kept: 40, entity_kept: 25 },
     limits: { min_pooled: 30, min_gap: 5, gap_flag: 0.3, post_class: 0.15, small_n: 10, min_top: 10, min_comments: 5, caption_tone: 0.5, yt_cap: 100, thin_trend: 100 } }, o || {});
 }
@@ -114,6 +121,9 @@ console.log('1. tile, layout and the full payload');
   chk('post, comment and reply rows are separate (3 layers x 3 platform groups)', (t.match(/Post tone/g) || []).length >= 3 && ctx.doc.querySelectorAll('.aud-dist-r').length === 9);
   chk('distribution bars are drawn with positive / neutral / negative parts', ctx.doc.querySelectorAll('.aud-bar .aud-neg').length === 9 && ctx.doc.querySelectorAll('.aud-bar .aud-pos').length === 9);
   chk('percentages and net sentiment appear', t.includes('42%') && t.includes('-4') && t.includes('Net'));
+  chk('sentiment-quality section: headline, words-only and confident-only nets, emoji share and the Wilson interval are shown', t.includes('Sentiment quality') && t.includes('Net, words only') && t.includes('-17') && t.includes('30.7') && t.includes('Wilson 95%'));
+  chk('sentiment-quality: a platform under 30 scored rows shows dashes, never 0 or NaN, and the page stays clean', t.includes('Instagram') && clean(t));
+  chk('weekly trend: slope with interval, direction and p are shown; thin or gappy series say why instead of a number', t.includes('Weekly sentiment trend') && t.includes('-0.41 (-0.64 to -0.22)') && t.includes('Falling') && t.includes('<0.001') && t.includes('fewer than 8 weeks') && t.includes('cover only 30%') && clean(t));
   chk('the gap section explains and shows the comment, reply and reply-vs-comment gaps', t.includes('sentiment gap') && t.includes('Comments vs post') && t.includes('Replies vs post') && t.includes('Replies vs comments'));
   chk('trend charts for comments and replies are drawn (svg)', ctx.doc.querySelectorAll('.aud-plot svg').length === 2, String(ctx.doc.querySelectorAll('.aud-plot svg').length));
   chk('themes: known D-themes get their names, unassigned and an unknown theme render (with a warning), nothing dropped', t.includes('D01 ·') && t.includes('No theme (unassigned)') && t.includes('D77 (not in the current taxonomy)'));

@@ -34,7 +34,10 @@ import pandas as pd
 DATA = Path(__file__).resolve().parents[1] / "data"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from lib.audience_rollup import gap_direction      # the pipeline's own rule and threshold (0.30): one definition, not a copy
+from lib.stats_v2 import mann_kendall, theil_sen, wilson_interval   # the one implementation of each (stage 51 uses wilson too)
 AUD_DB = DATA / "audience_sentiment.duckdb"
+QUAL_DB = DATA / "sentiment_quality.duckdb"       # written by scripts/51_sentiment_quality.py; optional: the card works without it
+QUAL_PLAT = {"youtube_video": "youtube", "instagram": "instagram", "linkedin": "linkedin", "snapchat": "snapchat"}   # this view's key -> stage 51's
 PER_POST = "xplat_post_audience_sentiment_v2"
 LAYERS = {  # platform -> (comment table, reply table or None)
     "youtube_video": ("comment_sentiment", "reply_sentiment"),
@@ -410,7 +413,7 @@ def explore_audience(qs: dict, main_cur) -> dict:
                             "min_comments": top_c},
                "top_gaps_by_platform": {p: {"negative": [card(r) for _, r in n_.iterrows()], "positive": [card(r) for _, r in p_.iterrows() if r["gap_comment_vs_post"] > 0]}
                                         for p, (n_, p_) in per_plat.items()},
-               "filter_coverage": filter_cov,
+               "filter_coverage": filter_cov, "quality": quality_block(plats, d_from, d_to), "quality_trend": trend_block(plats, d_from, d_to),
                "limits": {"min_pooled": MIN_POOLED, "min_gap": MIN_GAP, "gap_flag": GAP_FLAG, "post_class": POST_CLASS, "small_n": SMALL_N, "min_top": MIN_TOP,
                           "min_comments": min_c, "caption_tone": CAPTION_TONE, "extreme_tone": EXTREME_TONE, "yt_cap": YT_CAP, "li_cap": LI_CAP, "snap_cap": SNAP_CAP, "thin_trend": 100}}
         return res
@@ -419,6 +422,102 @@ def explore_audience(qs: dict, main_cur) -> dict:
             con.close()
         except Exception:
             pass
+
+
+TREND_MIN_WEEKS = 8      # a trend needs this many weeks that each have >= MIN_POOLED scored rows
+TREND_MIN_N = 30
+TREND_MIN_COVER = 0.7    # and those weeks must fill at least this share of the weeks between the first and the last (a slope across a gap-ridden span is not a trend)
+
+
+def trend_block(plats: list, d_from: str, d_to: str) -> dict | None:
+    """Robust trend of weekly net sentiment (headline base) per platform x layer: Theil-Sen slope (points per week, 95% interval) and a
+    Hamed-Rao-corrected Mann-Kendall test. Weeks under TREND_MIN_N rows are left out; fewer than TREND_MIN_WEEKS usable weeks, or weeks covering under TREND_MIN_COVER of the span -> NULL, not 0.
+    Descriptive only: the trend of the comments that were collected, not of the audience."""
+    if not QUAL_DB.exists():
+        return None
+    try:
+        q = duckdb.connect(QUAL_DB.as_posix(), read_only=True)
+        w = q.execute("SELECT * FROM sentiment_quality_weekly_v1").df()
+    except Exception:
+        return None
+    else:
+        q.close()
+    w = w[w["platform"].isin([QUAL_PLAT[p] for p in plats if p in QUAL_PLAT])]
+    if d_from:
+        w = w[w["week"] >= d_from]
+    if d_to:
+        w = w[w["week"] <= d_to]
+    inv = {v: k for k, v in QUAL_PLAT.items()}
+    rows = []
+    for (plat, layer), g in w.groupby(["platform", "layer"]):
+        g = g[g["b_n"] >= TREND_MIN_N].sort_values("week")
+        net = (100.0 * (g["b_pos"] - g["b_neg"]) / g["b_n"]).to_numpy(float)
+        wk = pd.to_datetime(g["week"]).map(pd.Timestamp.toordinal).to_numpy(float) / 7.0     # real week spacing, gaps respected
+        row = {"platform": inv[plat], "layer": layer, "weeks": int(len(g)), "first": str(g["week"].iloc[0]) if len(g) else None,
+               "last": str(g["week"].iloc[-1]) if len(g) else None, "slope": None, "lo": None, "hi": None, "p": None, "trend": None, "ols_slope": None}
+        span = int(round((wk[-1] - wk[0]))) + 1 if len(g) else 0
+        row["cover"] = float(len(g) / span) if span else None
+        if len(g) >= TREND_MIN_WEEKS and span and len(g) / span >= TREND_MIN_COVER:
+            ts, mk = theil_sen(net, wk), mann_kendall(net)
+            row.update(slope=float(ts["slope"]), lo=float(ts["lo"]), hi=float(ts["hi"]), p=float(mk["p"]), trend=mk["trend"],
+                       ols_slope=float(np.polyfit(wk, net, 1)[0]), first_net=float(net[0]), last_net=float(net[-1]))
+        rows.append(row)
+    order = {k: i for i, k in enumerate(PLATFORMS)}
+    rows.sort(key=lambda x: (order.get(x["platform"], 99), x["layer"]))
+    return {"rows": rows, "min_weeks": TREND_MIN_WEEKS, "min_n": TREND_MIN_N, "min_cover": TREND_MIN_COVER}
+
+
+def quality_block(plats: list, d_from: str, d_to: str) -> dict | None:
+    """Sentiment-quality view (stage 51): per platform x layer, the net sentiment on four bases, plus how many rows each rule touched.
+
+    A all scored rows (the number shown above) | B minus NO_TEXT (headline) | C confident rows only (max prob >= 0.60) | T rows with words
+    (B minus emoji-only reactions). Counts are summed over the months that overlap the date range (month grain: stage 51 buckets by month),
+    then shares and Wilson intervals are recomputed from the summed counts. Theme and entity filters cannot apply here (comment-level, no theme).
+    None when stage 51 has not been run, so the card degrades to what it showed before."""
+    if not QUAL_DB.exists():
+        return None
+    try:
+        q = duckdb.connect(QUAL_DB.as_posix(), read_only=True)
+    except Exception:
+        return None
+    try:
+        r = q.execute("SELECT * FROM sentiment_quality_rollup_v1").df()
+        meta = q.execute("SELECT * FROM sentiment_quality_meta_v1").df().iloc[0].to_dict()
+    except Exception:
+        return None
+    finally:
+        q.close()
+    keep = [QUAL_PLAT[p] for p in plats if p in QUAL_PLAT]
+    r = r[r["platform"].isin(keep)]
+    dated = bool(d_from or d_to)
+    if dated:
+        r = r[(r["posted_month"] != "ALL") & r["posted_month"].notna()]
+        if d_from:
+            r = r[r["posted_month"] >= d_from[:7]]
+        if d_to:
+            r = r[r["posted_month"] <= d_to[:7]]
+    else:
+        r = r[r["posted_month"] == "ALL"]
+    rows = []
+    inv = {v: k for k, v in QUAL_PLAT.items()}
+    for (plat, layer), g in r.groupby(["platform", "layer"]):
+        def tot(c):
+            return int(g[c].sum())
+        def net(tag):
+            n, pos, neg = tot(f"{tag}_n"), tot(f"{tag}_pos"), tot(f"{tag}_neg")
+            return None if n < MIN_POOLED else 100.0 * (pos - neg) / n
+        nb = tot("b_n")
+        pos_p, pos_lo, pos_hi = wilson_interval([tot("b_pos")], [nb]) if nb >= MIN_POOLED else ([np.nan], [np.nan], [np.nan])
+        neg_p, neg_lo, neg_hi = wilson_interval([tot("b_neg")], [nb]) if nb >= MIN_POOLED else ([np.nan], [np.nan], [np.nan])
+        rows.append({"platform": inv[plat], "layer": layer, "scored": tot("a_n"), "no_text": tot("n_skipped"), "emoji_only": tot("n_emoji_only"),
+                     "words_only": tot("t_n"), "confident": tot("c_n"), "uncertain": tot("n_uncertain"), "weak": tot("n_weak"),
+                     "net_all": net("a"), "net_headline": net("b"), "net_words": net("t"), "net_confident": net("c"),
+                     "pos_pct": None if np.isnan(pos_p[0]) else 100 * float(pos_p[0]), "pos_lo": None if np.isnan(pos_lo[0]) else 100 * float(pos_lo[0]), "pos_hi": None if np.isnan(pos_hi[0]) else 100 * float(pos_hi[0]),
+                     "neg_pct": None if np.isnan(neg_p[0]) else 100 * float(neg_p[0]), "neg_lo": None if np.isnan(neg_lo[0]) else 100 * float(neg_lo[0]), "neg_hi": None if np.isnan(neg_hi[0]) else 100 * float(neg_hi[0])})
+    order = {k: i for i, k in enumerate(PLATFORMS)}
+    rows.sort(key=lambda x: (order.get(x["platform"], 99), x["layer"]))
+    return {"rows": rows, "grain": "month" if dated else "all dates", "built": str(meta.get("built_at")), "conf_high": float(meta.get("conf_high", 0.6)),
+            "conf_low": float(meta.get("conf_low", 0.45)), "min_pooled": MIN_POOLED, "ignores_theme_entity": True}
 
 
 def _has(con, name: str) -> bool:

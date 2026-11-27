@@ -989,6 +989,101 @@ def prior_window_drift(
     return z, p, bn
 
 
+def theil_sen(y, x=None, *, alpha: float = 0.05) -> dict:
+    """Theil-Sen slope: median of all pairwise slopes (robust to a single spike, unlike OLS). NaN-safe (non-finite points dropped).
+
+    Returns {slope, intercept, lo, hi, n}. The (1-alpha) interval is Sen's (1968) rank-based one from the Mann-Kendall variance
+    (ties ignored in the variance here, so it is slightly conservative with ties). NaN fields when fewer than 3 usable points
+    or all x equal. The intercept is median(y - slope * x).
+    """
+    y = np.asarray(y, dtype=float)
+    x = np.arange(y.size, dtype=float) if x is None else np.asarray(x, dtype=float)
+    m = np.isfinite(y) & np.isfinite(x)
+    y, x = y[m], x[m]
+    n = y.size
+    out = {"slope": np.nan, "intercept": np.nan, "lo": np.nan, "hi": np.nan, "n": int(n)}
+    if n < 3:
+        return out
+    i, j = np.triu_indices(n, k=1)
+    dx = x[j] - x[i]
+    ok = dx != 0
+    if not ok.any():
+        return out
+    sl = np.sort((y[j] - y[i])[ok] / dx[ok])
+    N = sl.size
+    out["slope"] = float(np.median(sl))
+    out["intercept"] = float(np.median(y - out["slope"] * x))
+    var_s = n * (n - 1) * (2 * n + 5) / 18.0
+    c = stats.norm.ppf(1 - alpha / 2) * np.sqrt(var_s)
+    lo_i = int(np.floor((N - c) / 2.0)); hi_i = int(np.ceil((N + c) / 2.0))
+    out["lo"] = float(sl[max(lo_i, 0)]); out["hi"] = float(sl[min(hi_i, N - 1)])
+    return out
+
+
+def mann_kendall(y, *, hamed_rao: bool = True, alpha: float = 0.05) -> dict:
+    """Mann-Kendall monotonic-trend test, optionally with the Hamed & Rao (1998) autocorrelation correction.
+
+    Returns {S, tau, z, p, trend, n, n_eff_ratio}: p is two-sided; trend is 'up' / 'down' / 'none' at ``alpha``.
+    Hamed-Rao: serial correlation inflates the variance of S, so the naive test over-rejects on autocorrelated series (daily/weekly tone
+    is autocorrelated). The ranks of the Theil-Sen-detrended series give its significant autocorrelations (95% band), and
+    V* = V * (1 + 2/(n(n-1)(n-2)) * sum_k (n-k)(n-k-1)(n-k-2) r_k) over those lags; the factor is floored at 1 (never narrower than naive MK).
+    Ties are handled in V. NaN fields when n < 4.
+    """
+    y = np.asarray(y, dtype=float)
+    y = y[np.isfinite(y)]
+    n = y.size
+    out = {"S": np.nan, "tau": np.nan, "z": np.nan, "p": np.nan, "trend": "none", "n": int(n), "n_eff_ratio": np.nan}
+    if n < 4:
+        return out
+    d = y[None, :] - y[:, None]
+    S = float(np.sign(d[np.triu_indices(n, k=1)]).sum())
+    _, tc = np.unique(y, return_counts=True)
+    V = (n * (n - 1) * (2 * n + 5) - float(np.sum(tc * (tc - 1) * (2 * tc + 5)))) / 18.0
+    ratio = 1.0
+    if hamed_rao and n >= 8:
+        ts = theil_sen(y)
+        res = y - (ts["slope"] * np.arange(n) + ts["intercept"])
+        rk = stats.rankdata(res)
+        rk = rk - rk.mean()
+        den = float(np.sum(rk * rk))
+        if den > 0:
+            band = stats.norm.ppf(0.975) / np.sqrt(n)
+            acc = 0.0
+            for k in range(1, n - 1):
+                r = float(np.sum(rk[:-k] * rk[k:]) / den)
+                if abs(r) > band:
+                    acc += (n - k) * (n - k - 1) * (n - k - 2) * r
+            ratio = max(1.0, 1.0 + 2.0 / (n * (n - 1) * (n - 2)) * acc)
+    Vs = V * ratio
+    z = 0.0 if S == 0 or Vs <= 0 else (S - np.sign(S)) / np.sqrt(Vs)
+    p = float(2 * (1 - stats.norm.cdf(abs(z))))
+    out.update(S=S, tau=float(S / (n * (n - 1) / 2.0)), z=float(z), p=p, n_eff_ratio=float(1.0 / ratio),
+               trend=("up" if z > 0 else "down") if p < alpha else "none")
+    return out
+
+
+def prior_window_drift_robust(values, counts, *, window: int = 14, min_base: int = 7, min_n: int = 5, scale_floor: float = 0.05):
+    """CANDIDATE robust drift: z_t = (v_t - median(prior days)) / max(1.4826 * MAD(prior days), scale_floor), same guards as prior_window_drift.
+
+    Not adopted by default: on the real daily tone series median/MAD scaling gave a worse false-alert rate than the Student-t mean/sd rule
+    (see prior_window_drift). Kept so `scripts/review/robust_drift_eval.py` can measure both on the same data. Returns (z, base_n).
+    """
+    v = np.asarray(values, dtype=float); n = np.asarray(counts, dtype=float)
+    T = v.size
+    z = np.full(T, np.nan); bn = np.zeros(T, dtype=int)
+    ok = np.isfinite(v) & np.isfinite(n) & (n >= min_n)
+    for t in range(T):
+        if not ok[t]:
+            continue
+        lo = max(0, t - int(window))
+        b = v[lo:t][ok[lo:t]]
+        bn[t] = b.size
+        if b.size < int(min_base):
+            continue
+        z[t] = (v[t] - float(np.median(b))) / max(1.4826 * float(np.median(np.abs(b - np.median(b)))), float(scale_floor))
+    return z, bn
+
+
 # --------------------------------------------------------------------------- #
 # Diversity (carried over from v1 — these were correct)
 # --------------------------------------------------------------------------- #
@@ -1083,6 +1178,24 @@ def permutation_burst_test(
         ),
         "n_perm": n_perm,
     }
+
+
+def wilson_interval(k, n, z: float = 1.96):
+    """Wilson score interval for a binomial proportion k/n -> (point, lo, hi), all NaN when n <= 0.
+
+    Unlike the Wald interval it never collapses to a zero-width band at 0% or 100% for small n,
+    which is why sparse buckets must use it (Wilson 1927; Brown, Cai & DasGupta 2001). Vectorised.
+    """
+    k = np.asarray(k, dtype=float); n = np.asarray(n, dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ok = n > 0
+        p = np.where(ok, k / n, np.nan)
+        den = 1.0 + z * z / n
+        centre = (p + z * z / (2.0 * n)) / den
+        half = z * np.sqrt(p * (1.0 - p) / n + z * z / (4.0 * n * n)) / den
+    lo = np.where(ok, np.clip(centre - half, 0.0, 1.0), np.nan)
+    hi = np.where(ok, np.clip(centre + half, 0.0, 1.0), np.nan)
+    return p, lo, hi
 
 
 # --------------------------------------------------------------------------- #
@@ -1347,6 +1460,36 @@ def run_self_checks(*, verbose: bool = False) -> dict:
     res["eb_ratio_big_post_keeps_rate"] = bool(abs(eb_ratio([50_000], [1_000_000], _p0, _C)[0] - 0.05) < 1e-3)
     res["bb_prior_needs_support"] = bool(np.isnan(beta_binomial_prior([1, 2], [10, 10])[0]))
     res["eb_ratio_no_prior_is_nan"] = bool(np.isnan(eb_ratio([1], [1], np.nan, np.nan)[0]))
+
+    # --- 12b. Wilson interval ---------------------------------------------
+    _wp, _wl, _wh = wilson_interval([0, 10, 5], [10, 10, 0])
+    res["wilson_zero_not_zero_width"] = bool(_wl[0] == 0.0 and _wh[0] > 0.2)          # 0/10 still has an upper bound
+    res["wilson_all_not_zero_width"] = bool(_wh[1] == 1.0 and _wl[1] < 0.8)
+    res["wilson_n0_is_nan"] = bool(np.isnan(_wp[2]) and np.isnan(_wl[2]) and np.isnan(_wh[2]))
+    _wp2, _wl2, _wh2 = wilson_interval([50], [100])
+    res["wilson_known_value"] = bool(abs(_wl2[0] - 0.4038) < 2e-3 and abs(_wh2[0] - 0.5962) < 2e-3)
+
+    # --- 12c. Theil-Sen / Mann-Kendall (Hamed-Rao) --------------------------
+    _ty = np.arange(30, dtype=float) * 0.5 + np.random.default_rng(5).normal(0, 0.3, 30)
+    _ts = theil_sen(_ty)
+    _ref = stats.theilslopes(_ty, np.arange(30.0))
+    res["theil_sen_matches_scipy"] = bool(abs(_ts["slope"] - _ref[0]) < 1e-9 and _ts["lo"] <= _ts["slope"] <= _ts["hi"])
+    _sp = _ty.copy(); _sp[-1] += 500.0                                              # one viral spike at the end (high leverage on OLS)
+    res["theil_sen_resists_one_spike"] = bool(abs(theil_sen(_sp)["slope"] - _ts["slope"]) < 0.05 and abs(np.polyfit(np.arange(30.0), _sp, 1)[0] - 0.5) > 2.0)
+    res["theil_sen_needs_3_points"] = bool(np.isnan(theil_sen([1.0, 2.0])["slope"]) and np.isnan(theil_sen([np.nan, 1, np.nan])["slope"]))
+    _mk = mann_kendall(_ty)
+    res["mk_detects_trend"] = bool(_mk["trend"] == "up" and _mk["p"] < 1e-6 and _mk["tau"] > 0.8)
+    _flat = np.random.default_rng(6).normal(0, 1, 40)
+    res["mk_flat_noise_no_trend"] = bool(mann_kendall(_flat)["p"] > 0.01)
+    _ar = np.zeros(120); _e = np.random.default_rng(7).normal(0, 1, 120)
+    for _i in range(1, 120):
+        _ar[_i] = 0.8 * _ar[_i - 1] + _e[_i]
+    res["hamed_rao_never_narrower"] = bool(mann_kendall(_ar)["p"] >= mann_kendall(_ar, hamed_rao=False)["p"] and mann_kendall(_ar)["n_eff_ratio"] <= 1.0)
+    res["mk_ties_and_short"] = bool(np.isnan(mann_kendall([1, 2, 3])["z"]) and mann_kendall(np.ones(10))["trend"] == "none")
+    _rd = np.array([0.10, 0.12, 0.08, 0.11, 0.09, 0.10, 0.12, 0.10, 0.09, 0.11, 0.10, 0.08, 0.12, 0.10, -0.50, 0.10]); _rn = np.full(_rd.size, 20.0)
+    _zr, _ = prior_window_drift_robust(_rd, _rn, window=14, min_base=7, min_n=5)
+    _rd2 = _rd.copy(); _rd2[15] = 5.0                                                # change the FUTURE: today's z must not move
+    res["robust_drift_flags_drop_and_has_no_lookahead"] = bool(_zr[14] < -5 and abs(prior_window_drift_robust(_rd2, _rn)[0][14] - _zr[14]) < 1e-12)
 
     # --- 13. rank_pct -----------------------------------------------------
     rp = rank_pct([1.0, 2.0, 3.0, np.nan])
