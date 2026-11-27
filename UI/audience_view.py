@@ -511,7 +511,7 @@ def quality_block(plats: list, d_from: str, d_to: str) -> dict | None:
         neg_p, neg_lo, neg_hi = wilson_interval([tot("b_neg")], [nb]) if nb >= MIN_POOLED else ([np.nan], [np.nan], [np.nan])
         rows.append({"platform": inv[plat], "layer": layer, "scored": tot("a_n"), "no_text": tot("n_skipped"), "emoji_only": tot("n_emoji_only"),
                      "words_only": tot("t_n"), "confident": tot("c_n"), "uncertain": tot("n_uncertain"), "weak": tot("n_weak"),
-                     "net_all": net("a"), "net_headline": net("b"), "net_words": net("t"), "net_confident": net("c"),
+                     "pos_all": tot("n_pos"), "pos_sarc_likely": tot("n_pos_sarc_likely"), "pos_sarc_possible": tot("n_pos_sarc_possible"), "net_all": net("a"), "net_headline": net("b"), "net_words": net("t"), "net_confident": net("c"),
                      "pos_pct": None if np.isnan(pos_p[0]) else 100 * float(pos_p[0]), "pos_lo": None if np.isnan(pos_lo[0]) else 100 * float(pos_lo[0]), "pos_hi": None if np.isnan(pos_hi[0]) else 100 * float(pos_hi[0]),
                      "neg_pct": None if np.isnan(neg_p[0]) else 100 * float(neg_p[0]), "neg_lo": None if np.isnan(neg_lo[0]) else 100 * float(neg_lo[0]), "neg_hi": None if np.isnan(neg_hi[0]) else 100 * float(neg_hi[0])})
     order = {k: i for i, k in enumerate(PLATFORMS)}

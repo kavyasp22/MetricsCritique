@@ -8,7 +8,8 @@ Spec: `docs/SENTIMENT_QUALITY_SPEC.md`. Stage `scripts/51_sentiment_quality.py` 
 - **Finding:** emoji-only comments are 30% of Snapchat and 21% of Instagram comments; they lift net sentiment (+24 vs +10 words-only on Snapchat; +1 vs -12 on Instagram).
 - **Checks:** `UI/tests/check_audience_api.py` 94/94; `scripts/tests/test_sentiment_quality.py` + audience tests 27 pass; `check_audience.mjs` new checks pass, its old "five tiles" check and a later tile lookup still fail (pre-existing).
 - **Robust trends:** `stats_v2` theil_sen / mann_kendall (Hamed-Rao) / robust drift candidate (81/81). Weekly sentiment trend on the card (Theil-Sen + MK, coverage-guarded; Snapchat +0.36 net pts/week, p<0.001; YouTube NULL over all dates: 14% week coverage). `scripts/review/robust_drift_eval.py`: shipped `tone_drift_z` replicated exactly; on shuffled series it false-alerts 4.5% vs median/MAD 6.6% (nominal 5%), so the z-score rule is kept.
-- **Not done:** hand-judged sample, sarcasm flag, language routing. Post-level confidence needs a GPU re-score (deferred).
+- **Sarcasm cue flag:** `scripts/lib/sarcasm_cues.py`, in stage 51 and on the card as a flag only (labels never change). Idioms "what a great/amazing", "wah kya", "as if" were judged out (sincere, ~25% precision); revised "likely" about 76% precision on 21 read (AI-assisted, exploratory), "possible" about 30%. Recall unmeasured.
+- **Not done:** human-judged sample (emoji-only group, thresholds, sarcasm recall), language routing. Post-level confidence needs a GPU re-score (deferred).
 
 ## 2026-10-29 — Domain classifier for NER routing: BGE-M3 vs Laya (DONE; verdict PARTIAL)
 

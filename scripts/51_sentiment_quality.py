@@ -4,7 +4,7 @@ Comment-sentiment quality layer (Phase 1+2 of the sentiment-adoption plan), all 
 
 Reads  data/audience_sentiment.duckdb (READ ONLY: stored scores) and data/audience/*_extract.parquet (text only).
 Writes data/sentiment_quality.duckdb (its own file; nothing existing is modified, no model, no GPU, no prod access):
-  comment_quality_v1          one row per scored comment: max_prob, conf_tier, skip_reason
+  comment_quality_v1          one row per scored comment: max_prob, conf_tier, skip_reason, is_emoji_only, sarcasm_cue (likely / possible / none)
   sentiment_quality_weekly_v1 platform x layer x week: headline-base counts (for trends)
   sentiment_quality_rollup_v1 platform x layer x month: counts and net sentiment on three bases with Wilson intervals
     base A  all scored rows            (what the dashboard shows today)
@@ -26,6 +26,7 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+from lib.sarcasm_cues import sarcasm_cue  # noqa: E402
 from lib.sentiment_quality import CONF_HIGH, CONF_LOW, conf_tier, is_emoji_only, max_prob, skip_reason  # noqa: E402
 from lib.stats_v2 import wilson_interval  # noqa: E402
 
@@ -62,8 +63,16 @@ def add_quality(df: pd.DataFrame) -> pd.DataFrame:
     df["conf_tier"] = conf_tier(df["max_prob"])
     df["skip_reason"] = [skip_reason(t) for t in df["text_used"]]
     df["is_emoji_only"] = [is_emoji_only(t) for t in df["text_used"]]
+    df["sarcasm_cue"] = [sarcasm_cue(t) for t in df["text_used"]]
     df["posted_month"] = pd.to_datetime(df["posted_at"], utc=True, errors="coerce").dt.strftime("%Y-%m")
     return df
+
+
+def _sarc(g: pd.DataFrame) -> dict:
+    """Sarcasm CUE counts. The flag never changes a label; it says how many POSITIVE-labelled comments carry an irony cue."""
+    pos = g[g.label == "positive"]
+    return {"n_pos": int(len(pos)), "n_sarc_likely": int((g.sarcasm_cue == "likely").sum()), "n_pos_sarc_likely": int((pos.sarcasm_cue == "likely").sum()),
+            "n_pos_sarc_possible": int((pos.sarcasm_cue == "possible").sum())}
 
 
 def _stats(g: pd.DataFrame, tag: str) -> dict:
@@ -85,13 +94,13 @@ def rollup(q: pd.DataFrame) -> pd.DataFrame:
     for (plat, layer, month), g in s.groupby(["platform", "layer", "posted_month"], dropna=False):
         b = g[g.skip_reason.isna()]
         c = b[b.conf_tier == "confident"]
-        rows.append({"platform": plat, "layer": layer, "posted_month": month, "n_skipped": int(g.skip_reason.notna().sum()), "n_emoji_only": int(g.is_emoji_only.sum()),
+        rows.append({"platform": plat, "layer": layer, "posted_month": month, "n_skipped": int(g.skip_reason.notna().sum()), "n_emoji_only": int(g.is_emoji_only.sum()), **_sarc(g),
                      "n_uncertain": int((b.conf_tier == "uncertain").sum()), "n_weak": int((b.conf_tier == "weak").sum()),
                      **_stats(g, "a"), **_stats(b, "b"), **_stats(c, "c"), **_stats(b[~b.is_emoji_only], "t")})
     # an all-time row per platform x layer
     for (plat, layer), g in s.groupby(["platform", "layer"]):
         b = g[g.skip_reason.isna()]; c = b[b.conf_tier == "confident"]
-        rows.append({"platform": plat, "layer": layer, "posted_month": "ALL", "n_skipped": int(g.skip_reason.notna().sum()), "n_emoji_only": int(g.is_emoji_only.sum()),
+        rows.append({"platform": plat, "layer": layer, "posted_month": "ALL", "n_skipped": int(g.skip_reason.notna().sum()), "n_emoji_only": int(g.is_emoji_only.sum()), **_sarc(g),
                      "n_uncertain": int((b.conf_tier == "uncertain").sum()), "n_weak": int((b.conf_tier == "weak").sum()),
                      **_stats(g, "a"), **_stats(b, "b"), **_stats(c, "c"), **_stats(b[~b.is_emoji_only], "t")})
     return pd.DataFrame(rows)

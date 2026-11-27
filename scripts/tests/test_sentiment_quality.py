@@ -82,3 +82,16 @@ def test_trend_block_is_null_not_zero_when_thin_or_gappy(tmp_path, monkeypatch):
     (tmp_path / "d").mkdir()
     av4 = _trend_fixture(tmp_path / "d", monkeypatch, weeks_low, [10] * 10, list(range(10)))   # < 30 rows each: no usable weeks
     assert av4.trend_block(["youtube_video"], "", "")["rows"][0]["weeks"] == 0
+
+
+def test_sarcasm_cue_is_a_flag_and_never_changes_a_label():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("s51c", Path(__file__).resolve().parents[1] / "51_sentiment_quality.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    texts = ["Nice try, buddy"] * 3 + ["great job 🙄"] * 2 + ["amazing 😂"] * 4 + ["What a great day"] * 31
+    df = pd.DataFrame({"platform": "x", "layer": "comment", "posted_at": "2026-02-02T00:00:00Z", "score_status": "scored", "label": "positive",
+                       "p_negative": 0.05, "p_neutral": 0.05, "p_positive": 0.9, "text_used": texts})
+    q = m.add_quality(df)
+    a = m.rollup(q).query("posted_month == 'ALL'").iloc[0]
+    assert (a.n_pos, a.n_sarc_likely, a.n_pos_sarc_likely, a.n_pos_sarc_possible) == (40, 5, 5, 4)
+    assert a.a_pos == 40 and a.a_net == 100.0                      # labels untouched: sarcasm never moves the net

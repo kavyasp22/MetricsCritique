@@ -42,9 +42,20 @@ Current readings (all dates): Snapchat comments rising about +0.36 net points/we
 On shuffled copies of each series (no real drift, so every flag is false) the shipped rule flags 4.5% of days, median/MAD 6.6%, against a nominal 5%. The pasted claim that z-scores are too fragile is not supported on our data:
 median/MAD is the worse calibrated rule here, as the original check in `prior_window_drift` found. `tone_drift_z` stays as is; changing it would be a spec change.
 
+## Sarcasm cue flag (added 2026-11-27)
+`scripts/lib/sarcasm_cues.py` -> `comment_quality_v1.sarcasm_cue` (likely / possible / none) and rollup counts (`n_pos`, `n_sarc_likely`, `n_pos_sarc_likely`, `n_pos_sarc_possible`).
+A FLAG ONLY: no label or net is changed (test-guarded). Read it next to the positive share, since only positive-labelled comments can be hurt by sarcasm.
+- **likely:** a mocking idiom ("nice try", "yeah right", "good luck with that", "sure buddy", "what a surprise", "best comeback", ...) or praise + eye-roll / clown / upside-down / smirk / facepalm emoji.
+- **possible:** praise + laughing emoji (laughter is mostly sincere; weak evidence, not shown as a headline).
+- **Judged out:** "what a great/amazing/wonderful ...", "wah kya", "as if". In a first read of 36 flagged positive-labelled comments these were overwhelmingly sincere praise (every LinkedIn hit), precision about 25%.
+- **Precision (one analyst, AI-assisted, exploratory, not human validation):** revised "likely" about 16 of 21 positive-labelled hits sarcastic (about 76%; 3 sincere, 2 ambiguous); "possible" about 7-8 of 24 (about 30%).
+- **Recall is not measured** and is low by design (narrow rules): sarcasm without these cues is missed, so the count is a lower bound. Instagram/Snapchat Roman-Urdu/Hindi sarcasm is largely uncovered; YouTube is read on the English translation.
+- Positive-labelled "likely" comments are a small fraction of positives on every platform (see the dashboard column), so the flag does not materially move any platform's net sentiment.
+- Open: a human-judged sample with both flagged and unflagged comments to get recall; the laughing-emoji-only comments that the model labels neutral are not touched by this flag.
+
 ## Verdict: PARTIAL
 Checked: base A equals the stored labels on every platform and layer; C is a subset of B, B of A; no scored row lacks a probability;
 tests pass. **Not checked:** no hand-judged sample of the emoji-only group or of the thresholds. Known weak spot: the model labels most
 laughing-face-only comments neutral (88%), though the emoji is ambiguous (joy or mockery). YouTube comments are scored on the translated
 text, which dropped the emoji in about 0.8% of comments (not corrected). Post-level scores are unchanged (`post_scores` has `tone_score` only;
-a post-level confidence or neutral class would need a GPU re-score, deferred). Sarcasm and language routing are not built yet. The weekly trend is descriptive of collected comments (per-post collection caps apply) and has not been checked against a judged sample of weeks.
+a post-level confidence or neutral class would need a GPU re-score, deferred). Language routing is not built yet. The weekly trend is descriptive of collected comments (per-post collection caps apply) and has not been checked against a judged sample of weeks.
