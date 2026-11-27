@@ -50,8 +50,15 @@ A FLAG ONLY: no label or net is changed (test-guarded). Read it next to the posi
 - **Judged out:** "what a great/amazing/wonderful ...", "wah kya", "as if". In a first read of 36 flagged positive-labelled comments these were overwhelmingly sincere praise (every LinkedIn hit), precision about 25%.
 - **Precision (one analyst, AI-assisted, exploratory, not human validation):** revised "likely" about 16 of 21 positive-labelled hits sarcastic (about 76%; 3 sincere, 2 ambiguous); "possible" about 7-8 of 24 (about 30%).
 - **Recall is not measured** and is low by design (narrow rules): sarcasm without these cues is missed, so the count is a lower bound. Instagram/Snapchat Roman-Urdu/Hindi sarcasm is largely uncovered; YouTube is read on the English translation.
-- Positive-labelled "likely" comments are a small fraction of positives on every platform (see the dashboard column), so the flag does not materially move any platform's net sentiment.
+- **Recall is very low (analyst read of 96 unflagged positive comments, 2026-11-27):** about 2% [0.6-7.3] of unflagged positives read as sarcastic, about 3,800 comments (range 1,000-13,000) against about 87 caught by `likely`. Effect on net sentiment if that holds: about -0.7 to -2.5 points per platform (upper bound -2 to -9). The flag is a precise lower bound, not an estimate of sarcasm.
 - Open: a human-judged sample with both flagged and unflagged comments to get recall; the laughing-emoji-only comments that the model labels neutral are not touched by this flag.
+
+## Analyst review (2026-11-27, exploratory; human validation still pending)
+308 stratified comments read blind to model output (`/home/hariramanan/kavya/validation/sentiment_quality_eval/REPORT.md`; blind workbook `human_validation/Sentiment_Quality_Human_Validation.xlsx`, key and scorer alongside).
+- Emoji-only: model agrees with the reader on clear-meaning emoji 88% [73-95] (n=33); laughing-only emoji are undecidable from text (16 of 19 ambiguous ones labelled neutral). Supports keeping them scored and tagged.
+- Confidence tiers (words-only): label agrees with reader 86% confident, 66% uncertain, 48% weak (n=29/29/25, wide intervals). Supports tiering over a hard 0.60 gate.
+- Sarcasm: `likely` precision 72% [49-88] (n=18), `possible` 32%, recall very low (see above).
+- Open: YouTube (read on the translation) was lowest at 52% (n=21); a larger YouTube sample is needed.
 
 ## Verdict: PARTIAL
 Checked: base A equals the stored labels on every platform and layer; C is a subset of B, B of A; no scored row lacks a probability;
