@@ -7210,17 +7210,17 @@
                        cap: capVal });
       });
       if (covRows.length) {
-        body.appendChild(h('div', { class: 'ct aud-sec', text: 'Coverage at a glance' }));
-        audTable(body, [
+        var sec1Fold = audFold(body, '1. Coverage at a glance', 'posts with comment data, limits and coverage');
+        audTable(sec1Fold, [
           { k: 'platform', label: 'Platform' }, { k: 'posts', label: 'Posts matching the filters', num: true, fmt: audN },
           { k: 'with_c', label: 'With collected comments', num: true, fmt: audN }, { k: 'scored', label: 'With scored comments', num: true, fmt: audN },
           { k: 'pct', label: 'Coverage', num: true, fmt: function (v) { return v == null ? '—' : Number(v).toFixed(1) + '%'; } },
           { k: 'rows', label: 'Comments scored', num: true, fmt: audN }, { k: 'med', label: 'Median comments per post', num: true, fmt: function (v) { return v == null ? '—' : String(Math.round(v)); } },
           { k: 'cap', label: 'At the ~100 limit', num: true, fmt: audN }
         ], covRows, { rawTable: true });
-        body.appendChild(h('p', { class: 'fnote', text: 'Coverage = posts with at least one collected comment ÷ posts matching the filters. A post without collected comments is missing data, not a neutral audience.' }));
+        sec1Fold.appendChild(h('p', { class: 'fnote', text: 'Coverage = posts with at least one collected comment ÷ posts matching the filters. A post without collected comments is missing data, not a neutral audience.' }));
         var yc = (d.layers.youtube_video || {}).coverage, ic = (d.layers.instagram || {}).coverage;
-        var cav = audFold(body, 'Platform caveats', 'collection limits and coverage notes, click to see');
+        var cav = audFold(sec1Fold, 'Platform caveats', 'collection limits and coverage notes, click to see');
         if ((f.platforms || []).indexOf('youtube_video') >= 0 && yc && yc.with_comments) {
           cav.appendChild(h('p', { class: 'cs ex-warn', text: 'YouTube collection limit: comments were collected up to about ' + ((d.limits || {}).yt_cap || 100) + ' per video. ' + fmtInt(yc.at_cap) + ' of ' + fmtInt(yc.with_comments) +
             ' YouTube posts with comments (' + (100 * yc.at_cap / yc.with_comments).toFixed(0) + '%) are at that limit, so for them the comment tone describes only the comments collected and may not represent the whole thread. ' +
@@ -7279,7 +7279,7 @@
       var PKS = ALL_PKS.filter(function (pk) { return showPk(pk[0]) && d.layers[pk[0]]; });
 
       /* 1. layers side by side: post, comments, replies, per platform */
-      body.appendChild(h('div', { class: 'ct aud-sec', text: 'Post, comment and reply sentiment' }));
+      var sec2Fold = audFold(body, '2. Post, comment and reply sentiment', 'side-by-side comparison tables and distributions');
       var rows = [];
       PKS.forEach(function (pk) {
         var L = d.layers[pk[0]];
@@ -7292,7 +7292,7 @@
                       note: x.supported ? '' : (x.scored ? 'fewer than 30 scored rows: shares not shown' : 'no scored rows'), conf: x.conf_mean, notScored: x.not_scored });
         });
       });
-      audTable(body, [
+      audTable(sec2Fold, [
         { k: 'platform', label: 'Platform' }, { k: 'layer', label: 'Layer' },
         { k: 'posts', label: 'Posts', num: true, fmt: audN }, { k: 'n', label: 'Scored', num: true, fmt: audN },
         { k: 'pos', label: 'Positive', num: true, fmt: audPct }, { k: 'neu', label: 'Neutral', num: true, fmt: audPct }, { k: 'neg', label: 'Negative', num: true, fmt: audPct },
@@ -7306,12 +7306,12 @@
           h('span', { class: 'aud-dist-n', text: r.n == null ? '' : fmtInt(r.n) + ' scored' })]));
       });
       var dl = h('div', { class: 'aud-legend' }, [h('span', { class: 'aud-key aud-neg' }), txt(' negative '), h('span', { class: 'aud-key aud-neu' }), txt(' neutral '), h('span', { class: 'aud-key aud-pos' }), txt(' positive')]);
-      body.appendChild(dl); body.appendChild(dist);
+      sec2Fold.appendChild(dl); sec2Fold.appendChild(dist);
 
       /* 1b. sentiment quality: what the net number is made of (stage 51); absent when stage 51 has not been run */
       if (d.quality && d.quality.rows && d.quality.rows.length) {
         var Q = d.quality;
-        body.appendChild(h('div', { class: 'ct aud-sec', text: 'Sentiment quality: what the net number is made of' }));
+        var sqFold = audFold(body, '2a. Sentiment quality: what the net number is made of', 'emoji-only, confidence, sarcasm cue and intervals');
         var qrows = Q.rows.map(function (x) {
           var share = function (n) { return x.scored ? 100 * n / x.scored : null; };
           return { platform: (AUD_PLAT[x.platform] || x.platform), layer: x.layer === 'comment' ? 'Comments' : 'Replies', scored: x.scored,
@@ -7319,7 +7319,7 @@
                    all: x.net_all, head: x.net_headline, words: x.net_words, conf: x.net_confident,
                    ci: (x.pos_lo == null ? null : x.pos_lo.toFixed(1) + '–' + x.pos_hi.toFixed(1) + '%') };
         });
-        audTable(body, [
+        audTable(sqFold, [
           { k: 'platform', label: 'Platform' }, { k: 'layer', label: 'Layer' }, { k: 'scored', label: 'Scored', num: true, fmt: audN },
           { k: 'emoji', label: 'Emoji-only', num: true, fmt: audPct }, { k: 'notext', label: 'No text (excluded)', num: true, fmt: audN },
           { k: 'weak', label: 'Below 0.60 confidence', num: true, fmt: audPct },
@@ -7327,7 +7327,7 @@
           { k: 'head', label: 'Net (headline)', num: true, fmt: audNet }, { k: 'words', label: 'Net, words only', num: true, fmt: audNet },
           { k: 'conf', label: 'Net, confident only', num: true, fmt: audNet }, { k: 'ci', label: 'Positive share, 95% interval' }
         ], qrows, { rawTable: true });
-        body.appendChild(h('p', { class: 'fnote', text: 'Headline = every scored comment except those with no text (empty, punctuation only, a single letter, a link only). ' +
+        sqFold.appendChild(h('p', { class: 'fnote', text: 'Headline = every scored comment except those with no text (empty, punctuation only, a single letter, a link only). ' +
           'Emoji-only comments are kept: the model reads them sensibly (hearts and thumbs-up positive, crying faces negative), so they are real audience reaction, but they carry less information than words, so "words only" is shown beside it. ' +
           '"Confident only" keeps comments where the model’s top class has probability of at least ' + Q.conf_high.toFixed(2) + '; it drops mostly neutral comments, so it reads more extreme and is a sensitivity check, not a replacement. ' +
           '"Sarcasm cue" counts positive-labelled comments containing a mocking idiom (\u201cnice try\u201d, \u201cyeah right\u201d, \u201cgood luck with that\u201d) or praise with an eye-roll, clown or smirk emoji; it is a flag only and no label is changed. In an analyst check about 70% of flagged comments were sarcastic, but it misses most sarcasm (roughly 2% of the other positive comments read as sarcastic, which could lower a net by about 1 to 2 points), so treat it as a lower bound. ' +
@@ -7337,7 +7337,7 @@
       /* 1c. robust trend of the weekly net sentiment: Theil-Sen slope + Hamed-Rao Mann-Kendall (stage 51 weekly counts) */
       if (d.quality_trend && d.quality_trend.rows && d.quality_trend.rows.length) {
         var QT = d.quality_trend;
-        body.appendChild(h('div', { class: 'ct aud-sec', text: 'Weekly sentiment trend' }));
+        var stFoldW = audFold(body, '2b. Weekly sentiment trend', 'Theil-Sen slope and Mann-Kendall test per platform');
         var trows = QT.rows.map(function (x) {
           var has = x.slope != null;
           return { platform: (AUD_PLAT[x.platform] || x.platform), layer: x.layer === 'comment' ? 'Comments' : 'Replies', weeks: x.weeks,
@@ -7346,24 +7346,24 @@
                    p: has ? (x.p < 0.001 ? '<0.001' : x.p.toFixed(3)) : '—',
                    note: has ? '' : (x.weeks < QT.min_weeks ? 'fewer than ' + QT.min_weeks + ' weeks with enough comments' : 'weeks with data cover only ' + Math.round(100 * (x.cover || 0)) + '% of the period: pick a shorter date range') };
         });
-        audTable(body, [
+        audTable(stFoldW, [
           { k: 'platform', label: 'Platform' }, { k: 'layer', label: 'Layer' }, { k: 'weeks', label: 'Weeks used', num: true, fmt: audN },
           { k: 'slope', label: 'Net change per week (95% interval)' }, { k: 'dir', label: 'Direction' }, { k: 'p', label: 'p-value', num: true }, { k: 'note', label: 'Note' }
         ], trows, { rawTable: true });
-        body.appendChild(h('p', { class: 'fnote', text: 'Net sentiment points per week on the headline base, from the Theil-Sen slope (the median of all pairwise slopes, so one viral week cannot tilt it) with a Mann-Kendall test corrected for week-to-week autocorrelation (Hamed-Rao). ' +
+        stFoldW.appendChild(h('p', { class: 'fnote', text: 'Net sentiment points per week on the headline base, from the Theil-Sen slope (the median of all pairwise slopes, so one viral week cannot tilt it) with a Mann-Kendall test corrected for week-to-week autocorrelation (Hamed-Rao). ' +
           'Only weeks with at least ' + QT.min_n + ' scored comments are used, a trend needs at least ' + QT.min_weeks + ' of them covering ' + Math.round(100 * QT.min_cover) + '% of the period, and the weeks are by comment date. ' +
           'It describes the comments that were collected, not the whole audience; collection limits per post apply.' }));
       }
 
       /* 2. the gap between the audience and the post */
-      body.appendChild(h('div', { class: 'ct aud-sec', text: 'Audience vs post: the sentiment gap' }));
-      body.appendChild(h('div', { class: 'cs aud-gapdef' }, [h('b', { text: 'Audience gap = mean comment sentiment − original post sentiment.' }), txt(' Triage flag at ±0.30; see the note below.')]));
-      audFold(body, 'Reading the gap', 'what it does and does not mean').appendChild(h('div', { class: 'cs aud-gapdef' }, [txt('A positive gap does not necessarily mean the audience supports the content: a very negative news post with milder comments also gives a positive gap, and a negative gap can simply mean comments are blunter than a neutral caption. ' +
+      var sec3Fold = audFold(body, '3. Audience vs post: the sentiment gap', 'gap metrics, distributions and sample sizes');
+      sec3Fold.appendChild(h('div', { class: 'cs aud-gapdef' }, [h('b', { text: 'Audience gap = mean comment sentiment − original post sentiment.' }), txt(' Triage flag at ±0.30; see the note below.')]));
+      audFold(sec3Fold, 'Reading the gap', 'what it does and does not mean').appendChild(h('div', { class: 'cs aud-gapdef' }, [txt('A positive gap does not necessarily mean the audience supports the content: a very negative news post with milder comments also gives a positive gap, and a negative gap can simply mean comments are blunter than a neutral caption. ' +
             'The 0.30 line below is an operational flag for triage, not a statistical test: a gap built on a handful of comments can cross it by chance, and a gap inside it is not evidence of agreement.')]));
-      body.appendChild(audCtl('MIN COMMENTS PER GAP', [[5, '5 (default)', 'A gap needs at least 5 scored comments (or replies).'], [10, '10', ''], [20, '20', ''], [30, '30', ''], [50, '50', '']], EX.audMin,
+      sec3Fold.appendChild(audCtl('MIN COMMENTS PER GAP', [[5, '5 (default)', 'A gap needs at least 5 scored comments (or replies).'], [10, '10', ''], [20, '20', ''], [30, '30', ''], [50, '50', '']], EX.audMin,
         function (v) { EX.audMin = v; render(); }));
       if (EX.audMin > 5) {
-        body.appendChild(h('p', { class: 'fnote', text: 'Gaps built on fewer than ' + EX.audMin + ' scored comments (or replies) are left out of this section, the histogram and the theme table’s gap column; for Replies vs comments both the replies and the comments need ' + EX.audMin +
+        sec3Fold.appendChild(h('p', { class: 'fnote', text: 'Gaps built on fewer than ' + EX.audMin + ' scored comments (or replies) are left out of this section, the histogram and the theme table’s gap column; for Replies vs comments both the replies and the comments need ' + EX.audMin +
           '. Gap values are unchanged; the divergent list always needs at least ' + ((d.limits || {}).min_top || 10) + ' comments and uses the larger of the two.' }));
       }
       var grows = [], dash = function (v, f2) { return v == null ? '—' : f2(v); };
@@ -7386,13 +7386,13 @@
       });
       var gfmt = function (v) { return v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(2); };
       /* table A: the gap and its direction (the columns an analyst reads first), then table B: the sample behind each gap */
-      audTable(body, [
+      audTable(sec3Fold, [
         { k: 'platform', label: 'Platform' }, { k: 'cmp', label: 'Comparison' }, { k: 'n', label: 'Posts with a gap', num: true, fmt: audN },
         { k: 'mean', label: 'Mean gap', num: true, fmt: gfmt }, { k: 'median', label: 'Median gap', num: true, fmt: gfmt },
         { k: 'neg', label: 'More negative (gap ≤ −0.30)', num: true, fmt: audPct }, { k: 'al', label: 'Within ±0.30 (not “agree”)', num: true, fmt: audPct },
         { k: 'pos', label: 'More positive (gap ≥ +0.30)', num: true, fmt: audPct }
       ], grows, { rawTable: true });
-      var sf = audFold(body, 'Sample behind each gap', 'scored rows, median per post, small samples');
+      var sf = audFold(sec3Fold, 'Sample behind each gap', 'scored rows, median per post, small samples');
       sf.appendChild(h('div', { class: 'fnote', style: 'margin-top:0.5rem', text: 'Sample behind each gap (scored comments, or replies for the reply rows):' }));
       audTable(sf, [
         { k: 'platform', label: 'Platform' }, { k: 'cmp', label: 'Comparison' },
@@ -7419,13 +7419,13 @@
           hb.appendChild(r);
         });
         var histPlatLabel = selP.length > 2 ? 'all platforms' : (selP.length === 2 ? 'both platforms' : (AUD_PLAT[selP[0]] || 'selected platform'));
-        var hf = audFold(body, 'Gap distribution (histogram)', 'comment gap per post, click to see'); hf.appendChild(h('div', { class: 'fnote', text: 'Comment gap per post (' + histPlatLabel + '), number of posts:' })); hf.appendChild(hb);
+        var hf = audFold(sec3Fold, 'Gap distribution (histogram)', 'comment gap per post, click to see'); hf.appendChild(h('div', { class: 'fnote', text: 'Comment gap per post (' + histPlatLabel + '), number of posts:' })); hf.appendChild(hb);
       }
 
       /* 3. trend over time */
-      body.appendChild(h('div', { class: 'ct aud-sec', text: 'Sentiment over time (by ' + (f.basis === 'comment' ? 'comment date' : 'post date') + ', per ' + d.granularity + ')' }));
+      var sec4Fold = audFold(body, '4. Sentiment over time', 'by ' + (f.basis === 'comment' ? 'comment date' : 'post date') + ', per ' + d.granularity);
       var tr = d.trend || [];
-      if (!tr.length) { empty(body, 'No comment or reply data in these dates.'); }
+      if (!tr.length) { empty(sec4Fold, 'No comment or reply data in these dates.'); }
       else {
         var periods = {}; tr.forEach(function (r) { periods[r.period] = true; });
         var days = Object.keys(periods).sort();
@@ -7449,7 +7449,7 @@
           });
         }
         var wrap = h('div', { class: 'aud-charts' });
-        body.appendChild(wrap);                                  // in the page before it is measured, so the charts use the width they really get
+        sec4Fold.appendChild(wrap);                                  // in the page before it is measured, so the charts use the width they really get
         var cells = [];
         [['comment', 'Comments — net sentiment'], ['reply', 'Replies — net sentiment']].forEach(function (x) {
           var ser = series(x[0]);
@@ -7486,25 +7486,26 @@
           return lyArr.map(function (ly) { var o = r[ly[0]]; return { period: r.period, platform: AUD_PLAT[r.platform], layer: ly[1], n: o ? o.scored : 0, net: o ? o.net : null, tone: o ? o.tone : null, smp: smp(o ? o.scored : 0) }; });
         });
         trows = [].concat.apply([], trows).sort(function (a, b) { return a.period < b.period ? -1 : a.period > b.period ? 1 : (a.platform + a.layer).localeCompare(b.platform + b.layer); });
-        audTable(body, [{ k: 'period', label: 'Period start' }, { k: 'platform', label: 'Platform' }, { k: 'layer', label: 'Layer' }, { k: 'n', label: 'Scored', num: true, fmt: audN },
+        audTable(sec4Fold, [{ k: 'period', label: 'Period start' }, { k: 'platform', label: 'Platform' }, { k: 'layer', label: 'Layer' }, { k: 'n', label: 'Scored', num: true, fmt: audN },
           { k: 'net', label: 'Net', num: true, fmt: audNet }, { k: 'tone', label: 'Mean tone', num: true, fmt: audTone }, { k: 'smp', label: 'Sample' }], trows, { label: 'Trend values (' + trows.length + ')' });
       }
 
-      /* 4. by theme (the existing D-themes) */
-      body.appendChild(h('div', { class: 'ct aud-sec', text: 'By theme' }));
+      /* 4. by theme (the existing D-themes) & 5. collection status */
+      var sec5Fold = audFold(body, '5. Audience tone by theme & data status', 'D-theme breakdown and collection status');
       var th = (d.themes || []).slice(0, EX.top);
-      audTable(body, [
+      audTable(sec5Fold, [
         { k: 'name', label: 'Theme' }, { k: 'posts', label: 'Posts with data', num: true, fmt: audN },
         { k: 'c_scored', label: 'Comments scored', num: true, fmt: audN }, { k: 'c_net', label: 'Comment net', num: true, fmt: audNet },
         { k: 'r_scored', label: 'Replies scored', num: true, fmt: audN }, { k: 'r_net', label: 'Reply net', num: true, fmt: audNet },
         { k: 'gap_n', label: 'Posts with a gap', num: true, fmt: audN }, { k: 'gap_mean', label: 'Mean comment gap', num: true, fmt: gfmt }
       ], th.map(function (t) { return { name: audThemeName(t.theme), key: t.theme, posts: t.posts, c_scored: t.c_scored, c_net: t.c_net, r_scored: t.r_scored, r_net: t.r_net, gap_n: t.gap_n, gap_mean: t.gap_mean }; }),
-      { label: 'Audience sentiment by D-theme (' + th.length + ')', open: true });
+      { label: 'Audience sentiment by D-theme (' + th.length + ')', open: false });
       var fcT = d.filter_coverage || {};
-      audFold(body, 'About the themes', 'provisional D-themes').appendChild(h('p', { class: 'fnote', text: 'Themes are the existing provisional D-themes, shown as they are: only ' + (fcT.posts_with_data ? (100 * fcT.with_theme / fcT.posts_with_data).toFixed(0) : 0) +
+      audFold(sec5Fold, 'About the themes', 'provisional D-themes').appendChild(h('p', { class: 'fnote', text: 'Themes are the existing provisional D-themes, shown as they are: only ' + (fcT.posts_with_data ? (100 * fcT.with_theme / fcT.posts_with_data).toFixed(0) : 0) +
         '% of posts with comment data have a theme (theme accuracy was 81% lenient / 56% strict in the 2026-11-20 audit). Shares and nets appear only with at least 30 scored rows; the gap column uses the minimum comments chosen above.' }));
 
       /* 5. what data exists: zero comments is not the same as missing comments */
+      sec5Fold.appendChild(stFold);
       var srows = [];
       ALL_PKS.filter(function (pk) { return pk[0] !== 'all' && showPk(pk[0]); }).forEach(function (pk) {
         var s = (d.layers[pk[0]] || {}).status; if (!s) { return; }
@@ -7520,15 +7521,15 @@
       if (gp.indexOf(EX.audGapPlat) < 0) { EX.audGapPlat = 'all'; }
       if (EX.audGapPlat !== 'all' && d.top_gaps_by_platform && d.top_gaps_by_platform[EX.audGapPlat]) { tg = d.top_gaps_by_platform[EX.audGapPlat]; }
       var topMin = (d.top_gaps || {}).min_comments || 10;
-      body.appendChild(h('div', { class: 'ct aud-sec', text: 'Posts where the audience differs most from the post' }));
-      var dn = audFold(body, 'How these cards are chosen', 'ranking, sample size, strong post tone');
+      var sec6Fold = audFold(body, '6. Posts where the audience differs most from the post', 'top divergent cards for negative and positive gaps');
+      var dn = audFold(sec6Fold, 'How these cards are chosen', 'ranking, sample size, strong post tone');
       dn.appendChild(h('p', { class: 'fnote', text: 'Posts with a post tone and at least ' + topMin + ' scored comments, ranked by the comment gap (the ranking is unchanged; the platform buttons only narrow the list). ' +
         'Each card shows how many comments the gap rests on. Open a post to read it.' }));
       if (gp.length > 1) {
         var gapPlatOpts = [['all', gp.length === 2 ? 'Both' : 'All']].concat(
           gp.map(function (p) { return [p, AUD_PLAT[p] || p]; })
         );
-        body.appendChild(audCtl('PLATFORM', gapPlatOpts, EX.audGapPlat, function (v) { EX.audGapPlat = v; render(); }));
+        sec6Fold.appendChild(audCtl('PLATFORM', gapPlatOpts, EX.audGapPlat, function (v) { EX.audGapPlat = v; render(); }));
       }
       dn.appendChild(h('p', { class: 'fnote', text: 'Cards marked \u201cstrongly positive post\u201d or \u201cstrongly negative post\u201d have a post tone of \u00b1' + ((d.limits || {}).extreme_tone || 0.5).toFixed(1) +
         ' or more (provisional, informational only; the ranking ignores it). A strongly negative post (often a news or war report) tends to show a positive gap, and a strongly positive post (for example a promotional Instagram caption) a negative one, because comments are usually milder than the post.' }));
@@ -7558,7 +7559,7 @@
         if (!(tg[x[0]] || []).length) { empty(col, 'None in this selection.'); }
         cols.appendChild(col);
       });
-      body.appendChild(cols);
+      sec6Fold.appendChild(cols);
       body.appendChild(h('p', { class: 'fnote', text: 'Source: ' + d.source + (d.built ? ' (built ' + String(d.built).slice(0, 10) + ')' : '') + '. Version ' + d.version + '. ' +
         'The model reads wording, not attitude; per comment it agreed with a reader about 7 times in 10 (small hand check).' }));
     }

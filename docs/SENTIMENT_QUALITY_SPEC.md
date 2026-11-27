@@ -60,6 +60,20 @@ A FLAG ONLY: no label or net is changed (test-guarded). Read it next to the posi
 - Sarcasm: `likely` precision 72% [49-88] (n=18), `possible` 32%, recall very low (see above).
 - Open: YouTube (read on the translation) was lowest at 52% (n=21); a larger YouTube sample is needed.
 
+## Review of the `Social-media-sentiment-analysis` copy (2026-11-27)
+An integration of the sentiment-project logic was made in a separate copy (`/home/hariramanan/kavya/Social-media-sentiment-analysis/MetricsCritique`, 231 files show as modified only because of CRLF line endings; the real change is 10 modified + 8 new files). It was reviewed against our data; one part was ported, the rest was not, for these reasons:
+| Piece | Decision | Why |
+|---|---|---|
+| `lib/trend_statistics.py` (Wilson, Theil-Sen) | not ported (duplicate) | Numerically identical to `stats_v2.wilson_interval` / `theil_sen` and scipy; CLAUDE.md says reuse `stats_v2`. |
+| its "Hamed-Rao" Mann-Kendall | not ported | Not Hamed-Rao: a lag-1 AR(1) factor on the raw values, which a real trend itself inflates (power 0.81 vs 1.00 on a moderate trend, n=20), no tie correction, factor can go below 1. It is conservative (4.3% false positives on AR(1) phi=0.6 noise) where ours is not (19%, n=40). Real weekly series have residual lag-1 autocorrelation 0.0-0.5 and no trend label changes; read a trend on a series with r1 above 0.4 cautiously. |
+| `lib/sarcasm.py` | **rejected** | Contains the cues judged sincere in our review ("what a great/amazing", "wah kya", "kya baat hai") and treats any laughing emoji as irony, with substring matching. On the 145 judged comments: precision 35% [22-50] vs ours 72%. On all 181,522 positive comments it flags 9,214 "likely" (5%), of which at most 1 of 28 read was sarcastic; ours flags about 300 at ~72%. |
+| `lib/language_detector.py` and the hook in `04_nlp_scores.resolve_lang` | rejected | Routes French (markers "ne", "se") and English with a name or religious phrase ("Masha Allah", "Zindabad", "Bhai") to Roman Urdu/Hindi; about half to 60% of routed samples were right. Stage 04 would then store `lang_resolved='ur-Latn'` for English posts and change readability metric selection. |
+| `lib/preprocessor.py`, `audience_text.clean_for_model` | not ported | Not wired into any scorer (inert). Its `EMOJI_ONLY` skip contradicts our finding that emoji-only comments are read sensibly; URL/@ stripping and repeat-collapse remain an unvalidated re-score idea. |
+| `sentiment_model.label_probs(min_confidence)`, `score_with_sarcasm_and_lang`, `audience_rollup` additions | not ported | Add output keys to the scored files, depend on the rejected sarcasm module, and a hard 0.60 gate (`net_sentiment_gated`) is the approach our audit rejected; our tiers are in `sentiment_quality.py`. |
+| **`scripts/build_audience_database.py`** | **rejected, dangerous** | Scores YouTube comments with a small positive/negative word list, writes `model = cardiffnlp/...` on the rows, deletes and rebuilds `audience_sentiment.duckdb`, and leaves the Instagram / LinkedIn / Snapchat tables empty (`WHERE 1=0`). In that copy the file has 187,177 YouTube comments (ours 270,262), 65% neutral, and 0 rows for the other three platforms. Never run it in this repo. |
+| `UI/assets/dash.js` collapsible Audience sections | **ported** | Presentation only; applied on top of our sections (which became folds 2a and 2b). API harness 94/94, dashboard harness passes. |
+| `build_dashboard.py` entity-card refactor, `pv_templates` (Post Viewer) | not ported | Unrelated to sentiment; the Post Viewer was removed here. |
+
 ## Verdict: PARTIAL
 Checked: base A equals the stored labels on every platform and layer; C is a subset of B, B of A; no scored row lacks a probability;
 tests pass. **Not checked:** no hand-judged sample of the emoji-only group or of the thresholds. Known weak spot: the model labels most
