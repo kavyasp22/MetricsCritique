@@ -1,0 +1,35 @@
+{
+  "_comment": "Brand groups for the Cross-Platform Spread 'same publisher' label. An account joins a group when its normalised name (lower case, letters and digits only; write multi-word keywords with spaces, e.g. \"maritime institute of malaysia\") CONTAINS one of the keywords. Keep keywords distinctive; the label only hides a row when EVERY account behind it is one publisher. Edit and restart the API.",
+  "groups": {
+    "Aaj Tak": [
+      "aajtak"
+    ],
+    "BBC": [
+      "bbcnews",
+      "bbcchinese",
+      "bbcworld"
+    ],
+    "China MFA": [
+      "china mfa",
+      "mfa china"
+    ],
+    "US Naval Institute": [
+      "navalinstitute",
+      "usni"
+    ],
+    "BIPSS": [
+      "bipss"
+    ],
+    "Maritime Institute of Malaysia": [
+      "mima malaysia",
+      "maritime institute of malaysia"
+    ],
+    "Cyber Detective": [
+      "cyberdetective",
+      "cybdetective"
+    ],
+    "Powerus": [
+      "powerus"
+    ]
+  }
+}

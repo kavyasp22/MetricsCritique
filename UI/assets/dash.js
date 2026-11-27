@@ -321,8 +321,16 @@
       var sortKey = (cfg.params || {}).sort;
       var SORT_LABEL = { views: 'views', engagement: 'engagement (likes + comments + shares)', shares: 'shares / forwards', likes: 'likes' };
       var rangeTxt = (cfg.params || {}).from ? (' between ' + cfg.params.from + ' and ' + cfg.params.to) : '';
+      var isSpread = /^cross_platform/.test(cfg.view || '');             // the spread lists are oldest first (who posted it first)
       subEl.textContent = 'Showing ' + data.shown + ' of ' + fmtInt(data.total) + ' underlying posts' + rangeTxt + ', ' +
-        (sortKey ? ('ranked by ' + (SORT_LABEL[sortKey] || sortKey) + '.') : (byScore ? 'strongest match first.' : 'most recent first.'));
+        (sortKey ? ('ranked by ' + (SORT_LABEL[sortKey] || sortKey) + '.') : (byScore ? 'strongest match first.' : (isSpread ? 'earliest first.' : 'most recent first.')));
+      if (isSpread && cfg.cardCount != null) {                           // say when the card's count and this list differ, and why
+        var cardBasis = { cross_platform_url: 'one post per account on each platform', cross_platform_event: 'one post per distinct text on each platform' }[cfg.view] || 'each post once';
+        bodyEl.appendChild(h('p', { class: 'fnote', text: cfg.cardCount !== data.total
+          ? 'The card counts ' + fmtInt(cfg.cardCount) + ' post' + (cfg.cardCount === 1 ? '' : 's') + ' (' + cardBasis + '). This list shows every distinct post collected, ' + fmtInt(data.total) +
+            ', so it can be longer. A post that was collected several times is listed once.'
+          : 'Each post is listed once, however many times it was collected.' }));
+      }
       if (!data.rows.length) {
         bodyEl.appendChild(h('div', { class: 'empty', text: 'No underlying posts matched this selection.' }));
         return;
@@ -3228,7 +3236,7 @@
         origin: s.origin_platform,
         destinations: dests.length ? dests.join(', ') : plist.join(', '),
         breadth: s.n_platforms,
-        posts: s.n_posts,
+        posts: s.n_unique_posts != null ? s.n_unique_posts : s.n_posts,       // unique posts: n_posts also counts every scraped copy (one Instagram post can be scraped 100+ times)
         observed_views: s.observed_views != null ? s.observed_views : null,
         viewless_engagement: s.viewless_engagement != null ? s.viewless_engagement : null,
         same_account: s.same_account_name === true ? 'Same account name (cross-posting)' : (s.same_account_name === false ? 'Different accounts' : '—'),
@@ -3257,7 +3265,7 @@
       rowDrill: function (r) {
         return {
           view: 'cross_platform',
-          params: { story_id: r.story_id },
+          params: { story_id: r.story_id }, cardCount: r.posts,
           title: 'Narrative Spread (earliest observed: ' + r.origin + ') → ' + r.destinations + ' (' + r.posts + ' posts · ' + fmtCompact(r.observed_views || 0) + ' observed views)'
         };
       }
@@ -3298,7 +3306,7 @@
     ];
     function drill(r) {
       return {
-        view: 'cross_platform_url', params: { link_id: r.link_id },
+        view: 'cross_platform_url', params: { link_id: r.link_id }, cardCount: r.posts,
         title: 'Shared link (' + r.conf + '): ' + r.url
       };
     }
@@ -3357,7 +3365,7 @@
     ];
     function drill(r) {
       return {
-        view: 'cross_platform_event', params: { event_id: r.event_id },
+        view: 'cross_platform_event', params: { event_id: r.event_id }, cardCount: r.posts,
         title: 'Semantic event (' + r.conf + '): ' + r.platforms
       };
     }
@@ -5601,9 +5609,9 @@
 
       attachDrill(card, {
         view: 'cross_platform',
-        params: { story_id: s.story_id },
+        params: { story_id: s.story_id }, cardCount: (s.n_unique_posts != null ? s.n_unique_posts : s.n_posts),
         title: 'Narrative Spread: ' + spread,
-        subtitle: (s.n_posts || '?') + ' posts · ' + (views ? fmtCompact(views) + ' observed views' : 'no view counter')
+        subtitle: ((s.n_unique_posts != null ? s.n_unique_posts : s.n_posts) || '?') + ' posts · ' + (views ? fmtCompact(views) + ' observed views' : 'no view counter')
       });
 
       list.appendChild(card);
@@ -6438,7 +6446,7 @@
     }
     return T('cross_platform_stories').filter(function (s) { return inRange(s) && plOf(s).some(exPlatOk) && exTextOk(s.snippet); })
       .map(function (s) { return { id: s.story_id, text: String(s.snippet || '').slice(0, 220), conf: 'exact text', origin: s.origin_platform,
-        platforms: plOf(s).join(', '), posts: s.n_posts, spread_h: s.spread_duration_hours,
+        platforms: plOf(s).join(', '), posts: s.n_unique_posts != null ? s.n_unique_posts : s.n_posts, spread_h: s.spread_duration_hours,
         views: s.observed_views || 0, eng: s.viewless_engagement || 0, first: day(s.origin_time) }; });
   }
 
@@ -6455,8 +6463,34 @@
       links: 'Posts sharing the same link. High = full article link seen within 21 days; medium = shortened link; low = the link is spread over more than 21 days. App deep links are excluded.',
       events: 'Posts that say nearly the same thing in different words (bge-m3 similarity of at least 0.85 within 3 days). Preliminary: not yet hand-judged.' }[sub];
     exExplain(host, 'Cross-platform spread', note + ' "Earliest observed" is the first post we saw, not the confirmed origin. ' +
-      'Views are observed counts only (no estimates); posts on platforms with no view count are not added in. Click a row to see every post.' );
-    var rows = exSpreadRows(sub).sort(function (a, b) { return (b.views + b.eng) - (a.views + a.eng); }).slice(0, EX.top * 4);
+      'Views are observed counts only (no estimates); posts on platforms with no view count are not added in. "Posts" counts each post once, however many times it was collected; for shared links it counts one per account and platform, and for similar-meaning events one per distinct text, so "View posts" can list more. Click a row to see the posts.' );
+    /* "same publisher": the story / link / event is ONE organisation posting its own content on several platforms (e.g. Aaj Tak on Telegram and
+       WhatsApp). That is distribution, not others picking it up, so those rows are hidden by default behind a toggle and labelled when shown.
+       Flags come from /api/explore/spread_publishers (computed from the stored tables); without the API nothing is hidden. */
+    if (!EX.pubFlags && !EX.pubLoading) {
+      EX.pubLoading = true;
+      fetch('/api/explore/spread_publishers').then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)); })
+        .then(function (d) { EX.pubFlags = d; EX.pubLoading = false; render(); })
+        .catch(function () { EX.pubFlags = {}; EX.pubMissing = true; EX.pubLoading = false; });
+    }
+    var pubFlags = (EX.pubFlags && EX.pubFlags[sub]) || {};
+    var allRows = exSpreadRows(sub);
+    allRows.forEach(function (r) { var f = pubFlags[r.id]; r.same = !!(f && f.same); r.pub = (f && f.label) || ''; });
+    var nSame = allRows.filter(function (r) { return r.same; }).length;
+    var hideSame = EX.pubMode !== 'show';
+    if (nSame) {
+      var pubBar = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'SAME PUBLISHER' })]);
+      [['hide', 'Hide (default)'], ['show', 'Show and label']].forEach(function (x) {
+        var b = h('button', { type: 'button', class: 'df-preset-btn' + ((hideSame ? 'hide' : 'show') === x[0] ? ' active' : ''), text: x[1] });
+        b.addEventListener('click', function () { EX.pubMode = x[0]; render(); });
+        pubBar.appendChild(b);
+      });
+      pubBar.appendChild(h('span', { class: 'fnote', text: ' ' + fmtInt(nSame) + ' of ' + fmtInt(allRows.length) + ' here ' + (hideSame ? 'are hidden' : 'are labelled') +
+        ': the same organisation posting its own content on more than one platform (for example a news channel on Telegram and WhatsApp), which is distribution, not others picking the story up.' }));
+      host.appendChild(pubBar);
+    }
+    var rows = allRows.filter(function (r) { return !(hideSame && r.same); })
+      .sort(function (a, b) { return (b.views + b.eng) - (a.views + a.eng); }).slice(0, EX.top * 4);
     var modeBar = h('div', { class: 'ex-row' }, [h('span', { class: 'bds-label', text: 'VIEW' })]);
     [['cards', 'Cards'], ['table', 'Table']].forEach(function (x) {
       var b = h('button', { type: 'button', class: 'df-preset-btn' + (EX.spreadMode === x[0] ? ' active' : ''), text: x[1] });
@@ -6476,14 +6510,14 @@
         main.appendChild(h('div', { class: 'ex-chips' }, [
           h('span', { class: 'ex-chip', text: 'match: ' + r.conf }),
           h('span', { class: 'ex-chip', text: 'earliest observed: ' + r.origin }),
-          h('span', { class: 'ex-chip', text: r.platforms })]));
+          h('span', { class: 'ex-chip', text: r.platforms })].concat(r.same ? [h('span', { class: 'ex-chip', title: 'every account behind this is one publisher', text: 'same publisher: ' + r.pub })] : [])));
         main.appendChild(h('div', { class: 'ex-story-stats' }, [
           h('b', { text: fmtInt(r.posts) }), txt(' posts \u00b7 '),
           h('b', { text: Number(r.spread_h || 0).toFixed(1) }), txt(' h observed spread \u00b7 '),
           h('b', { text: fmtCompact(r.views) }), txt(' observed views \u00b7 first seen ' + r.first)]));
         var act = h('div', { class: 'ex-why-act' });
         var vb = h('button', { type: 'button', class: 'df-preset-btn', text: 'View posts' });
-        vb.addEventListener('click', function () { DRILL.open({ view: drillView[0], params: params, title: 'Spread (earliest observed: ' + r.origin + ')' }); });
+        vb.addEventListener('click', function () { DRILL.open({ view: drillView[0], params: params, title: 'Spread (earliest observed: ' + r.origin + ')', cardCount: r.posts }); });
         act.appendChild(vb);
         act.appendChild(FB.buttons('story', sub + ':' + r.id, r.text, r.first));
         main.appendChild(act);
@@ -6505,6 +6539,7 @@
       { k: 'conf', label: 'Match' },
       { k: 'origin', label: 'First seen on' },
       { k: 'platforms', label: 'Platforms' },
+      { k: 'pub', label: 'Same publisher', fmt: function (v) { return v ? String(v) : '\u2014'; } },
       { k: 'posts', label: 'Posts', num: true, fmt: fmtInt },
       { k: 'spread_h', label: 'Spread (h)', num: true, fmt: function (v) { return v == null ? '\u2014' : Number(v).toFixed(1); } },
       { k: 'views', label: 'Views', num: true, fmt: function (v) { return v == null ? '\u2014' : fmtCompact(v); } },
@@ -6513,7 +6548,7 @@
       open: true, label: 'Cross-platform spread (' + rows.length + ')',
       rowDrill: function (r) {
         var params = {}; params[drillView[1]] = r.id;
-        return { view: drillView[0], params: params, title: 'Spread (earliest observed: ' + r.origin + ')' };
+        return { view: drillView[0], params: params, title: 'Spread (earliest observed: ' + r.origin + ')', cardCount: r.posts };
       }
     });
   }

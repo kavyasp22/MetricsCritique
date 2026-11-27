@@ -1,5 +1,13 @@
 # Current state (as of 2026-07-30, later — see top sections for the newest work)
 
+## 2026-11-27 — Cross-Platform Spread card: audit (PARTIAL) + copy fix (DONE)
+
+Audit: `Project-documents-final/Cross_Platform_Spread_Card_Audit.md` (read-only; AI-assisted precision, 29/32 semantic events clearly one event). Findings: story "Posts" counted scrape copies (2,132 rows = 153 posts), the drill-down listed every copy (174 rows for 2 posts), stored `total_engagement` sums copies (3.7x / 1.22x / 1.35x), a junk old-Reddit-placeholder event ranks first, and 76% of URL links are one publisher's own channels.
+- **Fixed:** card shows unique posts for stories; drill-down collapses copies for stories, links and events (`_collapsed_cross_sql`). `check_explore_api.py` 113/113. Needs a container rebuild to show.
+- **Also:** the Trend Lifecycle tile was removed on purpose, so `check_audience.mjs` (97/97) and `check_explore.mjs` no longer expect it. `check_explore.mjs` still fails on the Overview range and a missing "Needs attention" panel (pre-existing).
+- **Same-publisher label (DONE):** `UI/spread_publisher.py` + `UI/publisher_aliases.json` + route `/api/explore/spread_publishers`; toggle on the card (hide by default), chip when shown; 64/76 stories, 199/246 links, 417/2,307 events flagged (only when every account is one publisher). The drill-down now says when its count differs from the card's. `check_explore_api.py` 118/118; `scripts/tests/test_spread_publisher.py` 4/4.
+- **Not done:** stage 20 boilerplate/URL-only filter, engagement on collapsed posts (stages 19/20 rerun), human-judged events.
+
 ## 2026-11-27 — Comment-sentiment quality layer, 4 platforms (DONE; verdict PARTIAL)
 
 Spec: `docs/SENTIMENT_QUALITY_SPEC.md`. Stage `scripts/51_sentiment_quality.py` -> `data/sentiment_quality.duckdb` (new file; nothing existing modified).

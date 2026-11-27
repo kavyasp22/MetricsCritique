@@ -355,6 +355,37 @@ def main() -> int:
     cov = a._main_con.execute(f"SELECT count(*), count(w.post_uid) FROM viral_keep k LEFT JOIN read_parquet('{a.POST_VIRALITY_V3.as_posix()}') w ON w.post_uid = k.post_uid").fetchall()[0]
     chk("the v3 file covers (almost) every post the card can show", cov[1] / cov[0] > 0.995, f"{cov[1]:,} of {cov[0]:,}")
 
+    # ---------------- cross-platform spread drill-down: one row per real post, not one per scrape
+    for view, key, tbl, ptbl in (("cross_platform", "story_id", "cross_platform_stories", "cross_platform_posts"),
+                                 ("cross_platform_url", "link_id", "cross_platform_url_links", "cross_platform_url_posts"),
+                                 ("cross_platform_event", "event_id", "cross_platform_semantic_events", "cross_platform_semantic_posts")):
+        worst = a._main_con.execute(f"SELECT {key}, n_posts FROM metrics.{tbl} ORDER BY n_posts DESC LIMIT 1").fetchone()
+        sql, params = a.build_query(view, q(**{key: worst[0]}))
+        rows = a._main_con.execute(sql, params).fetchdf()
+        raw = a._main_con.execute(f"SELECT count(*) FROM metrics.{ptbl} WHERE {key} = ?", [worst[0]]).fetchone()[0]
+        urls = rows["url"].fillna(rows["post_uid"])
+        chk(f"{view}: the drill-down lists one row per (platform, url), not one per scrape",
+            len(rows) > 0 and len(rows) == len(set(zip(rows["platform"], urls))) and len(rows) <= raw, f"{raw} scrape rows -> {len(rows)}")
+        chk(f"{view}: total_rows is the collapsed count and the columns are unchanged",
+            int(rows["total_rows"].iloc[0]) == len(rows) and list(rows.columns) == ["post_uid", "platform", "posted_at", "author_name", "text", "url", "total_rows"])
+    st = a._main_con.execute("SELECT story_id, n_posts, n_unique_posts FROM metrics.cross_platform_stories ORDER BY n_posts DESC LIMIT 1").fetchone()
+    sql, params = a.build_query("cross_platform", q(story_id=st[0]))
+    n_rows = len(a._main_con.execute(sql, params).fetchdf())
+    chk("the most-copied story: card unique count and drill-down agree within 1 (it was 174 rows for 2 posts)", abs(n_rows - st[2]) <= 1 and n_rows < st[1] / 4, f"n_posts {st[1]}, n_unique_posts {st[2]}, drill rows {n_rows}")
+
+    # ---------------- cross-platform spread: "same publisher" label (computed from the stored tables)
+    import spread_publisher as pub
+    pf = a.PUB.explore_spread_publishers(a._main_con)
+    chk("the label covers all three tiers and counts add up", set(pf["counts"]) == {"stories", "links", "events"} and all(pf["counts"][t]["same"] <= pf["counts"][t]["total"] for t in pf["counts"]), pf["counts"])
+    tiny = a._main_con.execute("SELECT link_id FROM metrics.cross_platform_url_links WHERE host = 'tinyurl.com'").fetchall()
+    chk("every Aaj Tak tinyurl link (Telegram + WhatsApp, one publisher) is flagged", tiny and all(pf["links"][r[0]]["same"] for r in tiny), f"{len(tiny)} links")
+    nyt = a._main_con.execute("SELECT link_id FROM metrics.cross_platform_url_links WHERE url LIKE 'nytimes.com/%' AND n_authors >= 2").fetchall()
+    chk("a news link shared by different accounts is NOT flagged", nyt and not any(pf["links"][r[0]]["same"] for r in nyt), f"{len(nyt)} links")
+    xi = a._main_con.execute("SELECT story_id FROM metrics.cross_platform_stories WHERE snippet LIKE 'At the invitation of President Xi Jinping%'").fetchall()
+    chk("China MFA on X + Instagram (mfa_china) is flagged as one publisher", xi and all(pf["stories"][r[0]]["same"] and pf["stories"][r[0]]["label"] == "China MFA" for r in xi))
+    chk("every flagged item has a label and at least two entries; unflagged items have none",
+        all((v["label"] and v["publishers"] == 1) if v["same"] else not v["label"] for t in ("stories", "links", "events") for v in pf[t].values()))
+
     n_ok = sum(RESULTS)
     print(f"\n  {n_ok}/{len(RESULTS)} checks passed")
     return 0 if n_ok == len(RESULTS) else 1

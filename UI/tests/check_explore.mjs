@@ -65,8 +65,8 @@ check('Explore view shown, others hidden',
   doc.getElementById('advanced-view').style.display === 'none');
 check('data-mode is explore', doc.body.getAttribute('data-mode') === 'explore');
 const tiles = doc.querySelectorAll('.ex-tile');
-check('five tiles (including merged Sentiment & Audience)', tiles.length === 5, String(tiles.length));
-check('tile titles', ['Trending Topics', 'Viral Posts', 'Cross-Platform Spread', 'Trend Lifecycle', 'Sentiment & Audience']
+check('four tiles (Trend Lifecycle was removed; Sentiment & Audience is merged)', tiles.length === 4, String(tiles.length));
+check('tile titles', ['Trending Topics', 'Viral Posts', 'Cross-Platform Spread', 'Sentiment & Audience']
   .every((t) => [...tiles].some((x) => x.textContent.includes(t))));
 check('Needs attention / status panel rendered', !!doc.querySelector('#explore-view .attn-box'));
 check('alerts show entity names, not raw keys like person:xyz', !/\b(person|org|location|event):[a-z_]/i.test(doc.querySelector('#explore-view').textContent.split('Social Signal Monitor')[0]) &&
@@ -111,10 +111,6 @@ const cb2 = doc.getElementById('ex-unclass'); cb2.checked = false; cb2.dispatchE
   const u = drillCalls[0] || '';
   check('clicking a Trending Topics row opens the drill-down with the selected dates', /from=2026-10-25/.test(u) && /to=2026-10-25/.test(u) && /topic_id=/.test(u), u);
 }
-const lifeRows = await rows('life');
-check('Lifecycle has onset slope, half-life and persistence table',
-  /Onset slope/.test(view().textContent) && /Persistence by topic and platform/.test(view().textContent));
-check('Trend Lifecycle shows rows or an explicit empty state', lifeRows > 0 || /No rows/.test(view().textContent), String(lifeRows));
 [...doc.querySelectorAll('#explore-view .df-preset-btn')].find((b) => b.textContent === 'Last 7d').click(); await wait(500);
 await rows('spread');
 const storyCards = view().querySelectorAll('.ex-story').length;
@@ -277,7 +273,7 @@ check('a search with no match empties Trending Topics', view().querySelectorAll(
   check('back to "any number" restores the list', plats().length === before.length);
 }
 // every card: tables closed (+ to open), explanation closed behind a heading
-for (const k of ['topics', 'viral', 'spread', 'life', 'sent']) {
+for (const k of ['topics', 'viral', 'spread', 'sent']) {
   [...doc.querySelectorAll('.ex-tile')].find((x) => x.dataset.tile === k).click(); await wait(500);
   const v = view();
   const ex = [...v.querySelectorAll('details.ex-explain')];

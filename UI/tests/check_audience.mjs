@@ -112,7 +112,7 @@ console.log('1. tile, layout and the full payload');
 {
   const ctx = await boot('canned', () => ({ body: payload() }));
   const tiles = [...ctx.doc.querySelectorAll('.ex-tile')].map((b) => b.getAttribute('data-tile'));
-  chk('the five tiles are unchanged and in order; Sentiment and Audience are merged', JSON.stringify(tiles) === JSON.stringify(['topics', 'viral', 'spread', 'life', 'sent']), tiles.join(','));
+  chk('the four tiles are in order (Trend Lifecycle was removed); Sentiment and Audience are merged', JSON.stringify(tiles) === JSON.stringify(['topics', 'viral', 'spread', 'sent']), tiles.join(','));
   chk('the Sentiment & Audience tile covers both author tone and audience reactions', tile(ctx, 'sent').textContent.includes('Sentiment & Audience'));
   tile(ctx, 'aud').click(); await wait(900);
   const t = view(ctx);
@@ -164,7 +164,7 @@ console.log('1. tile, layout and the full payload');
   const reset = [...ctx.doc.querySelectorAll('.df-preset-btn')].find((b) => b.textContent === 'Reset'); reset.click(); await wait(500);
   chk('Reset clears the filters and the page still works', !!view(ctx) && ctx.errors.length === 0);
   // ---- other tiles still behave
-  for (const k of ['topics', 'viral', 'spread', 'life', 'sent']) {
+  for (const k of ['topics', 'viral', 'spread', 'sent']) {
     ctx.urls.length = 0; tile(ctx, k).click(); await wait(500);
     chk(`tile "${k}" still renders and makes no audience request`, view(ctx).length > 40 && !ctx.urls.length && ctx.errors.length === 0, `${view(ctx).length} chars`);
   }
@@ -303,7 +303,10 @@ console.log('1e. stabilisation: gap table fit, trend chart, platform rows, plura
   info[0].click(); await wait(100);
   chk('pressing the info button shows the detail and sets aria-expanded', info[0].getAttribute('aria-expanded') === 'true' && info[0].parentElement.querySelector('.aud-info-t').style.display !== 'none');
   chk('a multilingual / code-mixed limitation note is shown', /Language: comments come in many languages.*code-mixed text, sarcasm/.test(t));
-  const ig = payload({ filters: { from: '', to: '', platforms: ['instagram'], theme: '', entity_uid: '', basis: 'post' } });
+  const igQ = { grain: 'all dates', built: '2026-11-27', conf_high: 0.6, conf_low: 0.45, min_pooled: 30, ignores_theme_entity: true, rows: [
+    { platform: 'instagram', layer: 'comment', scored: 40243, no_text: 404, emoji_only: 8251, pos_all: 14422, pos_sarc_likely: 6, pos_sarc_possible: 40, words_only: 31588, confident: 19544, uncertain: 12000, weak: 8000, net_all: 0.7, net_headline: 0.7, net_words: -12.2, net_confident: 3.0, pos_pct: 35.8, pos_lo: 35.3, pos_hi: 36.3 }] };   // what the real API returns for platforms=instagram
+  const igT = { min_weeks: 8, min_n: 30, min_cover: 0.7, rows: [{ platform: 'instagram', layer: 'comment', weeks: 18, cover: 1, slope: 1.22, lo: -0.48, hi: 3.05, p: 0.15, trend: 'none' }] };
+  const ig = payload({ filters: { from: '', to: '', platforms: ['instagram'], theme: '', entity_uid: '', basis: 'post' }, quality: igQ, quality_trend: igT });
   const c2 = await boot('canned', () => ({ body: ig })); tile(c2, 'aud').click(); await wait(900);
   const t3 = view(c2), rowsTxt = [...c2.doc.querySelectorAll('.aud-tbl tbody tr')].map((r) => r.children[0].textContent.trim());
   chk('Instagram only: no YouTube and no "Both platforms" rows in any table, bar or status row', !rowsTxt.includes('YouTube') && !rowsTxt.includes('Both platforms') && rowsTxt.includes('Instagram') && ![...c2.doc.querySelectorAll('.aud-dist-l, .aud-size-r .aud-dist-l')].some((x) => /YouTube|Both/.test(x.textContent)), [...new Set(rowsTxt)].join(','));

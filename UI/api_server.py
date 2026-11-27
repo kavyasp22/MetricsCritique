@@ -30,6 +30,7 @@ from urllib.parse import urlparse, parse_qs
 import duckdb
 
 import audience_view as AUD       # Explore > Audience Sentiment (v2 audience tables); read-only, isolated
+import spread_publisher as PUB    # Explore > Cross-Platform Spread: the 'same publisher' label (computed from stored tables; read-only)
 import keyword_query as KQ
 from feedback_store import FeedbackError, FeedbackStore
 
@@ -52,6 +53,7 @@ RETWEET_SQL = "(coalesce(p.text, '') ILIKE 'RT @%' OR coalesce(p.text, '') ILIKE
 VIRALITY_MIN_REF = 20                            # a percentile needs at least this many reference posts to be shown
 VIRAL_P_MIN = 0.80                               # "viral breakout" by amplification: percentile at or above this (and activity at or above the platform median, see explore_viral)
 
+_PUB_CACHE = None   # {tier: {id: {same, publishers, label}}, counts}: filled on the first /api/explore/spread_publishers request
 _main_con = duckdb.connect(database=":memory:", read_only=False)
 _main_con.execute(f"ATTACH '{DATA / 'analytics.duckdb'}' AS analytics (READ_ONLY)")
 _main_con.execute(f"ATTACH '{DATA / 'metrics.duckdb'}' AS metrics (READ_ONLY)")
@@ -59,6 +61,26 @@ _main_con.execute(f"ATTACH '{DATA / 'geo_ontology.duckdb'}' AS geo (READ_ONLY)")
 FEEDBACK = FeedbackStore()   # reader votes: its own SQLite file, never the metrics DB or production
 
 POST_COLS = "p.post_uid, p.platform, p.posted_at, p.author_name, left(coalesce(p.text,''), 500) AS text, p.url"
+
+
+def _collapsed_cross_sql(posts_table: str, key_col: str) -> str:
+    """Drill-down for a cross-platform story / link / event: ONE row per real post.
+
+    The *_posts tables hold one row per scrape, so a single Instagram post scraped 170 times used to list 170 rows. Keep the latest scrape per
+    (platform, url); a post without a url stays its own row. `total_rows` is computed after the collapse so paging and the count are right."""
+    return f"""
+        WITH x AS (
+            SELECT {POST_COLS},
+                   row_number() OVER (PARTITION BY p.platform, coalesce(p.url, p.post_uid)
+                                      ORDER BY p.scraped_at DESC NULLS LAST, p.post_uid) AS _rn
+            FROM metrics.{posts_table} cp
+            JOIN analytics.post_facts p ON p.post_uid = cp.post_uid
+            WHERE cp.{key_col} = ?
+        )
+        SELECT post_uid, platform, posted_at, author_name, text, url, count(*) OVER () AS total_rows
+        FROM x WHERE _rn = 1
+        ORDER BY posted_at ASC
+    """
 
 
 def _limit(qs: dict) -> int:
@@ -432,40 +454,19 @@ def build_query(view: str, qs: dict):
         story_id = qs.get("story_id", [None])[0]
         if not story_id:
             raise ValueError("story_id required")
-        sql = f"""
-            SELECT {POST_COLS}, count(*) OVER () AS total_rows
-            FROM metrics.cross_platform_posts cp
-            JOIN analytics.post_facts p ON p.post_uid = cp.post_uid
-            WHERE cp.story_id = ?
-            ORDER BY p.posted_at ASC
-        """
-        return sql, [story_id]
+        return _collapsed_cross_sql("cross_platform_posts", "story_id"), [story_id]
 
     if view == "cross_platform_url":
         link_id = qs.get("link_id", [None])[0]
         if not link_id:
             raise ValueError("link_id required")
-        sql = f"""
-            SELECT {POST_COLS}, count(*) OVER () AS total_rows
-            FROM metrics.cross_platform_url_posts cp
-            JOIN analytics.post_facts p ON p.post_uid = cp.post_uid
-            WHERE cp.link_id = ?
-            ORDER BY p.posted_at ASC
-        """
-        return sql, [link_id]
+        return _collapsed_cross_sql("cross_platform_url_posts", "link_id"), [link_id]
 
     if view == "cross_platform_event":
         event_id = qs.get("event_id", [None])[0]
         if not event_id:
             raise ValueError("event_id required")
-        sql = f"""
-            SELECT {POST_COLS}, count(*) OVER () AS total_rows
-            FROM metrics.cross_platform_semantic_posts cp
-            JOIN analytics.post_facts p ON p.post_uid = cp.post_uid
-            WHERE cp.event_id = ?
-            ORDER BY p.posted_at ASC
-        """
-        return sql, [event_id]
+        return _collapsed_cross_sql("cross_platform_semantic_posts", "event_id"), [event_id]
 
     if view == "entity":
         entity_uid = qs.get("entity_uid", [None])[0]
@@ -1609,6 +1610,19 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json({"error": str(e)}, status=400)
             except Exception as e:
                 self._json({"error": f"query failed: {e}"}, status=500)
+            return
+        if parsed.path == "/api/explore/spread_publishers":
+            global _PUB_CACHE
+            try:
+                if _PUB_CACHE is None:                       # the tables only change on a rebuild (which restarts the server)
+                    cur = _main_con.cursor()
+                    try:
+                        _PUB_CACHE = PUB.explore_spread_publishers(cur)
+                    finally:
+                        cur.close()
+                self._json(_PUB_CACHE)
+            except Exception as e:
+                self._json({"error": f"query failed: {type(e).__name__}: {e}"}, status=500)
             return
         if parsed.path == "/api/explore/audience":
             cur = _main_con.cursor()
