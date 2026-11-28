@@ -325,7 +325,7 @@
       subEl.textContent = 'Showing ' + data.shown + ' of ' + fmtInt(data.total) + ' underlying posts' + rangeTxt + ', ' +
         (sortKey ? ('ranked by ' + (SORT_LABEL[sortKey] || sortKey) + '.') : (byScore ? 'strongest match first.' : (isSpread ? 'earliest first.' : 'most recent first.')));
       if (isSpread && cfg.cardCount != null) {                           // say when the card's count and this list differ, and why
-        var cardBasis = { cross_platform_url: 'one post per account on each platform', cross_platform_event: 'one post per distinct text on each platform' }[cfg.view] || 'each post once';
+        var cardBasis = 'one post per account on each platform';
         bodyEl.appendChild(h('p', { class: 'fnote', text: cfg.cardCount !== data.total
           ? 'The card counts ' + fmtInt(cfg.cardCount) + ' post' + (cfg.cardCount === 1 ? '' : 's') + ' (' + cardBasis + '). This list shows every distinct post collected, ' + fmtInt(data.total) +
             ', so it can be longer. A post that was collected several times is listed once.'
@@ -6463,7 +6463,7 @@
       links: 'Posts sharing the same link. High = full article link seen within 21 days; medium = shortened link; low = the link is spread over more than 21 days. App deep links are excluded.',
       events: 'Posts that say nearly the same thing in different words (bge-m3 similarity of at least 0.85 within 3 days). Preliminary: not yet hand-judged.' }[sub];
     exExplain(host, 'Cross-platform spread', note + ' "Earliest observed" is the first post we saw, not the confirmed origin. ' +
-      'Views are observed counts only (no estimates); posts on platforms with no view count are not added in. "Posts" counts each post once, however many times it was collected; for shared links it counts one per account and platform, and for similar-meaning events one per distinct text, so "View posts" can list more. Click a row to see the posts.' );
+      'Views are observed counts only (no estimates); posts on platforms with no view count are not added in. "Posts" counts one post per account on each platform: an account that posted the same text or link several times counts once, and a post that was collected several times counts once. "View posts" lists every distinct post, so it can be longer. Click a row to see the posts.' );
     /* "same publisher": the story / link / event is ONE organisation posting its own content on several platforms (e.g. Aaj Tak on Telegram and
        WhatsApp). That is distribution, not others picking it up, so those rows are hidden by default behind a toggle and labelled when shown.
        Flags come from /api/explore/spread_publishers (computed from the stored tables); without the API nothing is hidden. */

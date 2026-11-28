@@ -15,6 +15,11 @@ Method
   5. Confidence: 'high' when every edge in the event is >= SIM_HIGH, else 'medium'.
      `large_event` flags events with more than LARGE_EVENT_TEXTS distinct texts (chaining risk).
 
+Eligibility also needs real words: at least MIN_LETTERS letters once links are removed (two different YouTube links were "matched" on
+their link text alone), and known platform placeholder texts are dropped (401 Reddit posts reading "This post contains content not
+supported on old Reddit" formed the largest event). Engagement and views are summed once per collected post (latest scrape per
+platform + url): a post scraped 170 times used to count its engagement 170 times.
+
 Precision (hand-judged by the assistant on 40 random pairs, similarity 0.80 to 1.0, window 3 days):
 40 of 40 were the same event. NOT independently reviewed. Below 0.80 is untested.
 
@@ -46,7 +51,11 @@ SIM_THRESHOLD = 0.85   # edge threshold (events at 0.80 chain into 200+ post blo
 SIM_HIGH = 0.90        # every edge at or above this -> confidence 'high'
 WINDOW_DAYS = 3        # posts must be within this many days of each other
 MIN_CHARS = 35
+MIN_LETTERS = 15       # letters left after removing links; a text that is only a link has no meaning to compare
 LARGE_EVENT_TEXTS = 30
+# platform placeholder texts that stand in for content (matched on the lower-cased, whitespace-collapsed text)
+PLACEHOLDER_RE = r"this post contains content not supported on old reddit|^\[(removed|deleted)\]$"
+_URL_RE = r"https?://\S+|www\.\S+"
 
 
 def _log(msg: str) -> None:
@@ -55,31 +64,43 @@ def _log(msg: str) -> None:
 
 def load_eligible_posts(con) -> pd.DataFrame:
     p = con.execute(
-        "SELECT post_uid, platform, author_uid, author_name, posted_at, scrape_lag_days, text, "
+        "SELECT post_uid, platform, author_uid, author_name, posted_at, scrape_lag_days, text, url, scraped_at, "
         "coalesce(likes,0) AS l, coalesce(comments,0) AS c, coalesce(shares,0) AS s, "
         "coalesce(views,0) AS v FROM post_facts WHERE text IS NOT NULL").fetchdf()
     p = p[p.posted_at.notna() & (p.text.str.strip().str.len() >= MIN_CHARS)].copy()
     p["ct"] = p.text.str.lower().str.replace(r"\s+", " ", regex=True).str.strip()
     p = p[~p.ct.str.fullmatch(r"[0-9\s\.\,\:\-\_\#\@]+")]
+    n0 = len(p)
+    words = p.text.str.replace(_URL_RE, " ", regex=True).str.count(r"[^\W\d_]")      # letters outside links
+    p = p[(words >= MIN_LETTERS) & ~p.ct.str.contains(PLACEHOLDER_RE, regex=True)].copy()
+    _log(f"-> dropped {n0 - len(p):,} link-only / placeholder texts of {n0:,}")
     p["eng"] = p.l + p.c + p.s
     return p
 
 
 def load_embeddings(post_uids: set[str]) -> tuple[np.ndarray, pd.Series]:
-    """Return (matrix float32, Series mapping post_uid -> row) for the requested posts."""
-    import pyarrow.parquet as pq
+    """Return (matrix float32, Series mapping post_uid -> row) for the requested posts.
+
+    DuckDB reads the parquet in parallel and casts DOUBLE -> FLOAT (round-to-nearest, the same values as numpy's astype(float32)); the rows come
+    back in file order, exactly as before. The previous pyarrow read of this single-row-group `list<double>` column ran for over 40 minutes
+    without finishing; this takes about 5 minutes. Batches are filtered as they arrive, so only the requested posts are kept in memory."""
     files = sorted(EMB_PARQUET.glob("*.parquet"))
     uids, mats = [], []
-    for f in files:
-        tab = pq.read_table(f, columns=["post_uid", "embedding"])
-        u = np.asarray(tab.column("post_uid").to_pylist())
-        keep = np.isin(u, list(post_uids))
-        if not keep.any():
-            continue
-        col = tab.column("embedding").combine_chunks()
-        dim = len(col[0]) if len(col) else 0
-        m = col.values.to_numpy(zero_copy_only=False).astype(np.float32).reshape(len(u), dim)
-        uids.append(u[keep]); mats.append(m[keep])
+    con = duckdb.connect(":memory:")
+    try:
+        for f in files:
+            src = f"read_parquet('{f.as_posix()}')"
+            dim = con.execute(f"SELECT len(embedding) FROM {src} LIMIT 1").fetchone()[0]
+            reader = con.execute(f"SELECT post_uid, embedding::FLOAT[{dim}] AS e FROM {src}").to_arrow_reader(20000)
+            for batch in reader:
+                u = np.asarray(batch.column(0).to_pylist())
+                keep = pd.Series(u).isin(post_uids).to_numpy()
+                if not keep.any():
+                    continue
+                m = batch.column(1).values.to_numpy(zero_copy_only=False).reshape(len(u), dim)
+                uids.append(u[keep]); mats.append(m[keep])
+    finally:
+        con.close()
     uid = np.concatenate(uids); mat = np.concatenate(mats)
     return mat, pd.Series(np.arange(len(uid)), index=uid)
 
@@ -154,6 +175,11 @@ def compute_semantic_events(verbose: bool = True):
     rep_comp = u.loc[nodes, ["platform", "ct"]].assign(event=comp.to_numpy())
     members = p.merge(rep_comp, on=["platform", "ct"], how="inner")
     members["norm_name"] = members.author_name.fillna("").str.lower().str.replace(r"[^a-z0-9]", "", regex=True)
+    # one collected copy per (platform, url): the latest scrape. Totals sum these, not every scrape of the same post.
+    members["copy_key"] = members.url.fillna(members.post_uid)
+    members = members.sort_values("scraped_at", ascending=False, na_position="last")
+    members["latest"] = ~members.duplicated(["event", "platform", "copy_key"])
+    members = members.sort_index()
 
     rows = []
     for ev, x in members.groupby("event"):
@@ -172,8 +198,8 @@ def compute_semantic_events(verbose: bool = True):
             origin_scrape_lag_days=None if pd.isna(first.scrape_lag_days) else round(float(first.scrape_lag_days), 1),
             origin_time=str(first.posted_at),
             spread_duration_hours=round((x.posted_at.max() - x.posted_at.min()).total_seconds() / 3600.0, 1),
-            observed_views=float(x.loc[x.platform.isin(vp) & (x.v > 0), "v"].sum()),
-            total_engagement=float(x.eng.sum()),
+            observed_views=float(x.loc[x.latest & x.platform.isin(vp) & (x.v > 0), "v"].sum()),
+            total_engagement=float(x.loc[x.latest, "eng"].sum()),
             min_sim=round(float(st.min_sim), 3), mean_sim=round(float(st.mean_sim), 3),
             match_confidence="high" if st.min_sim >= SIM_HIGH else "medium",
             large_event=bool(x.ct.nunique() > LARGE_EVENT_TEXTS)))

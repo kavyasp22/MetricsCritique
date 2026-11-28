@@ -69,6 +69,7 @@ def compute_cross_platform_reach(limit_stories: int = 150):
             posted_at,
             scrape_lag_days,
             url,
+            scraped_at,
             coalesce(likes, 0) AS likes,
             coalesce(comments, 0) AS comments,
             coalesce(shares, 0) AS shares,
@@ -85,7 +86,11 @@ def compute_cross_platform_reach(limit_stories: int = 150):
         -- times is not counted as 100+ independent view-less posts.
         SELECT *,
             row_number() OVER (PARTITION BY clean_text, platform, author_uid
-                               ORDER BY engagement DESC, posted_at) AS rep
+                               ORDER BY engagement DESC, posted_at) AS rep,
+            -- cp = 1 marks the LATEST scrape of each post (platform + url). Totals sum these only: one Instagram post
+            -- scraped 170 times used to add its engagement 170 times (stories were 3.7x too high). n_posts still counts rows.
+            row_number() OVER (PARTITION BY clean_text, platform, coalesce(url, post_uid)
+                               ORDER BY scraped_at DESC NULLS LAST, post_uid) AS cp
         FROM base
     ),
     clusters AS (
@@ -104,9 +109,9 @@ def compute_cross_platform_reach(limit_stories: int = 150):
             arg_min(platform, posted_at) AS origin_platform,
             arg_min(scrape_lag_days, posted_at) AS origin_scrape_lag_days,
             list(DISTINCT platform) AS platforms,
-            sum(engagement) AS total_engagement,
-            sum(views) AS total_views,
-            sum(CASE WHEN platform IN ({VP}) AND views > 0 THEN views ELSE 0 END) AS observed_views,
+            sum(engagement) FILTER (WHERE cp = 1) AS total_engagement,
+            sum(views) FILTER (WHERE cp = 1) AS total_views,
+            sum(CASE WHEN cp = 1 AND platform IN ({VP}) AND views > 0 THEN views ELSE 0 END) AS observed_views,
             sum(CASE WHEN rep = 1 AND platform NOT IN ({FP}) AND (views = 0 OR views IS NULL) THEN engagement ELSE 0 END) AS viewless_engagement
         FROM cleaned
         WHERE clean_text NOT SIMILAR TO '^[0-9\\s\\.\\,\\:\\-\\_\\#\\@]+$'
@@ -229,6 +234,7 @@ def compute_url_links():
     con = duckdb.connect(str(ANALYTICS_DB), read_only=True)
     raw = con.execute(f"""
         SELECT post_uid, platform, author_uid, posted_at, scrape_lag_days,
+               post_facts.url AS post_url, scraped_at,
                coalesce(views, 0) AS views,
                coalesce(likes, 0) + coalesce(comments, 0) + coalesce(shares, 0) AS engagement,
                unnest(regexp_extract_all(text, '{URL_RE}')) AS url
@@ -259,7 +265,10 @@ def compute_url_links():
     rows = []
     for key, x in raw.groupby("key", sort=False):
         first = x.iloc[0]
-        obs = x.loc[x.platform.isin(vp) & (x.views > 0), "views"].sum()
+        # totals use the latest scrape of each post (platform + url), not every scrape of it
+        xc = x.assign(_k=x.post_url.fillna(x.post_uid)).sort_values("scraped_at", ascending=False, na_position="last") \
+              .drop_duplicates(["platform", "_k"])
+        obs = xc.loc[xc.platform.isin(vp) & (xc.views > 0), "views"].sum()
         rows.append(dict(
             link_id=hashlib.md5(key.encode()).hexdigest(),
             url=key, host=first.host,
@@ -275,7 +284,7 @@ def compute_url_links():
             origin_scrape_lag_days=None if pd.isna(first.scrape_lag_days) else round(float(first.scrape_lag_days), 1),
             origin_time=str(first.posted_at),
             spread_duration_hours=round((x.posted_at.max() - x.posted_at.min()).total_seconds() / 3600.0, 1),
-            observed_views=float(obs), total_engagement=float(x.engagement.sum())))
+            observed_views=float(obs), total_engagement=float(xc.engagement.sum())))
     links = pd.DataFrame(rows).sort_values(["n_platforms", "n_posts"], ascending=False).reset_index(drop=True)
     posts = raw.merge(links[["link_id", "url"]], left_on="key", right_on="url")[
         ["link_id", "post_uid", "platform", "posted_at"]].copy()
