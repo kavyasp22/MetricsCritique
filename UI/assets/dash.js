@@ -6229,21 +6229,20 @@
     if (EX.entityUid) { return exEntityTopicsView(host); }
     var isTheme = (EX.topicGrain !== 'macro') && T('dtheme_metrics_daily') && T('dtheme_metrics_daily').length > 0;
     function exTrendingScore(r) {
-      // Prioritize genuinely surging / breaking out topics: starting (5), rising (4), peak (2), steady (1), declining (-3)
-      var s = (r.stage === 'starting' ? 5 : (r.stage === 'rising' ? 4 : (r.stage === 'peak' ? 2 : (r.stage === 'steady' ? 1 : -3))));
+      // Growth against the previous period (shown only with enough posts in both) plus, for macro topics, the pipeline's Emergence score.
+      // The stage is NOT part of the score: in a shuffle test with no real trend it still read rising or declining about 70% of the time.
       var g = (r.growth != null && isFinite(r.growth)) ? r.growth : 0;
-      var sc = (r.stage_change != null && isFinite(r.stage_change)) ? r.stage_change : 0;
       var em = (r.emergence != null) ? r.emergence : 0;
-      return (s * 10) + (g * 2) + sc + (em * 3);
+      return (g * 2) + (em * 3);
     }
     var rows = exTopicRows().filter(function (r) { return !EX.minPlat || r.platforms >= EX.minPlat; }).sort(function (a, b) {
       var sa = exTrendingScore(a), sb = exTrendingScore(b);
       return sb - sa || (b.posts - a.posts);
     }).slice(0, EX.top);
     exExplain(host, 'Trending topics', isTheme
-      ? 'Security themes (D01–D09) ranked by a trending score, not by post volume: the stage comes first (starting, then rising, peak, steady, declining), then growth against the previous period and the change over the last 3 days; more posts break ties. Shows posts, growth vs prior period, multi-platform presence, and stage (from the daily trajectory of posts per platform that had posts that day). Use the dropdown above to switch to macro clusters (t000–t007) if needed. Click a row to open its posts.'
-      : 'Ranked by a trending score: the stage comes first (starting, then rising, peak, steady, declining), then growth against the previous period, the change over the last 3 days and the Emergence score, ' +
-        'the pipeline’s single "popping up" number (blend of volume surprise, acceleration, semantic novelty and days-to-threshold; relative to this run’s panel, so read it as a ranking, not a probability); more posts break ties. ' +
+      ? 'Security themes (D01–D09) ranked by growth against the previous period (the selected days against the same number of days just before; shown only with enough posts in both), not by post volume; more posts break ties. Shows posts, growth, multi-platform presence, and an indicative stage (starting / rising / peak / steady / declining from the last 3 days against the 3 before). The stage is NOT used for the ranking: when the days are shuffled so there is no real trend, it still reads rising or declining about 70% of the time. Use the dropdown above to switch to macro clusters (t000–t007) if needed. Click a row to open its posts.'
+      : 'Ranked by growth against the previous period together with the Emergence score, ' +
+        'the pipeline’s single "popping up" number (blend of volume surprise, acceleration, semantic novelty and days-to-threshold; relative to this run’s panel, so read it as a ranking, not a probability); more posts break ties. The stage is an indicative label only and is not used for the ranking (with no real trend it still reads rising or declining about 70% of the time). ' +
         'Alert days = days the volume jump was statistically significant (Benjamini–Hochberg q < 0.05); only cells with enough support are counted. ' +
         'Growth compares the selected days with the same number of days just before them (shown only with at least 10 earlier and 20 current posts). ' +
         'Momentum is the recent direction of volume, not a forecast. Stage compares the last 3 days with the 3 before, as posts per active channel ' +
@@ -6257,7 +6256,7 @@
       { k: 'growth', label: 'Growth', num: true,
         fmt: function (v) { return v == null ? '\u2014' : (v >= 0 ? '+' : '') + Math.round(v * 100) + '%'; } },
       { k: 'platforms', label: 'Platforms', num: true },
-      { k: 'stage', label: 'Stage' }
+      { k: 'stage', label: 'Stage (indicative)' }
     ] : [
       { k: 'topic', label: 'Topic' },
       { k: 'posts', label: 'Posts', num: true, fmt: function (v) { return fmtInt(v); } },
@@ -6269,7 +6268,7 @@
       { k: 'burst_days', label: 'Burst days', num: true, fmt: function (v) { return v == null ? '\u2014' : v; } },
       { k: 'momentum', label: 'Momentum', num: true, fmt: function (v) { return v == null ? '\u2014' : (v >= 0 ? '+' : '') + Number(v).toFixed(2); } },
       { k: 'platforms', label: 'Platforms', num: true },
-      { k: 'stage', label: 'Stage' }
+      { k: 'stage', label: 'Stage (indicative)' }
     ];
     tableView(host, cols, rows, {
       label: (isTheme ? 'Trending security themes (' : 'Trending topics (') + rows.length + ')',
@@ -6301,31 +6300,31 @@
     if (!isTheme && r.emergence != null) {
       b.push('Emergence score ' + Number(r.emergence).toFixed(2) + ', rank ' + rank + ' of ' + n + ' topics in this view.');
     } else if (isTheme) {
-      b.push('Rank ' + rank + ' of ' + n + ' themes in this view (ranked by trending momentum & growth).');
+      b.push('Rank ' + rank + ' of ' + n + ' themes in this view (ranked by growth against the previous period).');
     }
     if (!isTheme && r.alert_days != null) {
       b.push(r.alert_days > 0 ? r.alert_days + ' day' + (r.alert_days === 1 ? '' : 's') + ' where the jump in volume was statistically significant (q < ' + EX_RULES.alpha + ').'
         : 'No day with a statistically significant jump.');
     }
     if (isTheme) {
-      b.push('Stage ' + r.stage + (r.stage_change != null ? ': the last 3 days are ' + (r.stage_change >= 0 ? '+' : '') + Math.round(r.stage_change * 100) + '% against the 3 before (post volume).' : '.'));
+      b.push('Recent direction (indicative only): ' + r.stage + (r.stage_change != null ? ', the last 3 days are ' + (r.stage_change >= 0 ? '+' : '') + Math.round(r.stage_change * 100) + '% against the 3 before; this is not used for the ranking.' : '.'));
     } else {
-      b.push('Stage ' + r.stage + (r.stage_change != null ? ': the last 3 days are ' + (r.stage_change >= 0 ? '+' : '') + Math.round(r.stage_change * 100) + '% against the 3 before (posts per active channel).' : '.'));
+      b.push('Recent direction (indicative only): ' + r.stage + (r.stage_change != null ? ', the last 3 days are ' + (r.stage_change >= 0 ? '+' : '') + Math.round(r.stage_change * 100) + '% against the 3 before (posts per active channel); this is not used for the ranking.' : '.'));
     }
     if (r.top_platform) { b.push('Seen on ' + r.platforms + ' platform' + (r.platforms === 1 ? '' : 's') + '; the largest is ' + r.top_platform + ' (' + Math.round(100 * r.top_share) + '% of the posts).'); }
     return b;
   }
   function exWhyCards(host, rows, isTheme) {
-    // Only showcase topics that are actually trending (rising, starting, peak with growth, NOT declining)
-    var activeTrending = rows.filter(function (r) { return r.stage === 'rising' || r.stage === 'starting' || (r.stage === 'peak' && (r.growth == null || r.growth >= 0)); });
-    var top = (activeTrending.length >= 3 ? activeTrending : rows.filter(function (r) { return r.stage !== 'declining'; })).slice(0, 5);
+    // Only showcase topics that are actually growing: more posts than in the previous period (needs enough posts in both). The stage is not used to choose.
+    var activeTrending = rows.filter(function (r) { return r.growth != null && r.growth > 0; });
+    var top = (activeTrending.length >= 3 ? activeTrending : rows.filter(function (r) { return r.growth == null || r.growth >= 0; })).slice(0, 5);
     if (!top.length) { top = rows.slice(0, 5); }
     if (!top.length) { return; }
     host.appendChild(h('div', { class: 'ct', style: 'margin-top:1rem', text: 'Why these are trending (top ' + top.length + ')' }));
     var list = h('div', { class: 'ex-why' });
     top.forEach(function (r, i) {
       var card = h('article', { class: 'ex-why-card' });
-      card.appendChild(h('div', { class: 'ex-why-hd' }, [h('b', { text: (i + 1) + '. ' + r.topic }), h('span', { class: 'ex-why-st', text: r.stage })]));
+      card.appendChild(h('div', { class: 'ex-why-hd' }, [h('b', { text: (i + 1) + '. ' + r.topic }), h('span', { class: 'ex-why-st', title: 'Indicative only: the last 3 days against the 3 before. It is not used for the ranking.', text: 'recent: ' + r.stage })]));
       var ul = h('ul', { class: 'ex-why-ul' });
       exWhyBullets(r, i + 1, rows.length, isTheme).forEach(function (t) { ul.appendChild(h('li', { text: t })); });
       card.appendChild(ul);
@@ -6350,19 +6349,19 @@
     var rows;
     if (isTheme) {
       rows = [
-        ['Ranking', 'Trending score', 'Security themes are ranked by stage first (starting 5, rising 4, peak 2, steady 1, declining \u22123, times 10), plus 2 \u00d7 growth and the change over the last 3 days; more posts break ties. It is not total post volume.'],
+        ['Ranking', 'Growth', 'Security themes are ranked by growth against the previous period (shown only with enough posts in both); more posts break ties. It is not total post volume. The stage is an indicative label and is not used for the ranking.'],
         ['Growth', 'posts in the selected days \u00f7 posts in the same number of days just before, minus 1', 'Shown only with at least ' + R.growthMinPrev + ' earlier and ' + R.growthMinCur + ' current posts; otherwise \u201c\u2014\u201d.'],
-        ['Stage', 'last 3 days vs the 3 before', 'rising \u2265 +' + Math.round((R.rise - 1) * 100) + '%; declining \u2264 \u2212' + Math.round((1 - R.fall) * 100) + '%; peak = flat and within ' + Math.round((1 - R.peakBand) * 100) + '% of the best 3-day level; steady = flat below it; starting = rising and the earlier period was under ' + Math.round(R.startPrev * 100) + '% as large (ranges up to ' + R.startMaxDays + ' days). Needs ' + R.stageDays + '+ days and ' + R.stageMinPosts + '+ posts in the last ' + R.stageDays + ' (for themes the daily figure is posts divided by the number of platforms that had posts that day; there is no channel-effort normalization).'],
+        ['Stage (indicative)', 'last 3 days vs the 3 before', 'rising \u2265 +' + Math.round((R.rise - 1) * 100) + '%; declining \u2264 \u2212' + Math.round((1 - R.fall) * 100) + '%; peak = flat and within ' + Math.round((1 - R.peakBand) * 100) + '% of the best 3-day level; steady = flat below it; starting = rising and the earlier period was under ' + Math.round(R.startPrev * 100) + '% as large (ranges up to ' + R.startMaxDays + ' days). Needs ' + R.stageDays + '+ days and ' + R.stageMinPosts + '+ posts in the last ' + R.stageDays + ' (for themes the daily figure is posts divided by the number of platforms that had posts that day; there is no channel-effort normalization).'],
         ['Platforms', 'Platform count', 'Number of distinct platforms on which the security theme was observed.'],
         ['Left out', 'Unassigned', 'Posts not assigned to a security theme are excluded unless \u201cInclude Unclassified\u201d is ticked.']
       ];
     } else {
       rows = [
-        ['Ranking', 'Trending score', 'Topics are ranked by stage first (starting 5, rising 4, peak 2, steady 1, declining \u22123, times 10), plus 2 \u00d7 growth, the change over the last 3 days and 3 \u00d7 the Emergence score (' + (meta.emergence_score ? meta.emergence_score.formula : 'Emergence score') + '); more posts break ties. The Emergence score is relative to this run\u2019s panel: a ranking, not a probability.'],
+        ['Ranking', 'Growth and Emergence', 'Topics are ranked by 2 \u00d7 growth plus 3 \u00d7 the Emergence score (' + (meta.emergence_score ? meta.emergence_score.formula : 'Emergence score') + '); more posts break ties. The Emergence score is relative to this run\u2019s panel: a ranking, not a probability. The stage is an indicative label and is not used for the ranking.'],
         ['Alert day', (meta.surprise ? meta.surprise.formula : 'Volume surprise'), 'A day counts when its jump is significant after Benjamini\u2013Hochberg correction (q < ' + R.alpha + ') and the cell has enough support.'],
         ['Growth', 'posts in the selected days \u00f7 posts in the same number of days just before, minus 1', 'Shown only with at least ' + R.growthMinPrev + ' earlier and ' + R.growthMinCur + ' current posts; otherwise \u201c\u2014\u201d.'],
         ['Momentum', (meta.momentum ? meta.momentum.formula : 'EMA7 \u2212 EMA21 of growth'), 'Describes the recent direction of volume; it is not a forecast.'],
-        ['Stage', 'last 3 days vs the 3 before, as posts per active channel', 'rising \u2265 +' + Math.round((R.rise - 1) * 100) + '%; declining \u2264 \u2212' + Math.round((1 - R.fall) * 100) + '%; peak = flat and within ' + Math.round((1 - R.peakBand) * 100) + '% of the best 3-day level; steady = flat below it; starting = rising and the earlier period was under ' + Math.round(R.startPrev * 100) + '% as large (ranges up to ' + R.startMaxDays + ' days). Needs ' + R.stageDays + '+ days and ' + R.stageMinPosts + '+ posts in the last ' + R.stageDays + '.'],
+        ['Stage (indicative)', 'last 3 days vs the 3 before, as posts per active channel', 'rising \u2265 +' + Math.round((R.rise - 1) * 100) + '%; declining \u2264 \u2212' + Math.round((1 - R.fall) * 100) + '%; peak = flat and within ' + Math.round((1 - R.peakBand) * 100) + '% of the best 3-day level; steady = flat below it; starting = rising and the earlier period was under ' + Math.round(R.startPrev * 100) + '% as large (ranges up to ' + R.startMaxDays + ' days). Needs ' + R.stageDays + '+ days and ' + R.stageMinPosts + '+ posts in the last ' + R.stageDays + '.'],
         ['Left out', 'Unclassified', 'Posts not assigned to a topic are excluded unless \u201cInclude Unclassified\u201d is ticked.']
       ];
     }
@@ -6372,7 +6371,7 @@
     rows.forEach(function (r) { body.appendChild(h('tr', {}, r.map(function (x) { return h('td', { text: x }); }))); });
     tb.appendChild(body);
     det.appendChild(tb);
-    det.appendChild(h('p', { class: 'cs', text: 'Limits: the thresholds (25%, 20%, 10%) are chosen, not tuned, and should be hand-checked before customers rely on a stage. Counts are posts and comments in the collected corpus, not all activity on a platform.' }));
+    det.appendChild(h('p', { class: 'cs', text: 'Limits: the stage thresholds (25%, 20%, 10%) are chosen, not tuned. In a test on 19 theme and topic series with the days shuffled (no real trend) the stage still read rising or declining about 70% of the time, so it is shown as an indicative label only and is not used for the ranking. Growth is also noisy with few posts, which is why it needs enough posts in both periods. Counts are posts and comments in the collected corpus, not all activity on a platform.' }));
     host.appendChild(det);
   }
 
