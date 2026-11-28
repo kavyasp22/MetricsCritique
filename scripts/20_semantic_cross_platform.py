@@ -54,7 +54,8 @@ MIN_CHARS = 35
 MIN_LETTERS = 15       # letters left after removing links; a text that is only a link has no meaning to compare
 LARGE_EVENT_TEXTS = 30
 # platform placeholder texts that stand in for content (matched on the lower-cased, whitespace-collapsed text)
-PLACEHOLDER_RE = r"this post contains content not supported on old reddit|^\[(removed|deleted)\]$"
+PLACEHOLDER_RE = (r"this post contains content not supported on old reddit|^\[(removed|deleted)\]$"
+                  r"|^\s*submitted by /u/\S+\s*\[link\]\s*\[comments\]\s*$")           # Reddit link posts that carry no text (628 posts; 19 rows sat in 12 events)
 _URL_RE = r"https?://\S+|www\.\S+"
 
 
