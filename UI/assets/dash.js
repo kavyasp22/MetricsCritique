@@ -5733,35 +5733,74 @@
 
   /* The thresholds behind the Trending Topics ranking. ONE place: the code below and the "How this is decided" panel both read it. */
   var EX_RULES = { stageDays: 6, stageMinPosts: 20, rise: 1.25, fall: 0.8, peakBand: 0.9, startPrev: 0.3, startMaxDays: 30,
-                   growthMinPrev: 10, growthMinCur: 20, entGrowthMinPrev: 5, entGrowthMinCur: 10, alpha: 0.05, tonePosNeg: 0.15 };
+                   growthMinPrev: 10, growthMinCur: 20, entGrowthMinPrev: 5, entGrowthMinCur: 10, alpha: 0.05, tonePosNeg: 0.15,
+                   testMaxK: 14, testMinPosts: 100, testSafety: 1.25 };
 
-  /* Stage of a topic from its own daily series (effort-normalised: posts per active channel, so a collector ramp-up does not
-     look like a surge). Compares the last 3 days with the 3 before them. Returns {stage, change} where change = last 3 / previous 3 - 1. */
+  /* Stage of a topic from its own daily series. A change is called only when it is statistically clear.
+     The last k days (k = half the window, at most 14) are compared with the k days before by an overdispersion-aware rate test: under "no change" the
+     recent posts out of all posts compared follow a binomial split (weighted by exposure: collector effort for macro topics, one per day for themes),
+     and the variance is inflated by the series' own day-to-day dispersion (Poisson = 1; news counts are far burstier) times a safety factor. Needs at least
+     testMinPosts posts in the days compared. The p-values of all topics in view are corrected together (Benjamini-Hochberg, q < alpha) and a change also has to
+     be at least +25% / -20%. Why: with the days shuffled (no real trend) the old 3-day-vs-3-day rule still read rising or declining about 70% of the time;
+     this test keeps that to roughly 3-7% (it can still miss real changes: a doubling is caught 11-36% of the time, a tripling 35-79%).
+     Everything that is not a clear change is "peak" (the last 3 days are within 10% of the best 3-day level) or "steady".
+     Returns {stage, change, test, startOk}: stage is the base label until exApplyStageTests decides rising / starting / declining; change = last 3 / previous 3 - 1 (descriptive). */
+  function exNormCdf(x) {      // Abramowitz-Stegun 7.1.26 (abs error < 1.5e-7)
+    var t = 1 / (1 + 0.3275911 * Math.abs(x) / Math.SQRT2), y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x / 2);
+    return x >= 0 ? 0.5 * (1 + y) : 0.5 * (1 - y);
+  }
+  function exStageTest(daily, days) {
+    var R = EX_RULES, n = days.length, k = Math.min(R.testMaxK, Math.floor(n / 2));
+    if (k < 3) { return null; }
+    function V(d) { return daily[d] ? daily[d].V : 0; }
+    function E(d) { return daily[d] ? daily[d].eff : 0; }
+    var a = 0, b = 0, ea = 0, eb = 0, i;
+    for (i = n - k; i < n; i++) { a += V(days[i]); ea += E(days[i]); }
+    for (i = n - 2 * k; i < n - k; i++) { b += V(days[i]); eb += E(days[i]); }
+    if (a + b < R.testMinPosts || ea <= 0 || eb <= 0) { return null; }
+    var sum = 0, m = 0;
+    for (i = 1; i < n; i++) { var x0 = V(days[i - 1]), x1 = V(days[i]), den = x0 + x1; if (den > 0) { sum += (x1 - x0) * (x1 - x0) / den; m++; } }
+    var phi = Math.max(1, m >= 3 ? sum / m : 1) * R.testSafety, p0 = ea / (ea + eb);
+    var z = (a - (a + b) * p0) / Math.sqrt(phi * (a + b) * p0 * (1 - p0));
+    return { z: z, p: 2 * (1 - exNormCdf(Math.abs(z))), ratio: b > 0 ? (a / ea) / (b / eb) : Infinity, support: a + b, k: k, q: null };
+  }
   function exStageDetail(daily, days, prevTotal) {
     var R = EX_RULES;
-    if (days.length < R.stageDays) { return { stage: 'too little data', change: null }; }
+    if (days.length < R.stageDays) { return { stage: 'too little data', change: null, test: null, startOk: false }; }
     function rate(d) { var o = daily[d]; return o && o.eff > 0 ? o.V / o.eff : 0; }
     function posts(d) { return daily[d] ? daily[d].V : 0; }
     var last6 = days.slice(-R.stageDays), tot = 0;
     last6.forEach(function (d) { tot += posts(d); });
-    if (tot < R.stageMinPosts) { return { stage: 'too little data', change: null }; }
+    if (tot < R.stageMinPosts) { return { stage: 'too little data', change: null, test: null, startOk: false }; }
     var r = days.map(rate), n = r.length;
     function mean(a, i, j) { var x = 0; for (var k = i; k < j; k++) { x += a[k]; } return x / Math.max(1, j - i); }
     var m3 = mean(r, n - 3, n), p3 = mean(r, n - 6, n - 3), best = m3;
     for (var i = 3; i <= n; i++) { best = Math.max(best, mean(r, i - 3, i)); }
     var curTotal = 0; days.forEach(function (d) { curTotal += posts(d); });
-    var change = p3 > 0 ? m3 / p3 - 1 : null;
-    if (p3 > 0 && m3 >= R.rise * p3) {
-      return { stage: (days.length <= R.startMaxDays && prevTotal > 0 && prevTotal < R.startPrev * curTotal) ? 'starting' : 'rising', change: change };   // no earlier period (full window) cannot be "starting"
-    }
-    if (p3 > 0 && m3 <= R.fall * p3) { return { stage: 'declining', change: change }; }
-    return { stage: m3 >= R.peakBand * best ? 'peak' : 'steady', change: change };
+    return { stage: m3 >= R.peakBand * best ? 'peak' : 'steady', change: p3 > 0 ? m3 / p3 - 1 : null, test: exStageTest(daily, days),
+             startOk: days.length <= R.startMaxDays && prevTotal > 0 && prevTotal < R.startPrev * curTotal };   // no earlier period (full window) cannot be "starting"
   }
-  function exSeriesStage(daily, days, prevTotal) { return exStageDetail(daily, days, prevTotal).stage; }
+  /* decide rising / starting / declining for a set of topics together: Benjamini-Hochberg over the tests that could be run, plus the effect-size gate */
+  function exApplyStageTests(items) {     // items: [{stage, test, startOk}] (mutated)
+    var R = EX_RULES, idx = [];
+    items.forEach(function (it, i) { if (it.test) { idx.push(i); } });
+    var ps = idx.map(function (i) { return items[i].test.p; }), order = ps.map(function (x, j) { return j; }).sort(function (a, b) { return ps[a] - ps[b]; });
+    var qs = new Array(ps.length), prev = 1;
+    for (var rank = ps.length; rank >= 1; rank--) { var j = order[rank - 1]; prev = Math.min(prev, ps[j] * ps.length / rank); qs[j] = prev; }
+    idx.forEach(function (i, j) {
+      var it = items[i], t = it.test; t.q = qs[j];
+      if (t.q < R.alpha && t.z > 0 && t.ratio >= R.rise) { it.stage = it.startOk ? 'starting' : 'rising'; }
+      else if (t.q < R.alpha && t.z < 0 && t.ratio <= R.fall) { it.stage = 'declining'; }
+    });
+    return items;
+  }
+  function exSeriesStage(daily, days, prevTotal) { var sd = exStageDetail(daily, days, prevTotal); exApplyStageTests([sd]); return sd.stage; }
 
   function exTopicRows(forceMacro) {
     var isTheme = !forceMacro && (EX.topicGrain !== 'macro') && T('dtheme_metrics_daily') && T('dtheme_metrics_daily').length > 0;
     var g = exCells(isTheme ? 'dtheme_metrics_daily' : 'metrics_daily'), by = {};
+    var dayTot = {};      // themes: all posts of each day (every theme, incl. unassigned) = the exposure, so the stage tests a theme's SHARE and growth in collection is not read as a trend
+    if (isTheme) { g.cells.forEach(function (c) { dayTot[c.d] = (dayTot[c.d] || 0) + (c.r.V || 0); }); }
     g.cells.forEach(function (c) {
       var r = c.r, tid = isTheme ? r.topic_id : exTid(r.topic_id);
       var o = by[tid] || (by[tid] = { topic_id: tid, cur: 0, prev: 0, plats: {}, alertDays: {}, emer: null, minq: null,
@@ -5769,7 +5808,7 @@
       if (c.inPrev) { o.prev += (r.V || 0); }
       if (!c.inCur) { return; }
       var dd = o.daily[c.d] || (o.daily[c.d] = { V: 0, eff: 0 });
-      dd.V += (r.V || 0); dd.eff += (isNum(r.effort) ? r.effort : 0);
+      dd.V += (r.V || 0); dd.eff = isTheme ? (dayTot[c.d] || 0) : dd.eff + (isNum(r.effort) ? r.effort : 0);      // themes: all posts of the day; macro topics: collector effort
       o.cur += (r.V || 0);
       o.platV[r.platform] = (o.platV[r.platform] || 0) + (r.V || 0);
       if ((r.V || 0) > 0) { o.plats[r.platform] = true; }
@@ -5783,7 +5822,7 @@
     });
     var toDay = g.days[g.days.length - 1] || S.to;
     var eps = T('burst_episodes').filter(function (e) { return exPlatOk(e.platform); });
-    return Object.keys(by).map(function (tid) {
+    var topicRows = Object.keys(by).map(function (tid) {
       var o = by[tid], ok = o.prev >= EX_RULES.growthMinPrev && o.cur >= EX_RULES.growthMinCur;
       var sd = exStageDetail(o.daily, g.days, o.prev);
       var topP = Object.keys(o.platV).sort(function (x, y) { return o.platV[y] - o.platV[x]; })[0];
@@ -5798,11 +5837,15 @@
         alert_days: isTheme ? null : Object.keys(o.alertDays).length,
         burst_days: isTheme ? null : Object.keys(o.burstDays).length,
         momentum: isTheme ? null : o.mom, platforms: Object.keys(o.plats).length,
-        stage: sd.stage, stage_change: sd.change, prev: o.prev,
+        stage: sd.stage, stage_change: sd.change, stage_test: sd.test, stage_start_ok: sd.startOk, prev: o.prev,
         top_platform: topP || null, top_share: topP && o.cur ? o.platV[topP] / o.cur : null,
         plat_names: Object.keys(o.plats)
       };
     }).filter(function (r) { return r.posts > 0 && exTextOk(r.topic) && (EX.unclass || r.topic !== 'Unclassified'); });
+    var stageItems = topicRows.map(function (r) { return { stage: r.stage, test: r.stage_test, startOk: r.stage_start_ok }; });
+    exApplyStageTests(stageItems);                 // one Benjamini-Hochberg correction over the topics in view
+    topicRows.forEach(function (r, i2) { r.stage = stageItems[i2].stage; });
+    return topicRows;
   }
 
   /* the "how to read this" text of each Explore card sits behind a heading, closed until clicked */
@@ -6028,7 +6071,7 @@
       if (enough) {
         var okG = d.n_prev >= EX_RULES.growthMinPrev && d.n_cur >= EX_RULES.growthMinCur;
         var dm = {}; d.daily.forEach(function (r) { dm[r.day] = { V: r.n, eff: r.total / 1000 }; });
-        var sd = exStageDetail(dm, days, d.n_prev);
+        var sd = exStageDetail(dm, days, d.n_prev); exApplyStageTests([sd]);
         var gs = (okG && p.total && c.total && p.n) ? (d.n_cur / c.total) / (p.n / p.total) - 1 : null;
         stageTxt = sd.stage === 'too little data' ? 'not enough recent days to call a stage' : sd.stage;
         gTxt = okG ? ', ' + pct((d.n_cur - d.n_prev) / d.n_prev) + ' on the ' + prev.length + ' days before' + (gs != null ? ' (' + pct(gs) + ' as a share of all posts)' : '') : '';
@@ -6240,13 +6283,14 @@
       return sb - sa || (b.posts - a.posts);
     }).slice(0, EX.top);
     exExplain(host, 'Trending topics', isTheme
-      ? 'Security themes (D01–D09) ranked by growth against the previous period (the selected days against the same number of days just before; shown only with enough posts in both), not by post volume; more posts break ties. Shows posts, growth, multi-platform presence, and an indicative stage (starting / rising / peak / steady / declining from the last 3 days against the 3 before). The stage is NOT used for the ranking: when the days are shuffled so there is no real trend, it still reads rising or declining about 70% of the time. Use the dropdown above to switch to macro clusters (t000–t007) if needed. Click a row to open its posts.'
+      ? 'Security themes (D01–D09) ranked by growth against the previous period (the selected days against the same number of days just before; shown only with enough posts in both), not by post volume; more posts break ties. Shows posts, growth, multi-platform presence, and a stage (starting / rising / peak / steady / declining). For themes the stage compares the theme\u2019s share of all posts, so growth in collection overall does not make every theme look like it is rising. Rising or declining is called only when the change is statistically clear: the last days (up to 14) are compared with the same number of days before them, allowing for how bursty the daily counts are, and corrected across the topics in view (q < 0.05); otherwise the stage is peak or steady. This stops noise being shown as a trend (with the days shuffled the old 3-day rule still read rising or declining about 70% of the time; this one about 3-7%), but it only catches large changes: a tripling about 35-79% of the time, a doubling about 11-36%, and not at all with under 100 posts in the days compared. The stage is not used for the ranking. Use the dropdown above to switch to macro clusters (t000–t007) if needed. Click a row to open its posts.'
       : 'Ranked by growth against the previous period together with the Emergence score, ' +
-        'the pipeline’s single "popping up" number (blend of volume surprise, acceleration, semantic novelty and days-to-threshold; relative to this run’s panel, so read it as a ranking, not a probability); more posts break ties. The stage is an indicative label only and is not used for the ranking (with no real trend it still reads rising or declining about 70% of the time). ' +
+        'the pipeline’s single "popping up" number (blend of volume surprise, acceleration, semantic novelty and days-to-threshold; relative to this run’s panel, so read it as a ranking, not a probability); more posts break ties. The stage is not used for the ranking. ' +
         'Alert days = days the volume jump was statistically significant (Benjamini–Hochberg q < 0.05); only cells with enough support are counted. ' +
         'Growth compares the selected days with the same number of days just before them (shown only with at least 10 earlier and 20 current posts). ' +
-        'Momentum is the recent direction of volume, not a forecast. Stage compares the last 3 days with the 3 before, as posts per active channel ' +
-        '(starting / rising / peak / steady / declining; "too little data" under 20 posts in the last 6 days). ' +
+        'Momentum is the recent direction of volume, not a forecast. Stage: ' +
+        'rising or declining is called only when the change is statistically clear (the last days, up to 14, against the same number before, as posts per unit of collector effort, allowing for bursty counts and corrected across the topics in view, q < 0.05); otherwise peak or steady. ' +
+        'This keeps false calls to about 3-7% (the old 3-day rule made them about 70% of the time) but only catches large changes (a tripling about 35-79% of the time, a doubling 11-36%); "too little data" under 20 posts in the last 6 days. ' +
         'The Burst stage on Trend Lifecycle describes a single burst on one platform and uses a different rule, so the two can differ. ' +
         '"Unclassified" (posts not assigned to a topic) is left out unless you tick the box. "Seen on" keeps only topics present on at least that many platforms. Click a row to open its posts.' );
     exBigTopicNote(host, rows);
@@ -6256,7 +6300,7 @@
       { k: 'growth', label: 'Growth', num: true,
         fmt: function (v) { return v == null ? '\u2014' : (v >= 0 ? '+' : '') + Math.round(v * 100) + '%'; } },
       { k: 'platforms', label: 'Platforms', num: true },
-      { k: 'stage', label: 'Stage (indicative)' }
+      { k: 'stage', label: 'Stage' }
     ] : [
       { k: 'topic', label: 'Topic' },
       { k: 'posts', label: 'Posts', num: true, fmt: function (v) { return fmtInt(v); } },
@@ -6268,7 +6312,7 @@
       { k: 'burst_days', label: 'Burst days', num: true, fmt: function (v) { return v == null ? '\u2014' : v; } },
       { k: 'momentum', label: 'Momentum', num: true, fmt: function (v) { return v == null ? '\u2014' : (v >= 0 ? '+' : '') + Number(v).toFixed(2); } },
       { k: 'platforms', label: 'Platforms', num: true },
-      { k: 'stage', label: 'Stage (indicative)' }
+      { k: 'stage', label: 'Stage' }
     ];
     tableView(host, cols, rows, {
       label: (isTheme ? 'Trending security themes (' : 'Trending topics (') + rows.length + ')',
@@ -6306,10 +6350,14 @@
       b.push(r.alert_days > 0 ? r.alert_days + ' day' + (r.alert_days === 1 ? '' : 's') + ' where the jump in volume was statistically significant (q < ' + EX_RULES.alpha + ').'
         : 'No day with a statistically significant jump.');
     }
-    if (isTheme) {
-      b.push('Recent direction (indicative only): ' + r.stage + (r.stage_change != null ? ', the last 3 days are ' + (r.stage_change >= 0 ? '+' : '') + Math.round(r.stage_change * 100) + '% against the 3 before; this is not used for the ranking.' : '.'));
+    var st = r.stage_test;
+    if (st) {
+      var pctTxt = isFinite(st.ratio) ? (st.ratio >= 1 ? '+' : '') + Math.round((st.ratio - 1) * 100) + '%' : 'up from none';
+      b.push('Stage ' + r.stage + (r.stage === 'rising' || r.stage === 'starting' || r.stage === 'declining'
+        ? ': a clear change, the last ' + st.k + ' days against the ' + st.k + ' before are ' + pctTxt + ' (q = ' + (st.q < 0.001 ? '<0.001' : st.q.toFixed(3)) + ').'
+        : ': no clear change in the last ' + st.k + ' days against the ' + st.k + ' before (' + pctTxt + ', q = ' + (st.q < 0.001 ? '<0.001' : st.q.toFixed(3)) + ').'));
     } else {
-      b.push('Recent direction (indicative only): ' + r.stage + (r.stage_change != null ? ', the last 3 days are ' + (r.stage_change >= 0 ? '+' : '') + Math.round(r.stage_change * 100) + '% against the 3 before (posts per active channel); this is not used for the ranking.' : '.'));
+      b.push('Stage ' + r.stage + (r.stage === 'too little data' ? '.' : ': too few posts (under ' + EX_RULES.testMinPosts + ' in the days compared) to call a change.'));
     }
     if (r.top_platform) { b.push('Seen on ' + r.platforms + ' platform' + (r.platforms === 1 ? '' : 's') + '; the largest is ' + r.top_platform + ' (' + Math.round(100 * r.top_share) + '% of the posts).'); }
     return b;
@@ -6324,7 +6372,7 @@
     var list = h('div', { class: 'ex-why' });
     top.forEach(function (r, i) {
       var card = h('article', { class: 'ex-why-card' });
-      card.appendChild(h('div', { class: 'ex-why-hd' }, [h('b', { text: (i + 1) + '. ' + r.topic }), h('span', { class: 'ex-why-st', title: 'Indicative only: the last 3 days against the 3 before. It is not used for the ranking.', text: 'recent: ' + r.stage })]));
+      card.appendChild(h('div', { class: 'ex-why-hd' }, [h('b', { text: (i + 1) + '. ' + r.topic }), h('span', { class: 'ex-why-st', title: 'rising / declining only when the change is statistically clear (q < 0.05); otherwise steady or peak. It is not used for the ranking.', text: r.stage })]));
       var ul = h('ul', { class: 'ex-why-ul' });
       exWhyBullets(r, i + 1, rows.length, isTheme).forEach(function (t) { ul.appendChild(h('li', { text: t })); });
       card.appendChild(ul);
@@ -6349,19 +6397,19 @@
     var rows;
     if (isTheme) {
       rows = [
-        ['Ranking', 'Growth', 'Security themes are ranked by growth against the previous period (shown only with enough posts in both); more posts break ties. It is not total post volume. The stage is an indicative label and is not used for the ranking.'],
+        ['Ranking', 'Growth', 'Security themes are ranked by growth against the previous period (shown only with enough posts in both); more posts break ties. It is not total post volume. The stage is not used for the ranking.'],
         ['Growth', 'posts in the selected days \u00f7 posts in the same number of days just before, minus 1', 'Shown only with at least ' + R.growthMinPrev + ' earlier and ' + R.growthMinCur + ' current posts; otherwise \u201c\u2014\u201d.'],
-        ['Stage (indicative)', 'last 3 days vs the 3 before', 'rising \u2265 +' + Math.round((R.rise - 1) * 100) + '%; declining \u2264 \u2212' + Math.round((1 - R.fall) * 100) + '%; peak = flat and within ' + Math.round((1 - R.peakBand) * 100) + '% of the best 3-day level; steady = flat below it; starting = rising and the earlier period was under ' + Math.round(R.startPrev * 100) + '% as large (ranges up to ' + R.startMaxDays + ' days). Needs ' + R.stageDays + '+ days and ' + R.stageMinPosts + '+ posts in the last ' + R.stageDays + ' (for themes the daily figure is posts divided by the number of platforms that had posts that day; there is no channel-effort normalization).'],
+        ['Stage', 'last k days vs the k days before (k = half the window, at most 14), tested', 'rising / declining only when the change is statistically clear: an overdispersion-aware rate test on the theme\u2019s share of all posts that day (so growth in collection is not read as a trend), corrected across the themes in view (Benjamini\u2013Hochberg, q < ' + R.alpha + '), and at least +' + Math.round((R.rise - 1) * 100) + '% / \u2212' + Math.round((1 - R.fall) * 100) + '%; starting = rising and the earlier period was under ' + Math.round(R.startPrev * 100) + '% as large (windows up to ' + R.startMaxDays + ' days). Anything else: peak = the last 3 days are within ' + Math.round((1 - R.peakBand) * 100) + '% of the best 3-day level, steady = below it. Needs ' + R.stageDays + '+ days, ' + R.stageMinPosts + '+ posts in the last ' + R.stageDays + ' and ' + R.testMinPosts + '+ posts in the days compared to call a change. It catches large changes only.'],
         ['Platforms', 'Platform count', 'Number of distinct platforms on which the security theme was observed.'],
         ['Left out', 'Unassigned', 'Posts not assigned to a security theme are excluded unless \u201cInclude Unclassified\u201d is ticked.']
       ];
     } else {
       rows = [
-        ['Ranking', 'Growth and Emergence', 'Topics are ranked by 2 \u00d7 growth plus 3 \u00d7 the Emergence score (' + (meta.emergence_score ? meta.emergence_score.formula : 'Emergence score') + '); more posts break ties. The Emergence score is relative to this run\u2019s panel: a ranking, not a probability. The stage is an indicative label and is not used for the ranking.'],
+        ['Ranking', 'Growth and Emergence', 'Topics are ranked by 2 \u00d7 growth plus 3 \u00d7 the Emergence score (' + (meta.emergence_score ? meta.emergence_score.formula : 'Emergence score') + '); more posts break ties. The Emergence score is relative to this run\u2019s panel: a ranking, not a probability. The stage is not used for the ranking.'],
         ['Alert day', (meta.surprise ? meta.surprise.formula : 'Volume surprise'), 'A day counts when its jump is significant after Benjamini\u2013Hochberg correction (q < ' + R.alpha + ') and the cell has enough support.'],
         ['Growth', 'posts in the selected days \u00f7 posts in the same number of days just before, minus 1', 'Shown only with at least ' + R.growthMinPrev + ' earlier and ' + R.growthMinCur + ' current posts; otherwise \u201c\u2014\u201d.'],
         ['Momentum', (meta.momentum ? meta.momentum.formula : 'EMA7 \u2212 EMA21 of growth'), 'Describes the recent direction of volume; it is not a forecast.'],
-        ['Stage (indicative)', 'last 3 days vs the 3 before, as posts per active channel', 'rising \u2265 +' + Math.round((R.rise - 1) * 100) + '%; declining \u2264 \u2212' + Math.round((1 - R.fall) * 100) + '%; peak = flat and within ' + Math.round((1 - R.peakBand) * 100) + '% of the best 3-day level; steady = flat below it; starting = rising and the earlier period was under ' + Math.round(R.startPrev * 100) + '% as large (ranges up to ' + R.startMaxDays + ' days). Needs ' + R.stageDays + '+ days and ' + R.stageMinPosts + '+ posts in the last ' + R.stageDays + '.'],
+        ['Stage', 'last k days vs the k days before (k = half the window, at most 14), tested, as posts per unit of collector effort', 'rising / declining only when the change is statistically clear: an overdispersion-aware rate test on the posts (posts per unit of collector effort), corrected across the topics in view (Benjamini\u2013Hochberg, q < ' + R.alpha + '), and at least +' + Math.round((R.rise - 1) * 100) + '% / \u2212' + Math.round((1 - R.fall) * 100) + '%; starting = rising and the earlier period was under ' + Math.round(R.startPrev * 100) + '% as large (windows up to ' + R.startMaxDays + ' days). Anything else: peak = the last 3 days are within ' + Math.round((1 - R.peakBand) * 100) + '% of the best 3-day level, steady = below it. Needs ' + R.stageDays + '+ days, ' + R.stageMinPosts + '+ posts in the last ' + R.stageDays + ' and ' + R.testMinPosts + '+ posts in the days compared to call a change. It catches large changes only.'],
         ['Left out', 'Unclassified', 'Posts not assigned to a topic are excluded unless \u201cInclude Unclassified\u201d is ticked.']
       ];
     }
@@ -6371,7 +6419,7 @@
     rows.forEach(function (r) { body.appendChild(h('tr', {}, r.map(function (x) { return h('td', { text: x }); }))); });
     tb.appendChild(body);
     det.appendChild(tb);
-    det.appendChild(h('p', { class: 'cs', text: 'Limits: the stage thresholds (25%, 20%, 10%) are chosen, not tuned. In a test on 19 theme and topic series with the days shuffled (no real trend) the stage still read rising or declining about 70% of the time, so it is shown as an indicative label only and is not used for the ranking. Growth is also noisy with few posts, which is why it needs enough posts in both periods. Counts are posts and comments in the collected corpus, not all activity on a platform.' }));
+    det.appendChild(h('p', { class: 'cs', text: 'Limits: the stage was calibrated on 19 theme and topic series with the days shuffled (no real trend): false rising / declining calls about 3-7% (the old 3-day rule: about 70%). Real days are more persistent than shuffled ones, so the true false-call rate is unmeasured. Power is modest (a tripling caught 35-79% of the time, a doubling 11-36%), so most topics read steady or peak even when they moved. The effect-size gates (25%, 20%, 10%) are chosen, not tuned. Growth is also noisy with few posts, which is why it needs enough posts in both periods. Counts are posts and comments in the collected corpus, not all activity on a platform.' }));
     host.appendChild(det);
   }
 
