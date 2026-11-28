@@ -6241,9 +6241,9 @@
       return sb - sa || (b.posts - a.posts);
     }).slice(0, EX.top);
     exExplain(host, 'Trending topics', isTheme
-      ? 'Security themes (D01–D09) ranked by post volume in the selected window. Shows posts, growth vs prior period, multi-platform presence, and stage (starting / rising / peak / steady / declining; based on daily post trajectory). Use the dropdown above to switch to macro clusters (t000–t007) if needed. Click a row to open its posts.'
-      : 'Ranked by Emergence score, the pipeline’s single "popping up" number (blend of volume surprise, ' +
-        'acceleration, semantic novelty and days-to-threshold; relative to this run’s panel, so read it as a ranking, not a probability). ' +
+      ? 'Security themes (D01–D09) ranked by a trending score, not by post volume: the stage comes first (starting, then rising, peak, steady, declining), then growth against the previous period and the change over the last 3 days; more posts break ties. Shows posts, growth vs prior period, multi-platform presence, and stage (from the daily trajectory of posts per platform that had posts that day). Use the dropdown above to switch to macro clusters (t000–t007) if needed. Click a row to open its posts.'
+      : 'Ranked by a trending score: the stage comes first (starting, then rising, peak, steady, declining), then growth against the previous period, the change over the last 3 days and the Emergence score, ' +
+        'the pipeline’s single "popping up" number (blend of volume surprise, acceleration, semantic novelty and days-to-threshold; relative to this run’s panel, so read it as a ranking, not a probability); more posts break ties. ' +
         'Alert days = days the volume jump was statistically significant (Benjamini–Hochberg q < 0.05); only cells with enough support are counted. ' +
         'Growth compares the selected days with the same number of days just before them (shown only with at least 10 earlier and 20 current posts). ' +
         'Momentum is the recent direction of volume, not a forecast. Stage compares the last 3 days with the 3 before, as posts per active channel ' +
@@ -6350,15 +6350,15 @@
     var rows;
     if (isTheme) {
       rows = [
-        ['Ranking', 'Post volume', 'Security themes are ranked by total post volume in the selected date window.'],
+        ['Ranking', 'Trending score', 'Security themes are ranked by stage first (starting 5, rising 4, peak 2, steady 1, declining \u22123, times 10), plus 2 \u00d7 growth and the change over the last 3 days; more posts break ties. It is not total post volume.'],
         ['Growth', 'posts in the selected days \u00f7 posts in the same number of days just before, minus 1', 'Shown only with at least ' + R.growthMinPrev + ' earlier and ' + R.growthMinCur + ' current posts; otherwise \u201c\u2014\u201d.'],
-        ['Stage', 'last 3 days vs the 3 before', 'rising \u2265 +' + Math.round((R.rise - 1) * 100) + '%; declining \u2264 \u2212' + Math.round((1 - R.fall) * 100) + '%; peak = flat and within ' + Math.round((1 - R.peakBand) * 100) + '% of the best 3-day level; steady = flat below it; starting = rising and the earlier period was under ' + Math.round(R.startPrev * 100) + '% as large (ranges up to ' + R.startMaxDays + ' days). Needs ' + R.stageDays + '+ days and ' + R.stageMinPosts + '+ posts in the last ' + R.stageDays + ' (calculated directly from post volume without channel-effort normalization).'],
+        ['Stage', 'last 3 days vs the 3 before', 'rising \u2265 +' + Math.round((R.rise - 1) * 100) + '%; declining \u2264 \u2212' + Math.round((1 - R.fall) * 100) + '%; peak = flat and within ' + Math.round((1 - R.peakBand) * 100) + '% of the best 3-day level; steady = flat below it; starting = rising and the earlier period was under ' + Math.round(R.startPrev * 100) + '% as large (ranges up to ' + R.startMaxDays + ' days). Needs ' + R.stageDays + '+ days and ' + R.stageMinPosts + '+ posts in the last ' + R.stageDays + ' (for themes the daily figure is posts divided by the number of platforms that had posts that day; there is no channel-effort normalization).'],
         ['Platforms', 'Platform count', 'Number of distinct platforms on which the security theme was observed.'],
         ['Left out', 'Unassigned', 'Posts not assigned to a security theme are excluded unless \u201cInclude Unclassified\u201d is ticked.']
       ];
     } else {
       rows = [
-        ['Ranking', (meta.emergence_score ? meta.emergence_score.formula : 'Emergence score'), 'Topics are sorted by emergence score, then by posts. The score is relative to this run\u2019s panel: a ranking, not a probability.'],
+        ['Ranking', 'Trending score', 'Topics are ranked by stage first (starting 5, rising 4, peak 2, steady 1, declining \u22123, times 10), plus 2 \u00d7 growth, the change over the last 3 days and 3 \u00d7 the Emergence score (' + (meta.emergence_score ? meta.emergence_score.formula : 'Emergence score') + '); more posts break ties. The Emergence score is relative to this run\u2019s panel: a ranking, not a probability.'],
         ['Alert day', (meta.surprise ? meta.surprise.formula : 'Volume surprise'), 'A day counts when its jump is significant after Benjamini\u2013Hochberg correction (q < ' + R.alpha + ') and the cell has enough support.'],
         ['Growth', 'posts in the selected days \u00f7 posts in the same number of days just before, minus 1', 'Shown only with at least ' + R.growthMinPrev + ' earlier and ' + R.growthMinCur + ' current posts; otherwise \u201c\u2014\u201d.'],
         ['Momentum', (meta.momentum ? meta.momentum.formula : 'EMA7 \u2212 EMA21 of growth'), 'Describes the recent direction of volume; it is not a forecast.'],
@@ -6463,7 +6463,7 @@
       links: 'Posts sharing the same link. High = full article link seen within 21 days; medium = shortened link; low = the link is spread over more than 21 days. App deep links are excluded.',
       events: 'Posts that say nearly the same thing in different words (bge-m3 similarity of at least 0.85 within 3 days). Preliminary: not yet hand-judged.' }[sub];
     exExplain(host, 'Cross-platform spread', note + ' "Earliest observed" is the first post we saw, not the confirmed origin. ' +
-      'Views are observed counts only (no estimates); posts on platforms with no view count are not added in. "Posts" counts one post per account on each platform: an account that posted the same text or link several times counts once, and a post that was collected several times counts once. "View posts" lists every distinct post, so it can be longer. Click a row to see the posts.' );
+      'Views are observed counts only (no estimates); posts on platforms with no view count are not added in. "Posts" counts one post per account on each platform: an account that posted the same text or link several times counts once, and a post that was collected several times counts once. "View posts" lists every distinct post, so it can be longer. Posts with no date (all WhatsApp posts) can never be the earliest and are left out of the spread, so an item that has them shows a dash for the spread. Click a row to see the posts.' );
     /* "same publisher": the story / link / event is ONE organisation posting its own content on several platforms (e.g. Aaj Tak on Telegram and
        WhatsApp). That is distribution, not others picking it up, so those rows are hidden by default behind a toggle and labelled when shown.
        Flags come from /api/explore/spread_publishers (computed from the stored tables); without the API nothing is hidden. */
@@ -6475,7 +6475,11 @@
     }
     var pubFlags = (EX.pubFlags && EX.pubFlags[sub]) || {};
     var allRows = exSpreadRows(sub);
-    allRows.forEach(function (r) { var f = pubFlags[r.id]; r.same = !!(f && f.same); r.pub = (f && f.label) || ''; });
+    allRows.forEach(function (r) {
+      var f = pubFlags[r.id]; r.same = !!(f && f.same); r.pub = (f && f.label) || '';
+      r.undated = (f && f.undated) || 0;                       // posts with no date (all WhatsApp posts): never the earliest, and they drop out of the spread hours
+      if (r.undated) { r.spread_h = null; }
+    });
     var nSame = allRows.filter(function (r) { return r.same; }).length;
     var hideSame = EX.pubMode !== 'show';
     if (nSame) {
@@ -6509,11 +6513,12 @@
         main.appendChild(h('div', { class: 'ex-story-title', text: r.text }));
         main.appendChild(h('div', { class: 'ex-chips' }, [
           h('span', { class: 'ex-chip', text: 'match: ' + r.conf }),
-          h('span', { class: 'ex-chip', text: 'earliest observed: ' + r.origin }),
+          h('span', { class: 'ex-chip', title: r.undated ? 'This item includes posts that have no date (for example WhatsApp), so they cannot be the earliest and the spread is not shown.' : '',
+            text: 'earliest observed: ' + r.origin + (r.undated ? ' (some posts have no date)' : '') }),
           h('span', { class: 'ex-chip', text: r.platforms })].concat(r.same ? [h('span', { class: 'ex-chip', title: 'every account behind this is one publisher', text: 'same publisher: ' + r.pub })] : [])));
         main.appendChild(h('div', { class: 'ex-story-stats' }, [
           h('b', { text: fmtInt(r.posts) }), txt(' posts \u00b7 '),
-          h('b', { text: Number(r.spread_h || 0).toFixed(1) }), txt(' h observed spread \u00b7 '),
+          h('b', { text: r.spread_h == null ? '\u2014' : Number(r.spread_h).toFixed(1) }), txt(' h observed spread \u00b7 '),
           h('b', { text: fmtCompact(r.views) }), txt(' observed views \u00b7 first seen ' + r.first)]));
         var act = h('div', { class: 'ex-why-act' });
         var vb = h('button', { type: 'button', class: 'df-preset-btn', text: 'View posts' });
@@ -7365,7 +7370,7 @@
         sqFold.appendChild(h('p', { class: 'fnote', text: 'Headline = every scored comment except those with no text (empty, punctuation only, a single letter, a link only). ' +
           'Emoji-only comments are kept: the model reads them sensibly (hearts and thumbs-up positive, crying faces negative), so they are real audience reaction, but they carry less information than words, so "words only" is shown beside it. ' +
           '"Confident only" keeps comments where the model’s top class has probability of at least ' + Q.conf_high.toFixed(2) + '; it drops mostly neutral comments, so it reads more extreme and is a sensitivity check, not a replacement. ' +
-          '"Sarcasm cue" counts positive-labelled comments containing a mocking idiom (\u201cnice try\u201d, \u201cyeah right\u201d, \u201cgood luck with that\u201d) or praise with an eye-roll, clown or smirk emoji; it is a flag only and no label is changed. In an analyst check about 70% of flagged comments were sarcastic, but it misses most sarcasm (roughly 2% of the other positive comments read as sarcastic, which could lower a net by about 1 to 2 points), so treat it as a lower bound. ' +
+          '"Sarcasm cue" counts positive-labelled comments containing a mocking idiom (\u201cnice try\u201d, \u201cyeah right\u201d, \u201cgood luck with that\u201d) or praise with an eye-roll, clown or smirk emoji; it is a flag only and no label is changed. In an analyst check about 70% of flagged comments were sarcastic, but it misses most sarcasm (roughly 3% of the other positive comments read as sarcastic, which could lower a net by about 1 to 4 points), so treat it as a lower bound. On YouTube, comments below 0.45 confidence were right only about 1 time in 4 in that check, so read the \u201cconfident only\u201d net as the safer one there. ' +
           'The interval is a Wilson 95% interval on the positive share. Counts are summed by ' + Q.grain + ' (month grain when dates are set); the theme and entity filters do not apply here. Thresholds are provisional.' }));
       }
 

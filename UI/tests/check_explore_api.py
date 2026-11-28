@@ -386,6 +386,11 @@ def main() -> int:
     chk("every flagged item has a label and at least two entries; unflagged items have none",
         all((v["label"] and v["publishers"] == 1) if v["same"] else not v["label"] for t in ("stories", "links", "events") for v in pf[t].values()))
 
+    wa = a._main_con.execute("""SELECT DISTINCT p.link_id FROM metrics.cross_platform_url_posts p JOIN analytics.post_facts f USING (post_uid) WHERE f.platform = 'whatsapp'""").fetchall()
+    chk("every link with a WhatsApp post (WhatsApp posts have no date) is marked undated, so the card shows no spread for it",
+        wa and all(pf["links"][r[0]]["undated"] > 0 for r in wa) and pf["counts"]["links"]["undated"] >= len(wa), f"{len(wa)} links")
+    chk("items with every member dated carry undated = 0 (events have none)", pf["counts"]["events"]["undated"] == 0)
+
     n_ok = sum(RESULTS)
     print(f"\n  {n_ok}/{len(RESULTS)} checks passed")
     return 0 if n_ok == len(RESULTS) else 1

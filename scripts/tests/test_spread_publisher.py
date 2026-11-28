@@ -45,5 +45,18 @@ def test_classify_only_flags_items_where_every_account_is_one_publisher():
 
 def test_alias_keywords_are_normalised_like_names():
     g = S._groups()
-    assert all(k == "".join(ch for ch in k if ch.isalnum()) for kws in g.values() for k in kws)   # compact form, comparable with names
+    assert all(k.lstrip("=") == "".join(ch for ch in k.lstrip("=") if ch.isalnum()) for kws in g.values() for k in kws)   # compact form (a leading = means exact)
     assert "maritimeinstitutemalaysia" in g["Maritime Institute of Malaysia"]                     # "of" dropped by the same clean-up
+
+
+def test_added_brand_groups_match_and_stay_narrow():
+    assert same("CGTN", "@cgtn_europe") and same("CGTN America", "CGTNEurope")                    # one broadcaster, regional accounts
+    assert same("India Today", "India Today Global") and same("India Today Global", "IndiaTodayGlobal")
+    assert not same("India Today Global", "The Times Of India") and not same("India Today Global", "Global Defense Insight")
+    assert same("ASPI", "ASPICanberra") and same("ASPI", "Australian Strategic Policy Institute")  # exact short name via "=aspi"
+    assert not same("ASPI", "Aspirations Daily")                                                  # "=aspi" never matches inside another word
+    assert same("Embassy of China in Maldives", "ChinaEmbassyinMaldives")
+    assert not same("Embassy of China in Maldives", "Embassy of China in Nepal")
+    assert same("Srijan Kalam", "Srijan Pal Singh Kalam")
+    assert same("Ministry of Defence, Government of India", "Directorate of Public Relations, Ministry of Defence")
+    assert not same("Ministry of Defence, Government of India", "Ministry of Defence UK")          # another country's ministry is not merged

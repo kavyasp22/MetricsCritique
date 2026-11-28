@@ -9,7 +9,7 @@ Accounts are matched conservatively (a false match would hide a genuinely indepe
   2. same set of name words in any order ("mfa_china" = "CHINA MFA Spokesperson")
   3. one name contains the other, when the shorter is at least 7 characters and is not only generic words ("navalinstitute" in "usnavalinstitute";
      "World News" is not "BBC World News")
-  4. both fall in one brand group of UI/publisher_aliases.json (curated keywords)
+  4. both fall in one brand group of UI/publisher_aliases.json (curated keywords: "contains", or "=name" for an exact short name)
 Names sharing only a short or common word do NOT match ("MFA Russia" is not "CHINA MFA Spokesperson").
 Mixed items (some independent accounts) are never `same`.
 """
@@ -37,7 +37,16 @@ def _groups() -> dict[str, list[str]]:
         raw = json.loads(ALIASES.read_text(encoding="utf-8"))["groups"]
     except (OSError, ValueError, KeyError):
         return {}
-    return {k: [normalise(x)[0] for x in v if normalise(x)[0]] for k, v in raw.items()}
+    out = {}
+    for k, v in raw.items():
+        kws = []
+        for x in v:
+            exact = x.startswith("=")                                 # "=aspi": the whole normalised name must equal it
+            c = normalise(x[1:] if exact else x)[0]
+            if c:
+                kws.append(("=" + c) if exact else c)
+        out[k] = kws
+    return out
 
 
 def normalise(name) -> tuple[str, frozenset]:
@@ -52,7 +61,7 @@ def normalise(name) -> tuple[str, frozenset]:
 
 def _brand(compact: str, groups: dict) -> str | None:
     for g, kws in groups.items():
-        if any(k in compact for k in kws):
+        if any((compact == k[1:]) if k.startswith("=") else (k in compact) for k in kws):
             return g
     return None
 
@@ -105,19 +114,22 @@ def classify(accounts: list, groups: dict | None = None) -> dict:
 
 
 def explore_spread_publishers(main_cur) -> dict:
-    """{tier: {id: {same, publishers, label}}, counts: {tier: {total, same}}} for the three tiers."""
+    """{tier: {id: {same, publishers, label, undated}}, counts: {tier: {total, same, undated}}} for the three tiers."""
     groups = _groups()
     out, counts = {}, {}
     for tier, table, key in TIERS:
         rows = main_cur.execute(f"""
-            SELECT cp.{key} AS id, p.platform, coalesce(p.author_name, p.author_uid) AS acct
+            SELECT cp.{key} AS id, p.platform, coalesce(p.author_name, p.author_uid) AS acct, (p.posted_at IS NULL)::INT AS undated
             FROM (SELECT DISTINCT {key}, post_uid FROM metrics.{table}) cp
             JOIN analytics.post_facts p ON p.post_uid = cp.post_uid""").fetchall()
-        by = {}
-        for i, plat, acct in rows:
+        by, und = {}, {}
+        for i, plat, acct, u in rows:
             by.setdefault(i, []).append((plat, acct))
-        res = {i: classify(v, groups) for i, v in by.items()}
+            und[i] = und.get(i, 0) + int(u or 0)
+        # `undated` = members with no post date (all WhatsApp posts): they can never be the earliest and drop out of the spread hours,
+        # so the card shows a dash for the spread of such an item instead of a misleading 0.0 h
+        res = {i: {**classify(v, groups), "undated": und.get(i, 0)} for i, v in by.items()}
         out[tier] = res
-        counts[tier] = {"total": len(res), "same": sum(1 for v in res.values() if v["same"])}
+        counts[tier] = {"total": len(res), "same": sum(1 for v in res.values() if v["same"]), "undated": sum(1 for v in res.values() if v["undated"])}
     out["counts"] = counts
     return out

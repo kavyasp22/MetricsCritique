@@ -1,5 +1,5 @@
 {
-  "_comment": "Brand groups for the Cross-Platform Spread 'same publisher' label. An account joins a group when its normalised name (lower case, letters and digits only; write multi-word keywords with spaces, e.g. \"maritime institute of malaysia\") CONTAINS one of the keywords. Keep keywords distinctive; the label only hides a row when EVERY account behind it is one publisher. Edit and restart the API.",
+  "_comment": "Brand groups for the Cross-Platform Spread 'same publisher' label. An account joins a group when its normalised name (lower case, letters and digits only; write multi-word keywords with spaces, e.g. \"maritime institute of malaysia\") CONTAINS a keyword; a keyword starting with = must EQUAL the whole normalised name (use it for short names such as \"=aspi\" that would otherwise match inside other words). Keep keywords distinctive; the label only hides a row when EVERY account behind it is one publisher. Edit and restart the API.",
   "groups": {
     "Aaj Tak": [
       "aajtak"
@@ -30,6 +30,29 @@
     ],
     "Powerus": [
       "powerus"
+    ],
+    "CGTN": [
+      "cgtn"
+    ],
+    "India Today": [
+      "india today"
+    ],
+    "ASPI": [
+      "=aspi",
+      "aspicanberra",
+      "australian strategic policy institute"
+    ],
+    "China Embassy in Maldives": [
+      "embassy of china in maldives",
+      "china embassy in maldives"
+    ],
+    "Srijan Pal Singh Kalam": [
+      "srijan kalam",
+      "srijan pal singh kalam"
+    ],
+    "India Ministry of Defence": [
+      "ministry of defence government of india",
+      "directorate of public relations ministry of defence"
     ]
   }
 }

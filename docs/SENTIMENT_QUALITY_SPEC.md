@@ -50,7 +50,7 @@ A FLAG ONLY: no label or net is changed (test-guarded). Read it next to the posi
 - **Judged out:** "what a great/amazing/wonderful ...", "wah kya", "as if". In a first read of 36 flagged positive-labelled comments these were overwhelmingly sincere praise (every LinkedIn hit), precision about 25%.
 - **Precision (one analyst, AI-assisted, exploratory, not human validation):** revised "likely" about 16 of 21 positive-labelled hits sarcastic (about 76%; 3 sincere, 2 ambiguous); "possible" about 7-8 of 24 (about 30%).
 - **Recall is not measured** and is low by design (narrow rules): sarcasm without these cues is missed, so the count is a lower bound. Instagram/Snapchat Roman-Urdu/Hindi sarcasm is largely uncovered; YouTube is read on the English translation.
-- **Recall is very low (analyst read of 96 unflagged positive comments, 2026-11-27):** about 2% [0.6-7.3] of unflagged positives read as sarcastic, about 3,800 comments (range 1,000-13,000) against about 87 caught by `likely`. Effect on net sentiment if that holds: about -0.7 to -2.5 points per platform (upper bound -2 to -9). The flag is a precise lower bound, not an estimate of sarcasm.
+- **Recall is very low (analyst read of 233 unflagged positive comments over two rounds):** about 3% [1-6] of unflagged positives read as sarcastic, about 5,450 comments (range 2,650-11,000) against about 87 caught by `likely`. Effect on net sentiment if that holds: about -1.0 to -3.6 points per platform (upper bound -2 to -7). The flag is a precise lower bound, not an estimate of sarcasm.
 - Open: a human-judged sample with both flagged and unflagged comments to get recall; the laughing-emoji-only comments that the model labels neutral are not touched by this flag.
 
 ## Analyst review (2026-11-27, exploratory; human validation still pending)
@@ -73,6 +73,12 @@ An integration of the sentiment-project logic was made in a separate copy (`/hom
 | **`scripts/build_audience_database.py`** | **rejected, dangerous** | Scores YouTube comments with a small positive/negative word list, writes `model = cardiffnlp/...` on the rows, deletes and rebuilds `audience_sentiment.duckdb`, and leaves the Instagram / LinkedIn / Snapchat tables empty (`WHERE 1=0`). In that copy the file has 187,177 YouTube comments (ours 270,262), 65% neutral, and 0 rows for the other three platforms. Never run it in this repo. |
 | `UI/assets/dash.js` collapsible Audience sections | **ported** | Presentation only; applied on top of our sections (which became folds 2a and 2b). API harness 94/94, dashboard harness passes. |
 | `build_dashboard.py` entity-card refactor, `pv_templates` (Post Viewer) | not ported | Unrelated to sentiment; the Post Viewer was removed here. |
+
+## Analyst review round 2 (2026-11-28; AI-assisted, exploratory, not human validation)
+270 more comments read blind, disjoint from round 1 (`/home/hariramanan/kavya/validation/sentiment_quality_eval/REPORT.md`; human kit: `Sentiment_Quality_Human_Validation_Round2.xlsx`, KEY, scorer).
+- **YouTube label accuracy by tier (pooled rounds 1+2):** confident 87% [74-94] (n=45), uncertain 65% [50-77] (n=48), **weak 28% [17-43] (n=43)**; all YouTube 60% [52-68] (n=136). The weak tier (11% of YouTube comments, max probability below 0.45) is about as accurate as chance and misses negatives; supports the 0.45 line.
+- **YouTube net sentiment:** reweighted to the real tier mix the model's net is -10.5 vs -15.2 by the reader (gap -4.6, 95% interval -14.8 to +6.1): not distinguishable from zero.
+- **Sarcasm among unflagged positives (pooled):** **3% [1-6] (n=233)**, about 5,450 comments (range 2,650-11,000); effect on net about -1.0 to -3.6 points per platform (upper -2.0 to -7.2). Replaces the round 1 figure of about 2%.
 
 ## Verdict: PARTIAL
 Checked: base A equals the stored labels on every platform and layer; C is a subset of B, B of A; no scored row lacks a probability;

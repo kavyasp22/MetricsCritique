@@ -62,8 +62,8 @@ doc.getElementById('mode-explore-btn').click(); await wait(800);
 // ---- why cards + methodology (Trending Topics) ----
 const why = doc.querySelectorAll('.ex-why-card');
 check('Trending Topics shows "why" cards (up to 5)', why.length > 0 && why.length <= 5, String(why.length));
-check('each D-Themes card has plain-language bullets with posts, volume rank, and stage (no emergence/alerts)',
-  [...why].every((c) => { const t = c.textContent; return /posts between/.test(t) && /Rank \d+ of \d+ security themes .* \(ranked by post volume\)/.test(t) && /Stage /.test(t) && !/(statistically significant|No day with)/.test(t) && !/Emergence score/.test(t); }));
+check('each D-Themes card has plain-language bullets with posts, trending rank, and stage (no emergence/alerts)',
+  [...why].every((c) => { const t = c.textContent; return /posts between/.test(t) && /Rank \d+ of \d+ themes in this view \(ranked by trending momentum & growth\)/.test(t) && /Stage /.test(t) && !/(statistically significant|No day with)/.test(t) && !/Emergence score/.test(t); }));
 
 // Switch to Macro clusters to validate Macro Topics why-cards
 const grainSel = doc.getElementById('ex-topic-grain');
@@ -81,7 +81,7 @@ const meth = doc.querySelector('.ex-method');
 check('"How this ranking is decided" panel exists', !!meth);
 check('methodology shows the live thresholds (25%, 20%, 10%, 6 days, 20 posts)',
   /rising ≥ \+25%/.test(meth.textContent) && /declining ≤ −20%/.test(meth.textContent) && /6\+ days and 20\+ posts/.test(meth.textContent));
-check('D-Themes methodology explains ranking by post volume', /Security themes are ranked by total post volume/.test(meth.textContent));
+check('D-Themes methodology explains ranking by the trending score, not post volume', /ranked by stage first/.test(meth.textContent) && /not total post volume/.test(meth.textContent));
 
 // ---- thumbs on a why card ----
 const activeWhy = doc.querySelectorAll('.ex-why-card');
